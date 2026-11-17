@@ -114,8 +114,9 @@ test("time parser: trims, dedupes, sorts, and rejects bad clock values", () => {
   expect("error" in parseTimeList("07:60")).toBe(true)
   expect("error" in parseTimeList("noon")).toBe(true)
   expect("error" in parseTimeList("07:00:00")).toBe(true)
-  expect("error" in parseTimeList("00:00,01:00,02:00,03:00,04:00")).toBe(true)
-  expect(parseTimeList("00:00,01:00,02:00,03:00")).toEqual({ times: ["00:00", "01:00", "02:00", "03:00"] })
+  const hourly = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`)
+  expect(parseTimeList(hourly.join(","))).toEqual({ times: hourly })
+  expect("error" in parseTimeList([...hourly, "23:30"].join(","))).toBe(true)
   expect(parseTimeList("00:00, 12:00")).toEqual({ times: ["00:00", "12:00"] })
 })
 
@@ -132,9 +133,8 @@ test("schedule validation: daily and weekly modes, blank weekends, bad shapes", 
   })
   expect("error" in week).toBe(false)
   expect("error" in normalizeSchedule({ mode: "daily", times: ["x"] })).toBe(true)
-  expect("error" in normalizeSchedule({ mode: "daily", times: ["00:00", "01:00", "02:00", "03:00", "04:00"] })).toBe(
-    true,
-  )
+  const tooMany = [...Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`), "23:30"]
+  expect("error" in normalizeSchedule({ mode: "daily", times: tooMany })).toBe(true)
   expect("error" in normalizeSchedule({ mode: "weekly", days: { mon: ["25:00"] } })).toBe(true)
   expect("error" in normalizeSchedule({ mode: "cron", times: [] })).toBe(true)
   expect("error" in normalizeSchedule(null)).toBe(true)

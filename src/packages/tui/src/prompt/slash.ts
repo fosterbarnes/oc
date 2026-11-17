@@ -24,6 +24,23 @@ export function commandUse(part: CommandText) {
   return { names: names as string[], request: typeof request === "string" ? request.trim() : "" }
 }
 
+type MessagePart = { type: string; synthetic?: boolean; metadata?: Record<string, unknown> }
+
+// `ocActive`: the active command after a message, stamped by opencode session/activeCommand.ts.
+export function activeCommand(
+  messages: readonly { id: string; role: string }[],
+  parts: Record<string, readonly MessagePart[] | undefined>,
+) {
+  const stamped = (part: MessagePart) => part.type === "text" && !!part.metadata && "ocActive" in part.metadata
+  const message = messages.findLast(
+    (message) =>
+      message.role === "user" &&
+      parts[message.id]?.some((part) => (part.type === "text" && !part.synthetic) || stamped(part)),
+  )
+  const value = message && parts[message.id]?.find(stamped)?.metadata?.ocActive
+  return typeof value === "string" ? value : undefined
+}
+
 // What the user typed: re-submits the same commands instead of their expanded templates.
 export function typedText(part: CommandText) {
   const use = commandUse(part)
@@ -31,41 +48,52 @@ export function typedText(part: CommandText) {
   return [...use.names.map((name) => `/${name}`), use.request].filter(Boolean).join(" ")
 }
 
-// Built-in TUI revives that split a typed draft into ordered steps: `/pass /revive /agent-push` runs
-// /pass, revives once that turn ends, then sends /agent-push from the reopened oc (`reviveChain.tsx`).
+// Built-in TUI revives that split a typed draft into ordered steps: `/test /revive /ship` runs
+// /test, revives once that turn ends, then sends /ship from the reopened oc (`reviveChain.tsx`).
 export const REVIVE_MODES = {
   revive: "install",
   "revive-no-install": "no-install",
   "revive-single": "single",
 } as const satisfies Record<string, ReviveResume.Mode>
 
-// With slash commands, all free text is one request every command step gets (the user types it
-// stream-of-consciousness around the commands). Without any, each text segment is its own prompt.
+// Revives never take text: a stack's text goes to its first other command, else to a plain step.
 export function extractChain(text: string, available: readonly { name: string }[]) {
+  const revives = Object.keys(REVIVE_MODES)
+  const steps = splitSlashSteps(text, [...available, ...revives.map((name) => ({ name }))], revives)
+  if (!steps.some((step) => step.command && step.command in REVIVE_MODES)) return
+  return {
+    steps: steps.map((step): ReviveResume.Step => {
+      if (step.command && step.command in REVIVE_MODES)
+        return { type: "revive", mode: REVIVE_MODES[step.command as keyof typeof REVIVE_MODES] }
+      return { type: "send", names: step.command ? [step.command] : [], ...(step.text && { text: step.text }) }
+    }),
+  }
+}
+
+export type SlashStep = { command?: string; text: string }
+
+// A message with 2+ commands runs as ordered steps. Text before the first command is a plain step;
+// each command gets the text up to the next command, and in a stack (`/spit /think text`) the first
+// command takes the text while the rest stay blank. `textless` commands are skipped as takers.
+export function splitSlashSteps(text: string, available: readonly { name: string }[], textless: string[] = []) {
+  const known = new Set(available.map((command) => command.name))
   const ranges = quotedRanges(text)
-  const revives = [...text.matchAll(/(?<=^|\s)\/(revive|revive-no-install|revive-single)(?=\s|$)/g)].filter(
-    (match) => !quoted(ranges, match.index),
+  const found = [...text.matchAll(/(?<=^|\s)\/(\S+)(?=\s|$)/g)].filter(
+    (match) => known.has(match[1]) && !quoted(ranges, match.index),
   )
-  if (!revives.length) return
-  // Same shape `split` with a capture group gives: segment, mode name, segment, ...
-  const ends = revives.map((match) => match.index + match[0].length)
-  const pieces = [
-    ...revives.flatMap((match, index) => [text.slice(ends[index - 1] ?? 0, match.index), match[1]]),
-    text.slice(ends.at(-1)),
-  ]
-  const segments = pieces.map((piece, index) =>
-    index % 2 ? { mode: REVIVE_MODES[piece as keyof typeof REVIVE_MODES] } : extractSlashCommands(piece, available),
-  )
-  const commands = segments.some((segment) => "names" in segment && segment.names.length > 0)
-  const steps = segments.flatMap((segment): ReviveResume.Step[] => {
-    if ("mode" in segment) return [{ type: "revive", mode: segment.mode }]
-    if (segment.names.length) return [{ type: "send", names: segment.names }]
-    return !commands && segment.arguments ? [{ type: "send", names: [], text: segment.arguments }] : []
-  })
-  const request = commands
-    ? segments.flatMap((segment) => ("arguments" in segment && segment.arguments ? [segment.arguments] : [])).join("\n")
-    : ""
-  return { steps, request }
+  const lead = text.slice(0, found[0]?.index).trim()
+  return found.reduce<{ steps: SlashStep[]; taker?: number }>(
+    (acc, match, index) => {
+      const after = text.slice(match.index + match[0].length, found[index + 1]?.index).trim()
+      const steps = [...acc.steps, { command: match[1], text: "" }]
+      const taker = acc.taker ?? (textless.includes(match[1]) ? undefined : steps.length - 1)
+      if (!after) return { steps, taker }
+      if (taker === undefined) return { steps: [...steps, { text: after }] }
+      steps[taker] = { ...steps[taker], text: after }
+      return { steps }
+    },
+    { steps: lead ? [{ text: lead }] : [] },
+  ).steps
 }
 
 export function extractSlashCommands(text: string, available: readonly { name: string }[]) {

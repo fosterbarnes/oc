@@ -79,6 +79,8 @@ const withCodeMode = testEffect(
             },
           }),
         clients: () => Effect.succeed({ weather: {} as any }),
+        // The registry lists commands (MCP prompts included) for mode_switch's targets.
+        prompts: () => Effect.succeed({}),
       }),
     ],
   ]),
@@ -92,6 +94,7 @@ const withEmptyCodeMode = testEffect(
       Layer.mock(MCP.Service, {
         tools: () => Effect.succeed({}),
         clients: () => Effect.succeed({}),
+        prompts: () => Effect.succeed({}),
       }),
     ],
   ]),

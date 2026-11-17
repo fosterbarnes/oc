@@ -11,7 +11,6 @@ import * as Stream from "effect/Stream"
 import { InstanceState } from "@/effect/instance-state"
 import { Provider } from "@/provider/provider"
 import { Agent } from "../agent/agent"
-import { Command } from "../command"
 import { LLM } from "./llm"
 import { MessageV2 } from "./message-v2"
 import { SessionID } from "./schema"
@@ -251,10 +250,7 @@ function namingText(part: SessionV1.TextPart | SessionV1.TextPartInput) {
   return withoutCommandHeader(part.text)
 }
 
-// `SessionPrompt.command` prepends an active-command header (one command) or `Command.COMPOSED_PREAMBLE`
-// (several), each followed by a blank line; titles use the text after it.
+// The active-command header is one line, followed by a blank line.
 function withoutCommandHeader(text: string) {
-  const preamble = `${Command.COMPOSED_PREAMBLE}\n\n`
-  if (text.startsWith(preamble)) return text.slice(preamble.length)
   return text.replace(/^\[[^\n]* is active:[^\n]*\]\n\n/, "")
 }

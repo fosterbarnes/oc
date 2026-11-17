@@ -18,7 +18,7 @@ export function reviveDivider(metadata: Record<string, unknown> | undefined) {
   return ` Revived . ${time} . ${metadata?.versions}${next?.length ? ` . next ${next.join(", ")}` : ""} `
 }
 
-// Under each chain step's message: "step 1 of 3 . next /revive, /agent-push". Chain notes written
+// Under each chain step's message: "step 1 of 3 . next /revive, /ship". Chain notes written
 // before this line existed carry no progress and show nothing.
 export function chainLine(metadata: Record<string, unknown> | undefined) {
   if (metadata?.kind !== "chain") return

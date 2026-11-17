@@ -8,7 +8,6 @@ import {
   usageReadingDetails,
 } from "../../../src/routes/session/sidebar-tools/usage/live"
 import type { ClaudeCodeUsage } from "../../../src/routes/session/sidebar-tools/usage/claude"
-import { formatClaudeUsageRows } from "../../../src/routes/session/sidebar-tools/usage/format"
 import type { OpenAIUsage } from "../../../src/routes/session/sidebar-tools/usage/probes"
 import { usageWindowStale, type UsageSnapshot } from "../../../src/routes/session/sidebar-tools/usage/snapshot"
 
@@ -39,9 +38,6 @@ test("live Claude quota replaces only the named account/window and retains cache
   expect(next.weekly.fetchedAt).toBe(1_000)
   expect(usageWindowStale(next.fiveHour, next, 3_000)).toBe(false)
   expect(usageWindowStale(next.weekly, next, 3_000)).toBe(true)
-  expect(
-    formatClaudeUsageRows(next, false, undefined, undefined, undefined, undefined, undefined, 3_000)[0].usage,
-  ).toContain("15.8%w*")
   expect(applyClaudeObservation(next, observation("claude-code", "C:/accounts/other", "five_hour"))).toBe(next)
   expect(applyClaudeObservation(next, observation("claude-code", "C:/accounts/main", "seven_day_opus"))).toBe(next)
 })
@@ -62,11 +58,6 @@ test("pooled Claude accounts with equal basenames cannot update each other", () 
   expect(next.accounts?.[0].usage).toBe(first)
   const changed = next.accounts?.[1].usage
   expect(changed?.ok && changed.fiveHour.usedPercent).toBe(23.5)
-  const rows = formatClaudeUsageRows(next, false, undefined, undefined, undefined, undefined, "C:/second/main", 3_000)
-  expect(rows[0].label).toBe("main:")
-  expect(rows[1].label).toBe("main «")
-  expect(rows[0].usage).toContain("8.25%h*")
-  expect(rows[1].usage).toContain("23.5%h,")
 })
 
 test("older probes and snapshots cannot replace newer Claude observations or erase known siblings", () => {

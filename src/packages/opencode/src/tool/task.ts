@@ -28,6 +28,7 @@ export interface TaskPromptOps {
   loop(sessionID: SessionID): Effect.Effect<SessionV1.WithParts>
   available(sessionID: SessionID): Effect.Effect<void>
   cancellation(sessionID: SessionID): Effect.Effect<number>
+  switchMode(input: { sessionID: SessionID; mode: string; from: string; reason: string }): Effect.Effect<void>
   /** Replaces metadata on a completed tool part, for output that keeps changing after the call returned. */
   partMetadata(input: {
     sessionID: SessionID

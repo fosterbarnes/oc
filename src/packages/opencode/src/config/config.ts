@@ -147,13 +147,15 @@ type Info = ConfigV1.Info & {
 
 const InfoSchema = Schema.Struct({ ...ConfigV1.Info.fields, subagentFile: Schema.optional(Schema.String) })
 
+type MarkdownLayer<T> = { directory?: string; value: T | string }
+
 type State = {
   config: Info
   directories: string[]
   // Command sources in merge order: inline config records, or config dirs rescanned on every commands() call.
-  commandLayers: (NonNullable<Info["command"]> | string)[]
+  commandLayers: MarkdownLayer<NonNullable<Info["command"]>>[]
   // Agent sources in the same merge order: inline config records, or config dirs rescanned on every agents() call.
-  agentLayers: (NonNullable<Info["agent"]> | string)[]
+  agentLayers: MarkdownLayer<NonNullable<Info["agent"]>>[]
   // Independent pre-plugin snapshot, including nested fields that config hooks can mutate in place.
   agentSnapshot: NonNullable<Info["agent"]>
   deps: Fiber.Fiber<void>[]
@@ -424,10 +426,10 @@ const layer = Layer.effect(
           result.plugin_origins = plugins
         })
 
-        const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope) => {
+        const merge = (source: string, next: Info, kind?: ConfigPlugin.Scope, directory?: string) => {
           result = mergeConfigConcatArrays(result, next)
-          if (next.command) commandLayers.push(next.command)
-          if (next.agent) agentLayers.push(next.agent)
+          if (next.command) commandLayers.push({ directory, value: next.command })
+          if (next.agent) agentLayers.push({ directory, value: next.agent })
           return mergePluginOrigins(source, next.plugin, kind)
         }
 
@@ -514,7 +516,7 @@ const layer = Layer.effect(
             for (const file of ["opencode.json", "opencode.jsonc"]) {
               const source = path.join(dir, file)
               yield* Effect.logDebug(`loading config from ${source}`)
-              yield* merge(source, yield* loadFile(source, authEnv))
+              yield* merge(source, yield* loadFile(source, authEnv), undefined, dir)
               result.agent ??= {}
               result.mode ??= {}
               result.plugin ??= []
@@ -551,7 +553,7 @@ const layer = Layer.effect(
             yield* Effect.logWarning("invalid command file", { path: diag.path, message: diag.message })
           }
           result.command = mergeDeep(result.command ?? {}, loaded.commands)
-          commandLayers.push(dir)
+          commandLayers.push({ directory: dir, value: dir })
           const scanned = yield* Effect.promise(() => ConfigAgent.scan(dir))
           for (const diag of scanned.diagnostics) {
             yield* Effect.logWarning("invalid agent file", {
@@ -562,7 +564,7 @@ const layer = Layer.effect(
           }
           result.agent = mergeDeep(result.agent ?? {}, scanned.agents)
           result.agent = mergeDeep(result.agent ?? {}, yield* Effect.promise(() => ConfigAgent.loadMode(dir)))
-          agentLayers.push(dir)
+          agentLayers.push({ directory: dir, value: dir })
           // Auto-discovered plugins under `.opencode/plugin(s)` are already local files, so ConfigPlugin.load
           // returns normalized Specs and we only need to attach origin metadata here.
           const list = yield* Effect.promise(() => ConfigPlugin.load(dir))
@@ -633,8 +635,8 @@ const layer = Layer.effect(
             source: managed.source,
           })
           result = mergeConfigConcatArrays(result, next)
-          if (next.command) commandLayers.push(next.command)
-          if (next.agent) agentLayers.push(next.agent)
+          if (next.command) commandLayers.push({ value: next.command })
+          if (next.agent) agentLayers.push({ value: next.agent })
         }
 
         const legacyPluginSources = (result.plugin_origins ?? [])
@@ -731,12 +733,17 @@ const layer = Layer.effect(
     })
 
     const directories = Effect.fn("Config.directories")(function* () {
-      return yield* InstanceState.use(state, (s) => s.directories)
+      const ctx = yield* InstanceState.context
+      return yield* ConfigPaths.directories(ctx.directory, ctx.worktree).pipe(
+        Effect.provideService(FSUtil.Service, fs),
+        Effect.orDie,
+      )
     })
 
     // Rebuilds commands with the startup merge order, rescanning command dirs so file edits apply live.
     const commands = Effect.fn("Config.commands")(function* () {
-      const layers = yield* InstanceState.use(state, (s) => s.commandLayers)
+      const s = yield* InstanceState.get(state)
+      const layers = liveMarkdownLayers(s.commandLayers, s.directories, yield* directories())
       const loaded = yield* Effect.promise(() =>
         Promise.all(
           layers.map((layer) =>
@@ -754,9 +761,10 @@ const layer = Layer.effect(
     // Reapply only plugin changes, so untouched fields still follow markdown edits and removals.
     const agents = Effect.fn("Config.agents")(function* () {
       const s = yield* InstanceState.get(state)
+      const layers = liveMarkdownLayers(s.agentLayers, s.directories, yield* directories())
       const loaded = yield* Effect.promise(() =>
         Promise.all(
-          s.agentLayers.map(async (layer) => {
+          layers.map(async (layer) => {
             if (typeof layer !== "string") return { agents: layer, diagnostics: [] }
             const scanned = await ConfigAgent.scan(layer)
             return {
@@ -889,6 +897,19 @@ export const node = LayerNode.make({
 })
 
 export * as Config from "./config"
+
+function liveMarkdownLayers<T>(layers: MarkdownLayer<T>[], boot: string[], live: string[]) {
+  const result = [...layers]
+  for (const [index, directory] of live.entries()) {
+    if (boot.includes(directory)) continue
+    const next = live.slice(index + 1).find((dir) => boot.includes(dir))
+    const position = next
+      ? result.findIndex((layer) => layer.directory === next)
+      : result.findLastIndex((layer) => layer.directory !== undefined) + 1
+    result.splice(position, 0, { directory, value: directory })
+  }
+  return result.map((layer) => layer.value)
+}
 
 function applyAgentOverrides<T extends Record<string, unknown>>(
   fresh: T,

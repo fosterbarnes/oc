@@ -2,7 +2,7 @@ import type { TextareaRenderable } from "@opentui/core"
 import type { Part } from "@opencode-ai/sdk/v2"
 import { displaySlice } from "./display"
 import type { PromptInfo } from "./history"
-import { extractChain, extractSlashCommands, typedText } from "./slash"
+import { extractChain, extractSlashCommands, splitSlashSteps, typedText } from "./slash"
 
 // KV flag: long pastes collapse to a `[Pasted ~N lines]` placeholder. Off by default.
 export const PASTE_SUMMARY_KEY = "paste_summary_enabled"
@@ -142,16 +142,19 @@ export function typedSlashCommands(
   )
   const expand = (value: string) => value.replace(/(\d+)/g, (_, index: string) => pastes[Number(index)].text)
   const commands = extractSlashCommands(marked, available)
+  const steps = splitSlashSteps(marked, available)
   const chain = extractChain(marked, available)
   return {
     names: commands.names,
     arguments: expand(commands.arguments),
+    ...(steps.filter((step) => step.command).length > 1 && {
+      steps: steps.map((step) => ({ ...step, text: expand(step.text) })),
+    }),
     ...(chain && {
       chain: {
         steps: chain.steps.map((step) =>
           step.type === "send" && step.text ? { ...step, text: expand(step.text) } : step,
         ),
-        request: expand(chain.request),
       },
     }),
   }

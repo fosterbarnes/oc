@@ -10,6 +10,7 @@ import { Context, Effect, Layer, Schema, Semaphore } from "effect"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { MessageID, SessionID } from "./schema"
 import { ScheduledDelivery } from "./scheduledDelivery"
+import { isDeepEqual } from "remeda"
 
 // Why a session's queue is not sending. Absent (with entries waiting) means paused after a restart.
 // "chain": a TUI took a revive chain and sends its steps itself; the queue waits until it resumes.
@@ -39,6 +40,7 @@ export const Payload = Schema.Struct({
     }),
   ),
   commands: Schema.optional(Schema.Array(Schema.String)),
+  split: Schema.optional(Schema.Boolean),
   chain: Schema.optional(Schema.Array(ChainStep)),
 })
 export type Payload = Schema.Schema.Type<typeof Payload>
@@ -87,7 +89,6 @@ export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionQueu
 }) {}
 
 export interface AddInput {
-  sessionID: SessionID
   id?: MessageID
   payload: Payload
   /** Send no earlier than this (ms). Without it the prompt waits only for the session to be idle. */
@@ -101,6 +102,7 @@ export interface EditInput {
   text: string
   /** Replaces the entry's commands; `[]` makes it a plain prompt. Absent keeps them. */
   commands?: readonly string[]
+  split?: boolean
   /** Replaces the entry's revive chain the same way. */
   chain?: readonly ChainStep[]
 }
@@ -119,7 +121,7 @@ export interface Detached extends Queued {
 
 export interface Interface {
   readonly snapshot: (sessionID: SessionID) => Effect.Effect<Snapshot>
-  readonly add: (input: AddInput) => Effect.Effect<Snapshot>
+  readonly add: (sessionID: SessionID, inputs: readonly AddInput[]) => Effect.Effect<Snapshot>
   readonly edit: (input: EditInput) => Effect.Effect<Snapshot, NotFoundError | BusyError>
   readonly cancel: (input: {
     sessionID: SessionID
@@ -128,9 +130,17 @@ export interface Interface {
   readonly resume: (sessionID: SessionID) => Effect.Effect<Snapshot>
   readonly pause: (sessionID: SessionID, reason: PauseReason) => Effect.Effect<void>
   /** Marks the next sendable entry `dispatching` when `idle` holds. */
-  readonly claim: (sessionID: SessionID, idle: Effect.Effect<boolean>) => Effect.Effect<Queued | undefined>
+  readonly claim: (
+    sessionID: SessionID,
+    idle: Effect.Effect<boolean>,
+    expected?: { id: MessageID; payload: Payload },
+  ) => Effect.Effect<Queued | undefined>
   /** Whether `claim` would find an entry, ignoring idle. */
   readonly ready: (sessionID: SessionID) => Effect.Effect<boolean>
+  /** Expands legacy command stacks before returning the next pending payload. */
+  readonly peek: (sessionID: SessionID) => Effect.Effect<{ id: MessageID; payload: Payload } | undefined>
+  /** Moves a scheduled stack into its destination session's ordinary drain. */
+  readonly transfer: (entry: Queued, sessionID: SessionID) => Effect.Effect<boolean>
   /** Claims every due fork/new entry and lists sessions with a due entry for the session itself. */
   readonly due: (now: number) => Effect.Effect<{ detached: Detached[]; sessions: SessionID[] }>
   /** Assigns a fresh user-message id after the target session (including any fork) exists. */
@@ -355,33 +365,47 @@ export const layer = Layer.effect(
         return row
       })
 
-    const add = (input: AddInput) =>
+    const add: Interface["add"] = (sessionID, inputs) =>
       lock.withPermit(
-        Effect.gen(function* () {
-          const id = input.id ?? MessageID.ascending()
-          if ((yield* findRow(id))?.state === "completed") return yield* snapshotOf(input.sessionID)
-          if (yield* isSent(id)) return yield* snapshotOf(input.sessionID)
-          // With nothing unscheduled waiting the queue is not paused: a new entry clears any earlier pause,
-          // except a running revive chain's, so the entry waits for the chain.
-          if (!hasUnscheduled(yield* readRows(input.sessionID)) && flags.get(input.sessionID) !== "chain") {
-            flags.set(input.sessionID, "running")
-          }
-          yield* db
-            .insert(SessionQueueTable)
-            .values({
-              id,
-              session_id: input.sessionID,
-              state: "pending",
-              payload: input.payload,
-              run_at: input.runAt ?? null,
-              target: input.target ?? "current",
-            })
-            .onConflictDoNothing()
-            .run()
-            .pipe(Effect.orDie)
-          yield* notify
-          return yield* snapshotOf(input.sessionID)
-        }),
+        db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                // With nothing unscheduled waiting the queue is not paused: a new entry clears any earlier pause,
+                // except a running revive chain's, so the entry waits for the chain.
+                if (!hasUnscheduled(yield* readRows(sessionID)) && flags.get(sessionID) !== "chain") {
+                  flags.set(sessionID, "running")
+                }
+                yield* Effect.forEach(
+                  inputs,
+                  (input) =>
+                    Effect.gen(function* () {
+                      const id = input.id ?? MessageID.ascending()
+                      if ((yield* findRow(id))?.state === "completed" || (yield* isSent(id))) return
+                      yield* db
+                        .insert(SessionQueueTable)
+                        .values({
+                          id,
+                          session_id: sessionID,
+                          state: "pending",
+                          payload: input.payload,
+                          run_at: input.runAt ?? null,
+                          target: input.target ?? "current",
+                        })
+                        .onConflictDoNothing()
+                        .run()
+                        .pipe(Effect.orDie)
+                    }),
+                  { discard: true },
+                )
+                return yield* snapshotOf(sessionID)
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(
+            Effect.orDie,
+            Effect.tap(() => notify),
+          ),
       )
 
     const edit: Interface["edit"] = (input) =>
@@ -398,6 +422,7 @@ export const layer = Layer.effect(
             parts,
             commands: commands?.length ? commands : undefined,
             chain: chain?.length ? chain : undefined,
+            split: input.split ?? row.payload.split,
           }
           const edited = yield* db
             .update(SessionQueueTable)
@@ -434,13 +459,68 @@ export const layer = Layer.effect(
         }),
       )
 
-    const claim: Interface["claim"] = (sessionID, idle) =>
+    const peek: Interface["peek"] = (sessionID) =>
+      lock.withPermit(
+        db
+          .transaction(
+            () =>
+              Effect.gen(function* () {
+                const rows = yield* readRows(sessionID)
+                const row = nextRow(sessionID, rows, Date.now())
+                if (!row) return undefined
+                const names = row.payload.commands ?? []
+                if (row.payload.chain || names.length < 2) return { id: row.id, payload: row.payload }
+                const payload = { ...row.payload, commands: [names[0]] }
+                yield* db.update(SessionQueueTable).set({ payload }).where(eq(SessionQueueTable.id, row.id)).run()
+                // Reserve consecutive positions ahead of the existing tail, including same-millisecond adds.
+                const tail = rows.slice(rows.findIndex((item) => item.id === row.id) + 1)
+                yield* Effect.forEach(
+                  tail,
+                  (item, index) =>
+                    db
+                      .update(SessionQueueTable)
+                      .set({
+                        time_created: Math.max(
+                          item.time_created + names.length,
+                          row.time_created + names.length + index,
+                        ),
+                      })
+                      .where(eq(SessionQueueTable.id, item.id))
+                      .run(),
+                  { discard: true },
+                )
+                yield* Effect.forEach(
+                  names.slice(1),
+                  (name, index) =>
+                    db
+                      .insert(SessionQueueTable)
+                      .values({
+                        id: MessageID.ascending(),
+                        session_id: sessionID,
+                        state: "pending",
+                        payload: { ...row.payload, commands: [name], parts: [], split: true },
+                        time_created: row.time_created + index + 1,
+                        run_at: row.run_at,
+                        target: row.target,
+                      })
+                      .run(),
+                  { discard: true },
+                )
+                return { id: row.id, payload }
+              }),
+            { behavior: "immediate" },
+          )
+          .pipe(Effect.orDie),
+      )
+
+    const claim: Interface["claim"] = (sessionID, idle, expected) =>
       identity.pipe(
         Effect.flatMap((owner) =>
           lock.withPermit(
             Effect.gen(function* () {
               const row = nextRow(sessionID, yield* readRows(sessionID), Date.now())
               if (!row) return undefined
+              if (expected && (row.id !== expected.id || !isDeepEqual(row.payload, expected.payload))) return undefined
               if (!(yield* idle)) return undefined
               const claim = yield* mark(row.id, owner)
               if (!claim) return undefined
@@ -523,6 +603,32 @@ export const layer = Layer.effect(
         ),
       claim,
       ready,
+      peek,
+      transfer: (entry, sessionID) =>
+        lock.withPermit(
+          db
+            .transaction(
+              () =>
+                Effect.gen(function* () {
+                  const row = yield* findRow(entry.id)
+                  if (!row || row.state !== "dispatching" || claimed(row)?.owner !== entry.claim.owner) return false
+                  yield* db
+                    .insert(SessionQueueTable)
+                    .values({
+                      id: MessageID.ascending(),
+                      session_id: sessionID,
+                      state: "pending",
+                      payload: entry.payload,
+                    })
+                    .run()
+                  yield* receipt(entry.id)
+                  flags.set(sessionID, "running")
+                  return true
+                }),
+              { behavior: "immediate" },
+            )
+            .pipe(Effect.orDie),
+        ),
       due,
       prepare,
       complete: (id) => lock.withPermit(receipt(id)),

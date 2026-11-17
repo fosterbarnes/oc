@@ -109,8 +109,9 @@ async function revivePipeline(context: Revive.ReviveContext) {
       const rollback = sources
         ? await log.step(`Installing into ${installDir}`, () => Revive.install(sources, installDir))
         : undefined
-      const warmed = rollback ? warmLaunch(installDir) : Promise.resolve()
-      if (context.native) return warmed
+      if (context.native) return
+      // Don't pre-launch occ/opencode here: macOS checks new executables one at a time, so that slowed
+      // this start from 2.3 s to 5.8 s (measured 2026-11-13).
       // The install stays undoable until the new server is ready; a failed start restores the old files.
       await log
         .step("Starting server", () => startServer())
@@ -121,7 +122,6 @@ async function revivePipeline(context: Revive.ReviveContext) {
           await log.step("Restoring the previous install", () => rollback(error))
           throw error
         })
-      await warmed
     })().then(
       () => undefined,
       (error: unknown) => ({ error }),
@@ -262,20 +262,6 @@ async function reviveSingle(context: Revive.ReviveContext) {
   ])
   if (settled && old) await log.step("Closing the original pane", () => closeOwnedPanes(old)).catch(() => undefined)
   process.exit(await child.exited)
-}
-
-// macOS scans each new executable path on its first launch (~1.6 s per name, measured 2026-11-09), and
-// every install makes new files. The server start pays it for `oc`; this pays it for `occ` (the
-// reopened window) and native `opencode` at the same time, instead of after the window reopens.
-async function warmLaunch(installDir: string) {
-  if (process.platform !== "darwin") return
-  const names = ["occ", "opencode"].map((name) => path.join(installDir, name))
-  await Promise.all(
-    names.map(async (file) => {
-      if (!(await Bun.file(file).exists())) return
-      await Bun.spawn([file, "--version"], { stdio: ["ignore", "ignore", "ignore"] }).exited.catch(() => undefined)
-    }),
-  )
 }
 
 // Terminal CLIs report whether they opened the tab. Only cmd's new-console path needs a detached hop.

@@ -4087,6 +4087,7 @@ export class Queue extends HeyApiClient {
             variant?: string
             parts: Array<TextPartInput | FilePartInput | AgentPartInput>
             commands?: Array<string>
+            split?: boolean
             chain?: Array<
               | {
                   type: "send"
@@ -4102,10 +4103,39 @@ export class Queue extends HeyApiClient {
             target?: "current" | "fork" | "new"
           }
         | {
+            type: "batch"
+            entries: Array<{
+              id?: string
+              agent?: string
+              model?: {
+                providerID: string
+                modelID: string
+              }
+              variant?: string
+              parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+              commands?: Array<string>
+              split?: boolean
+              chain?: Array<
+                | {
+                    type: "send"
+                    names: Array<string>
+                    text?: string
+                  }
+                | {
+                    type: "revive"
+                    mode: "install" | "no-install" | "single"
+                  }
+              >
+              runAt?: number
+              target?: "current" | "fork" | "new"
+            }>
+          }
+        | {
             type: "edit"
             id: string
             text: string
             commands?: Array<string>
+            split?: boolean
             chain?: Array<
               | {
                   type: "send"
@@ -5194,7 +5224,6 @@ export class Session2 extends HeyApiClient {
       arguments?: string
       command?: string
       variant?: string
-      additionalCommands?: Array<string>
       parts?: Array<
         | TextPartInput
         | {
@@ -5223,7 +5252,6 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "arguments" },
             { in: "body", key: "command" },
             { in: "body", key: "variant" },
-            { in: "body", key: "additionalCommands" },
             { in: "body", key: "parts" },
           ],
         },

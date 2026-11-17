@@ -195,6 +195,7 @@ export const SessionQueueTable = sqliteTable(
       variant?: string
       parts: readonly (SessionV1.TextPartInput | SessionV1.FilePartInput | SessionV1.AgentPartInput)[]
       commands?: readonly string[]
+      split?: boolean
       chain?: readonly ReviveResume.ReadonlyStep[]
     }>(),
     run_at: integer(),

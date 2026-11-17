@@ -330,18 +330,6 @@ const ask = Effect.fn("ShellTool.ask")(function* (
     })
   }
 
-  // `bgRun` is the switch `/bgRun` toggles; background runs also still need the normal `bash` approval below.
-  if (input.background) {
-    yield* ctx.ask({
-      permission: "bgRun",
-      patterns: Array.from(scan.patterns),
-      always: Array.from(scan.always),
-      metadata: {
-        command: input.command,
-      },
-    })
-  }
-
   if (scan.patterns.size === 0) return
   yield* ctx.ask({
     permission: ShellID.ToolID,

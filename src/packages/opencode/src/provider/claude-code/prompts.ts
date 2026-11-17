@@ -58,24 +58,34 @@ Every question that needs an answer from the operator goes through exactly one t
 - Do NOT call bare \`question\` - that is not a tool. Always use the full \`mcp__opencode_proxy__question\` name when invoking it.
 - Claude Code's built-in \`AskUserQuestion\` is disabled in this environment; the proxy is the only way to ask the operator questions.`
 
+// Proxy tools are deferred, so Claude sees only the name `mode_switch`, not its when-to-use text.
+// Live test 2026-11-16 (haiku): without this note the model told the user to change commands instead.
+export const MODE_SWITCH_PROXY_HINT = `### Switching the active command
+
+Each user message names the active slash command. Call \`mcp__opencode_proxy__mode_switch\` (load it with ToolSearch if it is deferred) when the latest request needs permissions the active command lacks, or clearly belongs to another command's job even if the active one could do it (for example mockup or plan revisions while in imp). Ask instead of telling the user to send another command or working around the active command's rules. The user approves or declines it in a form. Stay only for quick questions and small fixes within the active command's own job, and never switch only because the topic changed.`
+
 /**
- * The oc-only environment note for one tool-enabled spawn. The skills and
- * no-shell-subagent rules always apply: oc skills load and Bash may run even
- * when no proxy survives. Proxy tools are deferred MCP tools, so their
- * schemas cost nothing until Claude loads one; the note only says where they
- * live. The task and question sections ride along only when that proxy is
- * live, so a gated or permission-denied tool is never advertised.
- * Command-permission turns also strip Claude's built-ins, so the note names
- * the proxy replacements.
+ * The oc-only environment note for one tool-enabled spawn. The no-shell-subagent
+ * rule always applies: Bash may run even when no proxy survives. The skills
+ * rule rides along only while Claude's `Skill` is on (`skills`). Proxy tools
+ * are deferred MCP tools, so their schemas cost nothing until Claude loads one;
+ * the note only says where they live. The task and question sections ride along
+ * only when that proxy is live, so a gated or permission-denied tool is never
+ * advertised. Command-permission turns also strip Claude's built-ins, so the
+ * note names the proxy replacements (`replaced`: proxied oc tools whose Claude
+ * Code built-ins are off this turn).
  */
-/** `replaced`: proxied oc tools whose Claude Code built-ins are off this turn. */
-export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[] = []): string {
+export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[] = [], skills = true): string {
   return [
     "## OpenCode tools",
     "",
     "You are running inside OpenCode, which shows this conversation to the user.",
     "",
-    "- Skills: prefer OpenCode skills (`oc:<name>`) over the user's own Claude Code skills from `~/.claude/skills`; those are for the Claude Code desktop app and may do oc-like things in a way that bypasses OpenCode. Skills built into Claude Code are fine.",
+    ...(skills
+      ? [
+          "- Skills: prefer OpenCode skills (`oc:<name>`) over the user's own Claude Code skills from `~/.claude/skills`; those are for the Claude Code desktop app and may do oc-like things in a way that bypasses OpenCode. Skills built into Claude Code are fine.",
+        ]
+      : []),
     "- Never start an OpenCode subagent through a shell (`opencode run`, `opencode.exe`): it bypasses the TUI and the native subagent lifecycle.",
     "- Background Bash jobs and `Monitor` watches live only as long as this Claude process: an OpenCode restart, a usage-limit account failover or `/reload` ends them.",
     ...(proxyTools.includes("schedule_prompt")
@@ -96,6 +106,7 @@ export function buildToolEnvironmentNote(proxyTools: string[], replaced: string[
       : []),
     ...(proxyTools.includes("task") ? ["", SUBAGENT_DISPATCH_HINT] : []),
     ...(proxyTools.includes("question") ? ["", QUESTION_PROXY_HINT] : []),
+    ...(proxyTools.includes("mode_switch") ? ["", MODE_SWITCH_PROXY_HINT] : []),
   ].join("\n")
 }
 

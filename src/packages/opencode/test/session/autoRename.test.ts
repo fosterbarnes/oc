@@ -288,7 +288,7 @@ it.instance(
 )
 
 it.instance(
-  "native titles and manual rename use the request behind long composed commands",
+  "native titles and manual rename use the request behind long command instructions",
   () =>
     Effect.gen(function* () {
       const fixture = yield* setup()
@@ -298,7 +298,6 @@ it.instance(
         sessionID: session.id,
         model: "test/test-model",
         command: "spit",
-        additionalCommands: ["think"],
         arguments: "Require approval before plan execution",
       })
       yield* pollWithTimeout(

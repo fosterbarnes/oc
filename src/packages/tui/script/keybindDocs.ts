@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Regenerates the keybind tables in docs/keybinds.md from Definitions and the oc preset.
+// Regenerates the keybind tables in docs/keybinds.md from Definitions and the oc and macOS presets.
 // --check: exit 1 when the file is stale instead of writing it.
 import path from "path"
 import { TuiKeybind } from "../src/config/keybind"
@@ -16,19 +16,25 @@ if (start < 0 || end < start) throw new Error(`docs/keybinds.md needs one ${STAR
 const groups = Map.groupBy(
   Object.entries(TuiKeybind.Definitions).flatMap(([name, item]) => {
     const stock = format(item.default)
-    const oc = format(TuiKeybindPreset.oc[name as keyof typeof TuiKeybindPreset.oc] ?? item.default)
+    const ocValue = TuiKeybindPreset.oc[name as keyof typeof TuiKeybindPreset.oc] ?? item.default
+    const oc = format(ocValue)
+    const mac = format(TuiKeybindPreset.mac[name as keyof typeof TuiKeybindPreset.mac] ?? ocValue)
     if (stock === "-" && oc === "-") return []
-    return [{ group: name.split(/[_.]/)[0], description: item.description, stock, oc }]
+    return [{ group: name.split(/[_.]/)[0], description: item.description, stock, oc, mac }]
   }),
   (row) => row.group,
 )
+// The macOS layout applies only on top of the oc layout; bold marks a key that differs from the column before.
 const tables = [...groups].map(([group, rows]) =>
   [
     `### ${group[0].toUpperCase()}${group.slice(1)}`,
     "",
-    "| Action | oc | opencode |",
-    "|---|---|---|",
-    ...rows.map((row) => `| ${row.description} | ${row.oc === row.stock ? row.oc : `**${row.oc}**`} | ${row.stock} |`),
+    "| Action | oc | oc (macOS) | opencode |",
+    "|---|---|---|---|",
+    ...rows.map(
+      (row) =>
+        `| ${row.description} | ${row.oc === row.stock ? row.oc : `**${row.oc}**`} | ${cmd(row.mac === row.oc ? row.mac : `**${row.mac}**`)} | ${row.stock} |`,
+    ),
   ].join("\n"),
 )
 const paletteNote =
@@ -41,6 +47,11 @@ if (process.argv.includes("--check")) {
   process.exit(1)
 }
 await Bun.write(file, next)
+
+// `super` is the Cmd key on a Mac.
+function cmd(keys: string) {
+  return keys.replaceAll("super+", "cmd+")
+}
 
 function format(value: TuiKeybind.BindingValueSchema) {
   const keys = (Array.isArray(value) ? value : [value]).flatMap((item) => {

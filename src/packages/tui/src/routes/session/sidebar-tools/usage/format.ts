@@ -1,5 +1,4 @@
-import type { ClaudeCodeUsage } from "./claude"
-import { usageWindowStale, type UsageWindow } from "./snapshot"
+import type { UsageWindow } from "./snapshot"
 import { Locale } from "../../../../util/locale"
 
 export function formatUsagePercent(used: number | null | undefined, remaining = false, compact = false): string {
@@ -8,160 +7,30 @@ export function formatUsagePercent(used: number | null | undefined, remaining = 
   return `${compact ? Math.round(value) : Number(value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0))}%`
 }
 
-/**
- * Both rows share an origin; each value starts at its reset's first clock digit. `columns[i]` is the minimum date
- * start of the i-th window in a row; `starts` reports each row's actual date starts so callers can share columns.
- * `clocks`/`days` report each row's flipped clock/day widths so callers can share those too; the shared maxima
- * come back in as options to right-align later-slot dates. `lead` is the shared column of each row's first value,
- * so rows with different label widths or a clockless first reset (`-`) still line up.
- */
-export function formatUsageRows(options: {
-  label: string
-  windows: { usedPercent: number | null; resetAt: string | null; suffix: string; compact?: boolean }[]
-  remaining: boolean
-  width?: number
-  columns?: number[]
-  clocks?: number[]
-  days?: number[]
-  lead?: number
-}) {
-  const rows: { usage: string; reset: string; starts: number[]; clocks: number[]; days: number[]; lead: number }[] = []
-  // Later windows flip `M/D/YY ~time` to `~time M/D/YY` so the value sits under the clock digit.
-  const dates = options.windows.map((window, index) => {
-    const raw = window.resetAt ?? "reset unavailable"
-    if (index > 0 && window.resetAt) {
-      const flipped = raw.match(/^(\S+) (~\S+)$/)
-      if (flipped) return `${flipped[2]} ${flipped[1]}`
-    }
-    return raw
-  })
-  // Clock/day parts of each flipped date, by window index; only row positions past the first are ever padded.
-  const parts = dates.map((date, index) => {
-    if (index === 0) return undefined
-    const part = date.match(/^~(\S+) (\S+)$/)
-    return part ? { clock: part[1], day: part[2] } : undefined
-  })
-  let usage = options.label
-  let reset = ""
-  let starts: number[] = []
-  let clocks: number[] = []
-  let days: number[] = []
-  // Only a row's own first slot reports its value column; wrapped continuation rows report 0.
-  let lead = 0
-  options.windows.forEach((window, index) => {
-    const date = dates[index]
-    const emptyDate = date === ""
-    const clock = date.indexOf("~") + 1
-    // An empty date carries no clock; offset 1 keeps it in the shared column.
-    const offset = window.resetAt === "" ? 1 : window.resetAt && clock > 0 ? clock : 0
-    const value = `${formatUsagePercent(window.usedPercent, options.remaining, window.compact)}${window.usedPercent === null ? "" : window.suffix}`
-    const position = starts.length
-    const part = position > 0 ? parts[index] : undefined
-    // Pad the clock to the shared width and right-align the day, so later-slot dates end in one column.
-    const display = part
-      ? `~${part.clock.padEnd(Math.max(part.clock.length, options.clocks?.[position] ?? 0))} ${part.day.padStart(Math.max(part.day.length, options.days?.[position] ?? 0))}`
-      : date
-    // A comma ends the previous value when another window shares the row.
-    const base = position ? `${usage},` : usage
-    const start = Math.max(
-      position ? reset.length + 2 : 0,
-      base.length + 1 - offset,
-      position ? (options.columns?.[position] ?? 0) : (options.lead ?? 0) - offset,
-    )
-    const column = start + offset
-    if (!position && !rows.length) lead = column
-    const gap = column - base.length
-    const candidate = base + " ".repeat(gap) + value
-    const prefix = position && reset.length ? `${reset}, ` : reset
-    const nextReset = emptyDate ? reset : prefix.padEnd(start) + display
-    if (position && Math.max(candidate.length, nextReset.length) > (options.width || Infinity)) {
-      rows.push({ usage, reset, starts, clocks, days, lead })
-      lead = 0
-      const localStart = Math.max(0, options.label.length + 1 - offset)
-      usage = options.label + " ".repeat(localStart + offset - options.label.length) + value
-      reset = emptyDate ? "" : " ".repeat(localStart) + date
-      starts = [localStart]
-      clocks = [0]
-      days = [0]
-      return
-    }
-    usage = candidate
-    reset = nextReset
-    starts = [...starts, start]
-    clocks = [...clocks, part ? part.clock.length : 0]
-    days = [...days, part ? part.day.length : 0]
-  })
-  if (usage) rows.push({ usage, reset, starts, clocks, days, lead })
-  return rows
-}
-
-/** Shared per-slot widths: the widest date start, flipped clock, and flipped day of each window slot across rows. */
-export function usageColumns(rows: { starts: number[]; clocks?: number[]; days?: number[]; lead?: number }[]) {
-  const widest = (pick: (row: (typeof rows)[number]) => number[] | undefined) =>
-    rows.reduce<number[]>((shared, row) => {
-      const widths = pick(row) ?? []
-      return widths.map((width, index) => Math.max(width, shared[index] ?? 0)).concat(shared.slice(widths.length))
-    }, [])
-  return {
-    starts: widest((row) => row.starts),
-    clocks: widest((row) => row.clocks),
-    days: widest((row) => row.days),
-    lead: Math.max(0, ...rows.map((row) => row.lead ?? 0)),
-  }
-}
-
-export function formatClaudeUsageRows(
-  usage: Extract<ClaudeCodeUsage, { ok: true }>,
-  remaining: boolean,
-  width?: number,
-  columns?: number[],
-  clocks?: number[],
-  days?: number[],
-  /** Canonical account identity; old callers without account IDs can still supply the name. */
-  active?: string,
-  nowMs?: number,
-  lead?: number,
-) {
-  const accounts = usage.accounts?.flatMap((account) =>
-    account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
-  )
-  const known = accounts?.length ? accounts : [{ id: usage.accountID, name: undefined, usage }]
-  const cell = (window: UsageWindow, suffix: string, snapshot: ClaudeCodeUsage) => {
-    const idle = suffix === "h" && window.usedPercent === 0 ? "-" : ""
-    // Unknown percent -> null ("reset unavailable"); hourly 0% with no reset ->
-    // shows `-` (no 5-hour window running yet); other known percents without a reset leave a blank slot.
-    const resetAt = window.resetAt ?? (window.usedPercent === null ? null : idle)
-    return {
-      usedPercent: window.usedPercent,
-      resetAt,
-      suffix: suffix + (nowMs !== undefined && usageWindowStale(window, snapshot, nowMs) ? "*" : ""),
-    }
-  }
-  return known.flatMap(({ id, name, usage: account }, index) => {
-    // Pooled accounts use the name from the oc palette's Claude accounts menu (`claudeAccountName`).
-    const base = name ?? "Claude"
-    const label = active && (id ?? name) === active ? `${base} «` : `${base}:`
-    return formatUsageRows({
-      label,
-      remaining,
-      width,
-      columns,
-      clocks,
-      days,
-      lead,
-      windows: [cell(account.fiveHour, "h", account), cell(account.weekly, "w", account)],
-    }).map((row, rowIndex) => ({ ...row, label, account: id, snapshot: account, spaced: index > 0 && rowIndex === 0 }))
-  })
-}
-
-/** Sidebar suffix for a window of this length: `h`, `d`, `w`, `m`; empty when the length is unknown or unusual. */
-export function windowLabel(minutes: number | null | undefined): string {
-  if (!minutes || minutes <= 0) return ""
+/** Sidebar tag for a window of this length: `5h`, `1d`, `wk`, `mo`, `Nd`; `fallback` when the length is unknown. */
+export function windowTag(minutes: number | null | undefined, fallback: string): string {
+  if (!minutes || minutes <= 0) return fallback
   const days = minutes / 1440
-  if (days < 1) return "h"
-  if (days === 1) return "d"
-  if (days === 7) return "w"
-  return days >= 28 && days <= 31 ? "m" : ""
+  if (days < 1) return `${Math.round(minutes / 60)}h`
+  if (days === 7) return "wk"
+  return days >= 28 && days <= 31 ? "mo" : `${Math.round(days)}d`
+}
+
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
+/** Sidebar reset: the clock today (`7:40PM`), weekday and clock within 6 days (`Wed 3AM`), else `M/D`. */
+export function shortResetDate(ms: number, nowMs: number): string {
+  const date = new Date(ms)
+  const hours = date.getHours()
+  const minutes = String(date.getMinutes()).padStart(2, "0")
+  const clock =
+    Locale.clock() === "12h"
+      ? `${hours % 12 || 12}${minutes === "00" ? "" : `:${minutes}`}${hours >= 12 ? "PM" : "AM"}`
+      : `${String(hours).padStart(2, "0")}:${minutes}`
+  // Rounded: a daylight-saving change makes one day 23 or 25 hours long.
+  const days = Math.round((new Date(ms).setHours(0, 0, 0, 0) - new Date(nowMs).setHours(0, 0, 0, 0)) / 86_400_000)
+  if (days <= 0) return clock
+  return days < 7 ? `${WEEKDAYS[date.getDay()]} ${clock}` : `${date.getMonth() + 1}/${date.getDate()}`
 }
 
 /** Spelled-out window name for the usage menu: `5-hour`, `Weekly`, `Monthly`, or `N-day`; empty when unknown. */

@@ -41,9 +41,9 @@ upstream fixes are cherry-picked into the customized parent by hand.
    only when required for upstream compatibility, and keep the smallest
    necessary change.
 8. After hand-porting upstream changes, run `.scripts\bumpVersion.ps1` to
-   bump the last number of `.version/version` (for example `0.0.8` to
-   `0.0.9`) and roll a new tag into `.version/versionTag`. Do this before
-   the Windows dist build so the TUI display version matches. OpenCode's
+   bump the last number of `src/.version/version` (for example `0.2.363` to
+   `0.2.364`) and roll a new tag into `src/.version/versionTag`. Do this before
+   the dist build so the TUI display version matches. OpenCode's
    package version (the package.json `version` fields and the `.opencode`
    plugin pin) tracks the upstream release the port synced through. After
    porting up to an upstream release, update `baselineSha` by hand to that
@@ -60,7 +60,7 @@ upstream fixes are cherry-picked into the customized parent by hand.
 Protect these areas when porting upstream changes:
 
 - `.install.ps1` and `.scripts\*` local automation
-- `.version\version` and `.version\versionTag` maintenance versioning
+- `src\.version\version` and `src\.version\versionTag` maintenance versioning
 - `AGENTS.md`, `SCRIPTS.md`, `docs/buildNotes/`, `README.md`, `FORK.md`, `SCOPE.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths

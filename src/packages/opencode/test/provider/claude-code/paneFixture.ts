@@ -34,7 +34,7 @@ export const openPane = Effect.fnUntraced(function* (
     const installed = yield* Effect.promise(() => installQuotaFakeCli(root))
     quotaCliPath = installed.cliPath
     yield* Effect.promise(async () => {
-      const sidebar = path.join(fixture.home, ".config", "openSidebar", "config.json")
+      const sidebar = path.join(fixture.home, ".config", "opencode", "sidebar.json")
       await mkdir(path.dirname(sidebar), { recursive: true })
       await Bun.write(sidebar, JSON.stringify({ usageProviders: ["claude-code"] }))
     })

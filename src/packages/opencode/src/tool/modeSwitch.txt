@@ -1,0 +1,3 @@
+Ask the user to switch the active command. The user approves or declines in a form; you cannot switch on your own. On approval the new command's instructions and permissions start with the next turn, which begins automatically; end your turn after an approval. If the user declines, the current command stays: continue within its rules and do not ask again for the same request.
+Call it when the user's latest request needs permissions the current command lacks, or clearly belongs to another command's job even if the current one could do it (for example mockup or plan revisions while in imp).
+Stay for quick questions and small fixes the current command can handle, and never switch only because the topic changed. Never work around a command's rules instead of asking.

@@ -2,13 +2,14 @@
 
 Custom fork of opencode that focuses on building on existing features simply and cleanly, and adding new QOL features.
 
-Not ready for widespread use until 0.3.0, especially on Linux and macOS. As of current date, testing and feature work is being done on Windows 10 LTSC IoT (i know lol). Linux and macOS feature parity is planned for v0.3.0.
+Not ready for widespread use until 0.3.0. oc works on Windows 10 and 11, and on macOS (Apple Silicon; newer and less tested, no installer yet). Linux is not supported yet. Full Windows, macOS, and Linux support ships on or before 0.3.0.
 
 Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
 
 ## Standout features
 
 - Claude Code models in `/models`, using your own Claude Code login ([how](https://github.com/fosterbarnes/oc/wiki/Claude-Code))
+- Several Claude accounts, with a usage row for each ([how](https://github.com/fosterbarnes/oc/wiki/Claude-Code#several-claude-accounts))
 - Cursor models in `/models`, using your Cursor login (beta) ([how](https://github.com/fosterbarnes/oc/wiki/Cursor))
 - `oc <folder>` opens a ready session; `occ` reopens your last one ([how](https://github.com/fosterbarnes/oc/wiki/Launching#oc-and-occ))
 - One background server shared by every window, so launches after the first are fast (beta) ([how](https://github.com/fosterbarnes/oc/wiki/Launching#background-server))
@@ -17,7 +18,7 @@ Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
 - A sidebar with usage meters, sub-agents, a file tree, and changed files, all clickable ([how](https://github.com/fosterbarnes/oc/wiki/Sidebar))
 - Run your project's scripts from the sidebar in one click ([how](https://github.com/fosterbarnes/oc/wiki/Sidebar#script-runner))
 - `/commands` and skills reload as you edit them, no restart needed ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
-- Combine commands and skills you write in one prompt, like `/spit /think` ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
+- Combine commands and skills you write in one prompt, like `/test /review` ([how](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills#commands-and-skills))
 
 
 
@@ -34,21 +35,15 @@ Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
 - Startup animation with no blank gap before the app appears
 - Faster startup for every command
 - `/revive` rebuilds oc while you keep working, then restarts it in place (no rebuild when the source is unchanged)
-- `/update` installs a new oc release and reopens where you were
+- `/update` updates your oc source folder to GitHub `main`, then builds and reopens like `/revive` (until releases ship)
 - `opencode` runs every oc feature in one window with no background server, like stock OpenCode (beta)
 
 ### Claude Code
 - The context % updates live during Claude Code turns
-- Update Claude Code from the oc menu under Manage Third Party Harnesses
-- Update Claude Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
 
-### Cursor
-- Update Cursor CLI from the oc menu under Manage Third Party Harnesses
-- Update Cursor Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
-
-### Codex
-- Update Codex CLI from the oc menu under Manage Third Party Harnesses
-- Update ChatGPT Desktop from the oc menu under Manage Third Party Harnesses (Windows only)
+### Updates
+- Update the Claude Code, Cursor, and Codex CLIs, PowerShell 7, and WezTerm (nightly) from the oc menu under **Updates**
+- Update Claude Desktop, Cursor Desktop, and ChatGPT Desktop the same way (Windows only)
 
 ### Commands and tools
 - Favorite `/commands` and skills with `ctrl+f`
@@ -63,7 +58,7 @@ Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
 
 ## Requirements
 
-- Windows 10 or 11, x64
+- Windows 10 or 11, x64, or macOS on Apple Silicon (newer and less tested, no installer yet: [macOS install](https://github.com/fosterbarnes/oc/wiki/Install#macos))
 - PowerShell 7 (`pwsh`) on PATH
 
 Some features need extra software:
@@ -91,8 +86,8 @@ WezTerm is the recommended terminal for oc. It is what the maintainer uses daily
 
 ## Install
 
-<!-- TODO(release): no release has shipped the setup exe yet, and the release zip has no
-oc.exe/occ.exe. Update these steps when the first setup exe is published. -->
+<!-- TODO(release): no release has been published yet, so neither the setup exe nor the zip is
+on Releases. The zip has oc.exe but not occ.exe. Update these steps when the first setup exe is published. -->
 
 Run `oc_v<version>_windows-x64-setup.exe` from [Releases](https://github.com/fosterbarnes/oc/releases).
 It installs oc for your user, then opens **oc Dependency Installer** to install what oc uses (PowerShell 7,
@@ -102,7 +97,8 @@ desktop apps)
 
 Or install from the zip:
 
-1. Download the latest `windows-x64` zip from [Releases](https://github.com/fosterbarnes/oc/releases).
+1. Download `opencode-v<version>-<tag>-windows-x64.zip` from [Releases](https://github.com/fosterbarnes/oc/releases).
+   It has `oc.exe` but not `occ.exe`. (The `-native-windows-x64` zip holds stock `opencode.exe` only.)
 2. Extract it to a folder you keep, for example `%LOCALAPPDATA%\oc`.
 3. Add that folder to your PATH.
 4. Open a new PowerShell 7 window and run `oc`.
@@ -116,10 +112,10 @@ models, pick a Cursor model in `/models` and sign in through your browser.
 
 Things that work differently from stock OpenCode:
 
-- **Quitting:** `ctrl+c` clears the prompt and never quits. Quit with `ctrl+x q` or `/exit`.
-- **Keys:** many keys differ ([Keybinds](https://github.com/fosterbarnes/oc/wiki/Keybinds)). Switch to stock OpenCode keys with **Keybind layout** in `ctrl+o`.
+- **Quitting:** in the oc keybind layout, `ctrl+c` clears the prompt and never quits. Quit with `ctrl+x q` or `/exit`.
+- **Keys:** many keys differ ([Keybinds](https://github.com/fosterbarnes/oc/wiki/Keybinds)). Switch to stock OpenCode keys with **Keybind layout** in `ctrl+o`. On macOS the oc layout moves app shortcuts from `ctrl` to `cmd` (`cmd+o`, `cmd+n`, `cmd+return`); the leader, `ctrl+c`, and prompt editing stay on `ctrl`.
 - **Closing the last window doesn't stop oc:** the background server keeps running, so the next
-  launch opens where you left off. Stop it with `oc --kill-server` or from `ctrl+o`.
+  launch opens where you left off. Stop it with `oc --kill-server` (this also closes this instance's oc windows) or from `ctrl+o`.
 - **The session list shows every project,** not just the folder you're in. Picking a session opens
   it in its own folder.
 - **oc sessions are named `<folder> - <task>`** after your first prompt, using `/rename`'s model.
@@ -132,12 +128,13 @@ Things that work differently from stock OpenCode:
 
 How everything works is in the [wiki](https://github.com/fosterbarnes/oc/wiki):
 
+- [Install](https://github.com/fosterbarnes/oc/wiki/Install) and [Keybinds](https://github.com/fosterbarnes/oc/wiki/Keybinds)
 - [Launching](https://github.com/fosterbarnes/oc/wiki/Launching): `oc`, `occ`, the background server, `opencode`, and `/revive`
 - [Sessions](https://github.com/fosterbarnes/oc/wiki/Sessions): the session list, marks, and names
 - [Sidebar](https://github.com/fosterbarnes/oc/wiki/Sidebar): usage, files, scripts, and sub-agents
-- [Claude Code](https://github.com/fosterbarnes/oc/wiki/Claude-Code) and [Cursor](https://github.com/fosterbarnes/oc/wiki/Cursor): using your subscriptions
+- [Claude Code](https://github.com/fosterbarnes/oc/wiki/Claude-Code), [Claude Agent](https://github.com/fosterbarnes/oc/wiki/Claude-Agent), and [Cursor](https://github.com/fosterbarnes/oc/wiki/Cursor): using your subscriptions
 - [Agents and Skills](https://github.com/fosterbarnes/oc/wiki/Agents-and-Skills): commands, skills, and per-command permissions
-- [Configuration](https://github.com/fosterbarnes/oc/wiki/Configuration): every setting oc adds
+- [Configuration](https://github.com/fosterbarnes/oc/wiki/Configuration): every setting oc adds, and moving settings between machines
 - [Troubleshooting](https://github.com/fosterbarnes/oc/wiki/Troubleshooting) and [FAQ](https://github.com/fosterbarnes/oc/wiki/FAQ)
 - [Companion Tools](https://github.com/fosterbarnes/oc/wiki/Companion-Tools)
 - [Developing](https://github.com/fosterbarnes/oc/wiki/Developing): building from source. Repo docs: [FORK.md](FORK.md), [SCOPE.md](SCOPE.md), [SCRIPTS.md](SCRIPTS.md), [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)

@@ -2,12 +2,12 @@ import { expect, test } from "bun:test"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { openInOtherTabs } from "../src/agentPushAutoDelete"
+import { openInOtherTabs } from "../src/pushAutoDelete"
 
 test("only running tabs keep a pushed session open", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ocTuis-"))
   try {
-    // A tab closed with its window leaves its ledger behind (the `oc - agent-push:#14b2f3f` report).
+    // A tab closed with its window leaves its ledger behind (the `oc - ship:#14b2f3f` report).
     const closed = Bun.spawn(process.platform === "win32" ? ["cmd", "/c", "exit"] : ["true"])
     await closed.exited
     const ledger = (pid: number, sessionID: string) =>

@@ -79,6 +79,48 @@ afterEach(async () => {
 
 describe("session queue HttpApi", () => {
   it.instance(
+    "validates the whole batch before adding any entry",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const session = yield* Session.use.create({ title: "batch validation" })
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const path = pathFor(SessionPaths.queue, { sessionID: session.id })
+        const state = yield* SessionRunState.Service
+        yield* state.maintenance(
+          session.id,
+          Effect.gen(function* () {
+            const invalid = yield* request(path, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                type: "batch",
+                entries: [{ parts: [{ type: "text", text: "first" }] }, { parts: [], target: "new" }],
+              }),
+            })
+            expect(invalid.status).toBe(400)
+            const empty = yield* request(path, { headers }).pipe(Effect.flatMap(json<{ entries: unknown[] }>))
+            expect(empty.entries).toEqual([])
+            const added = yield* request(path, {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                type: "batch",
+                entries: [{ parts: [{ type: "text", text: "first" }] }, { parts: [{ type: "text", text: "second" }] }],
+              }),
+            })
+            expect(added.status).toBe(200)
+            expect((yield* json<{ entries: { text: string }[] }>(added)).entries.map((entry) => entry.text)).toEqual([
+              "first",
+              "second",
+            ])
+          }),
+        )
+      }),
+    { config: testProviderConfig("http://127.0.0.1:1") },
+  )
+
+  it.instance(
     "adds, edits, cancels, and resumes queued prompts with typed errors",
     () =>
       Effect.gen(function* () {

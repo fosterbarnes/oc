@@ -172,7 +172,7 @@ const blockingProcessor = Layer.succeed(
   }),
 )
 
-const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true })
+const runtimeFlags = RuntimeFlags.layer({ experimentalEventSystem: true, client: "cli" })
 
 const testLLMServerNode = LayerNode.make({ service: TestLLMServer, layer: TestLLMServer.layer, deps: [] })
 
@@ -588,15 +588,16 @@ it.instance(
       )
       const id = MessageID.ascending()
       yield* llm.text("drained")
-      yield* owner.add({
-        sessionID: chat.id,
-        id,
-        payload: {
-          agent: "build",
-          model: ref,
-          parts: [{ type: "text", text: "queued" }],
+      yield* owner.add(chat.id, [
+        {
+          id,
+          payload: {
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "queued" }],
+          },
         },
-      })
+      ])
       const held = yield* owner.claim(chat.id, Effect.succeed(true))
       if (!held) throw new Error("queue owner did not acquire the durable claim")
       yield* queue.resume(chat.id)
@@ -943,7 +944,12 @@ it.instance("prompt without turn permissions saves a user message that passes th
 
 it.instance("an oc-posted synthetic prompt runs under the command rules of the turn it continues", () =>
   Effect.gen(function* () {
-    yield* useServerConfig(providerCfg)
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: {
+        restricted: { template: "Inspect", permission: { ocTui: "allow" } },
+      },
+    }))
     const prompt = yield* SessionPrompt.Service
     const sessions = yield* Session.Service
     const chat = yield* sessions.create({ title: "Pinned" })
@@ -963,13 +969,20 @@ it.instance("an oc-posted synthetic prompt runs under the command rules of the t
         if (message.info.role !== "user") return "not a user message"
         return SessionPrompt.continuedTurnRules(message.info, timeline).permission
       })
-    expect(yield* effective(yield* send("/agentTest", false, rules))).toEqual(rules)
+    yield* llm.text("done")
+    yield* prompt.command({ sessionID: chat.id, command: "restricted", arguments: "" })
     // A Claude wake turn after a background task: same rules, also when chained.
     expect(yield* effective(yield* send("[Claude Code continued on its own]", true))).toEqual(rules)
     expect(yield* effective(yield* send("[Claude Code continued on its own]", true))).toEqual(rules)
-    // The next typed message ends the command's rules.
-    expect(yield* effective(yield* send("plain", false))).toBeUndefined()
-    expect(yield* effective(yield* send("[notice]", true))).toBeUndefined()
+    expect(yield* effective(yield* send("plain", false))).toEqual(rules)
+    expect(yield* effective(yield* send("[notice]", true))).toEqual(rules)
+    const cleared = yield* prompt.prompt({
+      sessionID: chat.id,
+      noReply: true,
+      parts: [{ type: "text", text: "No command", synthetic: true, metadata: { ocActive: null } }],
+    })
+    expect(yield* effective(cleared)).toBeUndefined()
+    expect(yield* effective(yield* send("[notice after none]", true))).toBeUndefined()
   }),
 )
 
@@ -3022,53 +3035,98 @@ noLLMServer.instance(
 
 // Agent / command resolution errors
 
-it.instance("slash composition delivers ordered unique command bodies in one model turn", () =>
+for (const answer of ["Stay", "rejected", "Keep planning", "Switch", "none"] as const) {
+  it.instance(`mode_switch ${answer} requires an explicit question reply before creating a turn`, () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          inspect: { template: "Inspect only", suggest: true, permission: { edit: "deny" } },
+          implement: {
+            template: "Implement $ARGUMENTS",
+            suggest: true,
+            permission: { edit: "allow" },
+            toolHost: { edit: "oc" },
+          },
+        },
+      }))
+      const { prompt, sessions, chat } = yield* boot()
+      const questions = yield* Question.Service
+      yield* llm.tool("mode_switch", {
+        mode: answer === "none" ? "none" : "implement",
+        reason: "The user requested an edit",
+      })
+      yield* llm.text("continued")
+      const turn = yield* prompt
+        .command({ sessionID: chat.id, command: "inspect", arguments: "review" })
+        .pipe(Effect.forkChild)
+      const request = yield* pollWithTimeout(
+        questions.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === chat.id))),
+        "mode switch did not ask",
+      )
+      const before = (yield* sessions.messages({ sessionID: chat.id })).filter(
+        (message) => message.info.role === "user",
+      )
+      expect(before).toHaveLength(1)
+      if (answer === "rejected") yield* questions.reject(request.id)
+      if (answer !== "rejected")
+        yield* questions.reply({ requestID: request.id, answers: [[answer === "none" ? "Switch" : answer]] })
+      yield* Fiber.join(turn)
+      const after = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
+      expect(after).toHaveLength(answer === "Switch" || answer === "none" ? 2 : 1)
+      if (answer === "Switch") {
+        expect(after[1].info).toMatchObject({
+          permission: Permission.fromConfig({ edit: "allow" }),
+          toolHost: { edit: "oc" },
+        })
+        expect(after[1].parts[0]).toMatchObject({
+          metadata: { ocActive: "implement", ocCommands: ["implement"], ocModeSwitch: { from: "inspect" } },
+        })
+        expect(after[1].info.role === "user" && after[1].info.model).toEqual(
+          before[0].info.role === "user" && before[0].info.model,
+        )
+      }
+      if (answer === "none") {
+        if (after[1].info.role !== "user") throw new Error("expected user")
+        expect(after[1].parts).toMatchObject([{ synthetic: true, metadata: { ocActive: null } }])
+        expect(SessionPrompt.continuedTurnRules(after[1].info, after)).not.toHaveProperty("permission")
+      }
+    }),
+  )
+}
+
+it.instance("a command replaces the previous command without merging its rules", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
       command: {
-        compositionSpit: { template: "Discuss strategies. No code changes." },
-        compositionThink: { template: "Choose a clean solution and write a Markdown plan." },
-        compositionConcise: { template: "Keep the explanation concise." },
+        first: { template: "Discuss strategies.", permission: { edit: "deny" }, toolHost: { read: "oc" } },
+        second: { template: "Implement.", permission: { edit: "allow" } },
       },
     }))
     const { prompt, sessions } = yield* boot()
-    for (const names of [
-      ["compositionSpit", "compositionThink", "compositionConcise", "compositionSpit"],
-      ["compositionThink", "compositionSpit"],
-    ]) {
-      const chat = yield* sessions.create({ title: "Composition" })
+    const chat = yield* sessions.create({ title: "Command replacement" })
+    for (const name of ["first", "second"]) {
       yield* llm.text("done")
       yield* prompt.command({
         sessionID: chat.id,
-        command: names[0],
-        additionalCommands: names.slice(1),
+        command: name,
         arguments: "Fix queued messages\n\nPreserve cancellation",
         agent: "build",
         model: "test/test-model",
         variant: "high",
       })
-      const inputs = yield* llm.inputs
-      const messages = inputs.at(-1)?.messages
-      if (!Array.isArray(messages)) throw new Error("Expected model messages")
-      const text = messages.at(-1)?.content
-      expect(typeof text).toBe("string")
-      expect(text).toContain("Apply all listed slash commands together")
-      expect(text).toContain("replace any earlier slash command's persona, mode, and rules")
-      expect(text).toContain("Discuss strategies. No code changes.")
-      expect(text).toContain("Choose a clean solution and write a Markdown plan.")
-      expect(text).toContain("[User request]\nFix queued messages\n\nPreserve cancellation")
-      expect(text.indexOf(`[/${names[0]}]`)).toBeLessThan(text.indexOf(`[/${names[1]}]`))
-      expect(text.match(/\[\/compositionSpit\]/g)).toHaveLength(1)
-      const history = yield* sessions.messages({ sessionID: chat.id })
-      expect(history.filter((message) => message.info.role === "user")).toHaveLength(1)
-      expect(history[0].info).toMatchObject({ agent: "build", model: { ...ref, variant: "high" } })
     }
+    const users = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
+    expect(users).toHaveLength(2)
+    expect(users[1].info).toMatchObject({ permission: Permission.fromConfig({ edit: "allow" }) })
+    expect(users[1].info).not.toHaveProperty("toolHost")
+    expect(users[1].parts[0]).toMatchObject({ metadata: { ocCommands: ["second"], ocActive: "second" } })
     expect(yield* llm.calls).toBe(2)
   }),
 )
 
-it.instance("slash composition expands shared arguments and shell snippets without cross-template substitution", () =>
+it.instance("single commands expand arguments and preserve command metadata", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
@@ -3084,19 +3142,17 @@ it.instance("slash composition expands shared arguments and shell snippets witho
     yield* prompt.command({
       sessionID: chat.id,
       command: "first",
-      additionalCommands: ["second", "plain"],
       arguments: '"two words" remaining request',
     })
     const history = yield* sessions.messages({ sessionID: chat.id })
     const text = history[0].parts.find((part) => part.type === "text")
-    if (text?.type !== "text") throw new Error("Expected composed text")
+    if (text?.type !== "text") throw new Error("Expected command text")
     expect(text.text).toContain("First: two words | remaining request")
-    expect(text.text).toContain('Second: "two words" remaining request\nexpanded')
-    expect(text.text).toContain('[/plain]\nPlain body\n\n[User request]\n"two words" remaining request')
     expect(text.text).not.toContain("$ARGUMENTS")
     expect(text.text).not.toContain("!`")
     expect(text.metadata).toMatchObject({
-      ocCommands: ["first", "second", "plain"],
+      ocCommands: ["first"],
+      ocActive: "first",
       ocCommandArguments: '"two words" remaining request',
     })
     expect(yield* llm.calls).toBe(1)
@@ -3105,13 +3161,12 @@ it.instance("slash composition expands shared arguments and shell snippets witho
     yield* prompt.command({
       sessionID: single.id,
       command: "plain",
-      additionalCommands: ["plain"],
       arguments: "request",
     })
     const singleHistory = yield* sessions.messages({ sessionID: single.id })
     expect(singleHistory[0].parts.find((part) => part.type === "text")).toMatchObject({
-      text: "[/plain is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]\n\nPlain body\n\nrequest",
-      metadata: { ocCommands: ["plain"] },
+      text: expect.stringContaining("Plain body\n\nrequest"),
+      metadata: { ocCommands: ["plain"], ocActive: "plain" },
     })
   }),
 )
@@ -3131,7 +3186,7 @@ it.instance("command arguments keep replacement patterns literal", () =>
   }),
 )
 
-it.instance("slash composition carries the editor selection into the command turn", () =>
+it.instance("a command carries the editor selection into its turn", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
@@ -3156,18 +3211,18 @@ it.instance("slash composition carries the editor selection into the command tur
   }),
 )
 
-it.instance("agent-push mid-session keeps the title", () =>
+it.instance("a push command mid-session keeps the title", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
-      command: { "agent-push": { template: "Push" } },
+      command: { ship: { template: "Push", pushSession: true } },
     }))
     const { prompt, chat, sessions } = yield* boot()
     yield* sessions.setTitle({ sessionID: chat.id, title: "work in progress" })
     yield* llm.text("worked")
     yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "do work" }] })
     yield* llm.text("pushed")
-    yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
+    yield* prompt.command({ sessionID: chat.id, command: "ship", arguments: "" })
     const after = yield* sessions.get(chat.id)
     expect(after.title).toBe("work in progress")
     // Not the first message, so this session can never auto-delete.
@@ -3175,11 +3230,11 @@ it.instance("agent-push mid-session keeps the title", () =>
   }),
 )
 
-it.instance("agent-push as the first message marks the session as a push session", () =>
+it.instance("a push command as the first message marks the session as a push session", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
-      command: { "agent-push": { template: "Push" } },
+      command: { ship: { template: "Push", pushSession: true } },
     }))
     const { prompt, chat, sessions } = yield* boot()
     // Every new oc session starts with this synthetic message (`tui/src/ocNewSession.ts`).
@@ -3190,18 +3245,18 @@ it.instance("agent-push as the first message marks the session as a push session
       parts: [{ type: "text", text: `Working directory initialized: ${chat.directory}`, synthetic: true }],
     })
     yield* llm.text("pushed")
-    yield* prompt.command({ sessionID: chat.id, command: "agent-push", arguments: "" })
+    yield* prompt.command({ sessionID: chat.id, command: "ship", arguments: "" })
     const after = yield* sessions.get(chat.id)
-    expect(after.title).toBe(`${path.basename(chat.directory)} - agent-push:`)
+    expect(after.title).toBe(`${path.basename(chat.directory)} - ship:`)
     expect(after.metadata?.[PUSH_SESSION_KEY]).toBe(true)
   }),
 )
 
-it.instance("command permission applies to its own turn only", () =>
+it.instance("typed messages inherit the active command permission in storage", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig((url) => ({
       ...providerCfg(url),
-      command: { imp: { template: "Implement", permission: { session_complete: "allow" } } },
+      command: { imp: { template: "Implement", permission: { session_complete: "allow" }, toolHost: { read: "oc" } } },
       permission: { "*": "allow" },
     }))
     const { prompt, chat, sessions } = yield* boot()
@@ -3211,7 +3266,14 @@ it.instance("command permission applies to its own turn only", () =>
     yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "follow up" }] })
     const hits = yield* llm.hits
     expect(JSON.stringify(hits[0]?.body)).toContain('"session_complete"')
-    expect(JSON.stringify(hits[1]?.body)).not.toContain('"session_complete"')
+    expect(JSON.stringify(hits[1]?.body)).toContain('"session_complete"')
+    const users = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
+    expect(users[1].info).toMatchObject({ permission: Permission.fromConfig({ session_complete: "allow" }) })
+    expect(users[1].info.role === "user" && users[1].info.toolHost).toEqual(
+      users[0].info.role === "user" && users[0].info.toolHost,
+    )
+    expect(users[1].parts[0]).toMatchObject({ text: "follow up", metadata: { ocActive: "imp" } })
+    expect(JSON.stringify(hits[1]?.body)).toContain("This message is not a new run")
     expect((yield* sessions.get(chat.id)).permission ?? []).not.toContainEqual(
       expect.objectContaining({ permission: "session_complete" }),
     )
@@ -3239,7 +3301,7 @@ noLLMServer.instance("legacy tool flags preserve existing session permission rul
   }),
 )
 
-it.instance("slash composition validates missing and routed secondary commands before shell effects", () =>
+it.instance("an unknown command is rejected before shell effects", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     const marker = path.join(test.directory, "compositionMarker.txt")
@@ -3254,10 +3316,8 @@ it.instance("slash composition validates missing and routed secondary commands b
       },
     }))
     const { prompt, chat, sessions } = yield* boot()
-    for (const name of ["missing", "routed", "model", "task"]) {
-      const exit = yield* prompt
-        .command({ sessionID: chat.id, command: "first", additionalCommands: [name], arguments: "request" })
-        .pipe(Effect.exit)
+    for (const name of ["missing"]) {
+      const exit = yield* prompt.command({ sessionID: chat.id, command: name, arguments: "request" }).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) throw new Error("Expected command rejection")
       const error = Cause.squash(exit.cause)
       expect(NamedError.Unknown.isInstance(error)).toBe(true)

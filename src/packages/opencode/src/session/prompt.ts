@@ -57,10 +57,11 @@ import { decodeDataUrl } from "@/util/data-url"
 import { Cause, Deferred, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Semaphore, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
 import { SESSION_NOTICE_KEY, TaskTool, type TaskPromptOps } from "@/tool/task"
-import { agentPushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
+import { pushTitle, PUSH_SESSION_KEY } from "@/tool/sessionComplete"
 import { SessionRunState } from "./run-state"
 import { SessionQueue } from "./queue"
 import { SessionIntake } from "./intake"
+import { ActiveCommand } from "./activeCommand"
 import { ScheduledDelivery } from "./scheduledDelivery"
 import { ScheduledResume } from "./scheduledResume"
 import { RuntimeFlags } from "@/effect/runtime-flags"
@@ -147,13 +148,13 @@ function readMidTurn(msgs: SessionV1.WithParts[], userID: string, assistant: Ses
 
 /**
  * An oc-posted synthetic prompt (Claude wake turn, background notice) continues the turn before it, so it runs
- * under that turn's command rules (`permission`, `toolHost`), also through a chain of them. A typed message never
- * inherits: a command's rules end at the next one. Derived at loop time from loaded messages; nothing is stored.
+ * under that turn's command rules (`permission`, `toolHost`), also through a chain of them.
  */
 export function continuedTurnRules(user: SessionV1.User, timeline: SessionV1.WithParts[]): SessionV1.User {
   if (user.permission || user.toolHost) return user
   const index = timeline.findIndex((msg) => msg.info.id === user.id)
   const parts = timeline[index]?.parts ?? []
+  if (parts.some((part) => part.type === "text" && part.metadata && ActiveCommand.KEY in part.metadata)) return user
   if (!parts.length || !parts.every((part) => part.type === "text" && part.synthetic)) return user
   const previous = timeline.slice(0, index).findLast((msg) => msg.info.role === "user")?.info
   if (previous?.role !== "user") return user
@@ -172,6 +173,17 @@ const IMAGE_EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
   "image/avif": "avif",
   "image/svg+xml": "svg",
+}
+
+function commandRules(command: Command.Info) {
+  return {
+    turnPermission: Permission.fromConfig(command.permission ?? {}),
+    ...(command.toolHost !== undefined ? { toolHost: command.toolHost } : {}),
+  }
+}
+
+function commandHeader(name: string, body: string) {
+  return `[/${name} is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation. It stays active for later messages until the user sends another command or approves a mode_switch.]\n\n${body}`
 }
 
 type PromptFilePart = Extract<PromptInput["parts"][number], { type: "file" }>
@@ -207,7 +219,7 @@ export interface Interface {
   readonly queue: {
     readonly deadline: SessionQueue.Interface["deadline"]
     readonly snapshot: (sessionID: SessionID) => Effect.Effect<SessionQueue.Snapshot>
-    readonly add: (input: SessionQueue.AddInput) => Effect.Effect<SessionQueue.Snapshot>
+    readonly add: SessionQueue.Interface["add"]
     readonly edit: SessionQueue.Interface["edit"]
     readonly cancel: (input: {
       sessionID: SessionID
@@ -282,6 +294,7 @@ const layer = Layer.effect(
         available: (sessionID: SessionID) => state.available(sessionID),
         cancellation: (sessionID: SessionID) => state.cancellation(sessionID),
         partMetadata: (input) => partMetadata(input),
+        switchMode: (input) => switchMode(input),
       } satisfies TaskPromptOps
     })
 
@@ -1207,7 +1220,38 @@ const layer = Layer.effect(
       if (!input.noReply) yield* state.assertAvailable(input.sessionID)
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const inherited = yield* Effect.gen(function* () {
+        const typed = input.parts.find((part) => part.type === "text" && !part.synthetic)
+        if (
+          session.parentID ||
+          input.turnPermission !== undefined ||
+          input.toolHost !== undefined ||
+          !typed ||
+          input.parts.some(
+            (part) =>
+              part.type === "text" &&
+              (part.metadata?.ocCommands || (part.metadata && ActiveCommand.KEY in part.metadata)),
+          )
+        )
+          return input
+        const name = yield* ActiveCommand.active(sessions, input.sessionID)
+        if (!name) return input
+        const command = yield* commands.get(name)
+        if (!command) {
+          yield* Effect.logWarning("active command no longer exists", { sessionID: input.sessionID, command: name })
+          return input
+        }
+        return {
+          ...input,
+          ...commandRules(command),
+          parts: input.parts.map((part) =>
+            part.type === "text" && part === typed
+              ? { ...part, metadata: { ...part.metadata, [ActiveCommand.KEY]: name } }
+              : part,
+          ),
+        }
+      })
+      const message = yield* createUserMessage(inherited)
       if ("skipped" in message) return message
       if (input.persisted) yield* input.persisted
       yield* sessions.touch(input.sessionID)
@@ -1795,145 +1839,165 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
-    const command = Effect.fn("SessionPrompt.command")(function* (
-      input: CommandInput & Pick<TurnInput, "delivery" | "persisted">,
+    const commandTemplate = Effect.fn("SessionPrompt.commandTemplate")(function* (
+      cmd: Command.Info,
+      input: { sessionID: SessionID; arguments: string; agent?: string },
     ) {
-      yield* Effect.logInfo("command", {
-        "session.id": input.sessionID,
-        command: input.command,
-        agent: input.agent,
-      })
-      const names = [...new Set([input.command, ...(input.additionalCommands ?? [])])]
-      const available = yield* commands.list()
-      const byName = new Map(available.map((definition) => [definition.name, definition]))
-      const definitions = names.map((name) => byName.get(name))
-      const missing = names.find((_, index) => !definitions[index])
-      if (missing !== undefined) {
-        const hint = available.length ? ` Available commands: ${available.map((c) => c.name).join(", ")}` : ""
-        const error = new NamedError.Unknown({ message: `Command not found: "${missing}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
-        throw error
-      }
-      const selected = definitions.filter((definition) => definition !== undefined)
-      const incompatible = selected
-        .slice(1)
-        .find(
-          (definition) =>
-            definition.agent !== undefined || definition.model !== undefined || definition.subtask === true,
-        )
-      if (incompatible) {
-        const error = new NamedError.Unknown({
-          message: `Command "/${incompatible.name}" selects an agent, model, or subtask. Run it first or separately.`,
-        })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
-        throw error
-      }
-      const cmd = selected[0]
       const agentName = cmd.agent ?? input.agent
-      const turnPermission = selected.some((definition) => definition.permission !== undefined)
-        ? Permission.merge(...selected.map((definition) => Permission.fromConfig(definition.permission ?? {})))
-        : undefined
-      // Later commands win per tool, like their rules.
-      const toolHost = selected.some((definition) => definition.toolHost !== undefined)
-        ? Object.assign({}, ...selected.map((definition) => definition.toolHost ?? {}))
-        : undefined
+      const rules = commandRules(cmd)
 
       const raw = input.arguments.match(argsRegex) ?? []
       const args = raw.map((arg) => arg.replace(quoteTrimRegex, ""))
-      const templates = yield* Effect.forEach(
-        selected,
-        Effect.fnUntraced(function* (definition) {
-          const templateCommand = yield* Effect.promise(async () => definition.template)
+      const body = yield* Effect.gen(function* () {
+        const templateCommand = yield* Effect.promise(async () => cmd.template)
 
-          const placeholders = templateCommand.match(placeholderRegex) ?? []
-          let last = 0
-          for (const item of placeholders) {
-            const value = Number(item.slice(1))
-            if (value > last) last = value
-          }
+        const placeholders = templateCommand.match(placeholderRegex) ?? []
+        let last = 0
+        for (const item of placeholders) {
+          const value = Number(item.slice(1))
+          if (value > last) last = value
+        }
 
-          const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
-            const position = Number(index)
-            const argIndex = position - 1
-            if (argIndex >= args.length) return ""
-            if (position === last) return args.slice(argIndex).join(" ")
-            return args[argIndex]
-          })
-          const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
-          let template = withArgs.replaceAll("$ARGUMENTS", () => input.arguments)
+        const withArgs = templateCommand.replaceAll(placeholderRegex, (_, index) => {
+          const position = Number(index)
+          const argIndex = position - 1
+          if (argIndex >= args.length) return ""
+          if (position === last) return args.slice(argIndex).join(" ")
+          return args[argIndex]
+        })
+        const usesArgumentsPlaceholder = templateCommand.includes("$ARGUMENTS")
+        let template = withArgs.replaceAll("$ARGUMENTS", () => input.arguments)
 
-          if (
-            selected.length === 1 &&
-            placeholders.length === 0 &&
-            !usesArgumentsPlaceholder &&
-            input.arguments.trim()
-          ) {
-            template = template + "\n\n" + input.arguments
-          }
+        if (placeholders.length === 0 && !usesArgumentsPlaceholder && input.arguments.trim()) {
+          template = template + "\n\n" + input.arguments
+        }
 
-          const shellMatches = ConfigMarkdown.shell(template)
-          if (shellMatches.length > 0) {
-            const ctx = yield* InstanceState.context
-            const cfg = yield* config.get()
-            const sh = Shell.preferred(cfg.shell)
-            const results = yield* Effect.forEach(
-              shellMatches,
-              ([, cmd]) =>
-                Effect.gen(function* () {
-                  if (turnPermission) {
-                    const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-                    const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
-                    yield* permission
-                      .ask({
-                        sessionID: input.sessionID,
-                        permission: "bash",
-                        patterns: [cmd],
-                        always: [cmd],
-                        metadata: { command: cmd },
-                        ruleset: Permission.merge(agent?.permission ?? [], session.permission ?? [], turnPermission),
-                      })
-                      .pipe(Effect.orDie)
-                  }
-                  const handle = yield* spawner.spawn(
-                    ChildProcess.make(sh, Shell.args(sh, cmd), {
-                      cwd: ctx.directory,
-                      stdin: "ignore",
-                      stdout: "pipe",
-                      stderr: "ignore",
-                      forceKillAfter: "3 seconds",
-                    }),
-                  )
-                  const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
-                  const code = yield* handle.exitCode
-                  if (code !== 0) return yield* Effect.fail(new Error(`Shell command exited with code ${code}`))
-                  return text
-                }).pipe(
-                  Effect.scoped,
-                  Effect.catch((error) =>
-                    Effect.logError("command substitution failed", {
+        const shellMatches = ConfigMarkdown.shell(template)
+        if (shellMatches.length > 0) {
+          const ctx = yield* InstanceState.context
+          const cfg = yield* config.get()
+          const sh = Shell.preferred(cfg.shell)
+          const results = yield* Effect.forEach(
+            shellMatches,
+            ([, cmd]) =>
+              Effect.gen(function* () {
+                if (rules.turnPermission) {
+                  const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+                  const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
+                  yield* permission
+                    .ask({
                       sessionID: input.sessionID,
-                      command: cmd,
-                      error,
-                    }).pipe(Effect.as(`<failed: ${cmd}>`)),
-                  ),
+                      permission: "bash",
+                      patterns: [cmd],
+                      always: [cmd],
+                      metadata: { command: cmd },
+                      ruleset: Permission.merge(
+                        agent?.permission ?? [],
+                        session.permission ?? [],
+                        rules.turnPermission,
+                      ),
+                    })
+                    .pipe(Effect.orDie)
+                }
+                const handle = yield* spawner.spawn(
+                  ChildProcess.make(sh, Shell.args(sh, cmd), {
+                    cwd: ctx.directory,
+                    stdin: "ignore",
+                    stdout: "pipe",
+                    stderr: "ignore",
+                    forceKillAfter: "3 seconds",
+                  }),
+                )
+                const text = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+                const code = yield* handle.exitCode
+                if (code !== 0) return yield* Effect.fail(new Error(`Shell command exited with code ${code}`))
+                return text
+              }).pipe(
+                Effect.scoped,
+                Effect.catch((error) =>
+                  Effect.logError("command substitution failed", {
+                    sessionID: input.sessionID,
+                    command: cmd,
+                    error,
+                  }).pipe(Effect.as(`<failed: ${cmd}>`)),
                 ),
-              { concurrency: "unbounded" },
-            )
-            let index = 0
-            template = template.replace(bashRegex, () => results[index++])
-          }
-          return template.trim()
-        }),
-      )
-      const template =
-        selected.length === 1
-          ? `[/${cmd.name} is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]\n\n${templates[0]}`
-          : [
-              Command.COMPOSED_PREAMBLE,
-              "",
-              ...selected.map((definition, index) => `[/${definition.name}]\n${templates[index]}\n`),
-              `[User request]\n${input.arguments}`,
-            ].join("\n")
+              ),
+            { concurrency: "unbounded" },
+          )
+          let index = 0
+          template = template.replace(bashRegex, () => results[index++])
+        }
+        return template.trim()
+      })
+      const template = commandHeader(cmd.name, body)
+      return yield* resolvePromptParts(template)
+    })
+
+    const switchMode: TaskPromptOps["switchMode"] = Effect.fn("SessionPrompt.switchMode")(function* (input) {
+      const previous = yield* sessions
+        .findMessage(input.sessionID, (message) => message.info.role === "user")
+        .pipe(Effect.orDie)
+      if (Option.isNone(previous) || previous.value.info.role !== "user") throw new Error("No user message to continue")
+      const user = previous.value.info
+      const cmd = input.mode === "none" ? undefined : yield* commands.get(input.mode)
+      if (input.mode !== "none" && !cmd) throw new Error(`Command not found: ${input.mode}`)
+      const parts: PromptInput["parts"] = cmd
+        ? [
+            ...(yield* commandTemplate(cmd, { sessionID: input.sessionID, arguments: "", agent: user.agent })).map(
+              (part) =>
+                part.type === "text"
+                  ? {
+                      ...part,
+                      metadata: {
+                        ...part.metadata,
+                        ocCommands: [cmd.name],
+                        ocCommandArguments: "",
+                        [ActiveCommand.KEY]: cmd.name,
+                        ocModeSwitch: { from: input.from, reason: input.reason },
+                      },
+                    }
+                  : part,
+            ),
+            {
+              type: "text",
+              synthetic: true,
+              text: `Command switch approved by the user (from /${input.from}: ${input.reason}). Continue the user's latest request under /${cmd.name}.`,
+            },
+          ]
+        : [
+            {
+              type: "text",
+              synthetic: true,
+              text: `[No command is active now: /${input.from} and its rules no longer apply.] Switch approved by the user (${input.reason}). Continue the user's latest request.`,
+              metadata: { [ActiveCommand.KEY]: null, ocModeSwitch: { from: input.from, reason: input.reason } },
+            },
+          ]
+      const message = yield* createUserMessage({
+        sessionID: input.sessionID,
+        agent: user.agent,
+        model: user.model,
+        variant: user.model.variant,
+        ...(user.model.explicit ? { explicitModel: true } : {}),
+        ...(cmd ? commandRules(cmd) : {}),
+        parts,
+      }).pipe(Effect.orDie)
+      claudeSteerSinks.get(input.sessionID)?.preempt(message.info.id)
+    })
+
+    const command = Effect.fn("SessionPrompt.command")(function* (
+      input: CommandInput & Pick<TurnInput, "delivery" | "persisted">,
+    ) {
+      yield* Effect.logInfo("command", { "session.id": input.sessionID, command: input.command, agent: input.agent })
+      const available = yield* commands.list()
+      const cmd = available.find((definition) => definition.name === input.command)
+      if (!cmd) {
+        const hint = available.length ? ` Available commands: ${available.map((c) => c.name).join(", ")}` : ""
+        const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
+        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        throw error
+      }
+      const agentName = cmd.agent ?? input.agent
+      const rules = commandRules(cmd)
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
@@ -1956,7 +2020,7 @@ const layer = Layer.effect(
         throw error
       }
 
-      const templateParts = yield* resolvePromptParts(template)
+      const templateParts = yield* commandTemplate(cmd, input)
       const inputFiles = new Set(
         input.parts?.flatMap((part) =>
           part.type === "file" && new URL(part.url).protocol === "file:" ? [fileURLToPath(part.url)] : [],
@@ -1966,7 +2030,15 @@ const layer = Layer.effect(
         .filter((part) => part.type !== "file" || !inputFiles.has(fileURLToPath(part.url)))
         .map((part) =>
           part.type === "text"
-            ? { ...part, metadata: { ...part.metadata, ocCommands: names, ocCommandArguments: input.arguments } }
+            ? {
+                ...part,
+                metadata: {
+                  ...part.metadata,
+                  ocCommands: [cmd.name],
+                  ocCommandArguments: input.arguments,
+                  [ActiveCommand.KEY]: cmd.name,
+                },
+              }
             : part,
         )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
@@ -1996,14 +2068,14 @@ const layer = Layer.effect(
         { parts },
       )
 
-      if (names.includes("agent-push")) {
+      if (cmd.pushSession) {
         const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
-        // Opened by /agent-push: only such a session gets the push title and may auto-delete after its
-        // push (`sessionComplete.ts`); a mid-session push keeps its title. The synthetic message a new
-        // session starts with does not count.
+        // Opened by a push command (frontmatter `pushSession: true`): only such a session gets the push
+        // title and may auto-delete after its push (`sessionComplete.ts`); a mid-session push keeps its
+        // title. The synthetic message a new session starts with does not count.
         const earlier = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
         if (!earlier.some((message) => message.info.role === "assistant" || isRealUserMessage(message))) {
-          yield* sessions.setTitle({ sessionID: input.sessionID, title: agentPushTitle(session.directory) })
+          yield* sessions.setTitle({ sessionID: input.sessionID, title: pushTitle(session.directory, cmd.name) })
           yield* sessions.setMetadata({
             sessionID: input.sessionID,
             metadata: { ...session.metadata, [PUSH_SESSION_KEY]: true },
@@ -2018,20 +2090,16 @@ const layer = Layer.effect(
         agent: userAgent,
         parts,
         variant: input.variant,
-        turnPermission,
-        toolHost,
+        ...rules,
         delivery: input.delivery,
         persisted: input.persisted,
       })
-      // One per composed command: listeners such as `/init` detection (`project.ts`) match by name.
-      yield* Effect.forEach(names, (name) =>
-        events.publish(Command.Event.Executed, {
-          name,
-          sessionID: input.sessionID,
-          arguments: input.arguments,
-          messageID: result.info.id,
-        }),
-      )
+      yield* events.publish(Command.Event.Executed, {
+        name: cmd.name,
+        sessionID: input.sessionID,
+        arguments: input.arguments,
+        messageID: result.info.id,
+      })
       return result
     })
 
@@ -2054,7 +2122,6 @@ const layer = Layer.effect(
         command({
           ...hooks,
           command: names[0],
-          additionalCommands: names.slice(1),
           arguments: SessionQueue.requestText(entry.payload),
           agent: payload.agent,
           model: payload.model && `${payload.model.providerID}/${payload.model.modelID}`,
@@ -2125,11 +2192,79 @@ const layer = Layer.effect(
     const dispatchHead: (sessionID: SessionID) => Effect.Effect<boolean> = Effect.fn("SessionPrompt.dispatchQueued")(
       function* (sessionID: SessionID) {
         const idle = isIdle(sessionID)
-        let queued = yield* queue.claim(sessionID, idle)
+        const expected = yield* Effect.gen(function* () {
+          const next = (yield* idle) ? yield* queue.peek(sessionID) : undefined
+          if (!next) return undefined
+          const name = next.payload.commands?.[0]
+          if (!next.payload.chain && next.payload.split && name && !SessionQueue.requestText(next.payload).trim()) {
+            const command = yield* commands.get(name)
+            if (command && command.whenBlank !== "send") {
+              const changed = queue
+                .peek(sessionID)
+                .pipe(
+                  Effect.map(
+                    (current) => !current || current.id !== next.id || !isDeepEqual(current.payload, next.payload),
+                  ),
+                )
+              const watch = Effect.gen(function* () {
+                while (true) {
+                  const seen = ScheduledDelivery.queueWake.version()
+                  if (yield* changed) return true as const
+                  yield* ScheduledDelivery.queueWake.wait(seen, Number.POSITIVE_INFINITY)
+                }
+              })
+              const answers = yield* question
+                .ask({
+                  sessionID,
+                  questions: [
+                    {
+                      header: "Blank command",
+                      question: `/${name} is next in the queue and has no prompt. Type a prompt, or:`,
+                      options: [
+                        { label: "Send blank", description: "Run the command without a prompt" },
+                        { label: "Skip", description: "Remove this queued command" },
+                      ],
+                    },
+                  ],
+                })
+                .pipe(
+                  Effect.raceFirst(watch),
+                  Effect.catchTag("QuestionRejectedError", () =>
+                    queue.pause(sessionID, "interrupted").pipe(Effect.as(undefined)),
+                  ),
+                )
+              if (answers === true) return true
+              if (!answers) return false
+              if (yield* changed) return true
+              const answer = answers[0]?.[0]
+              if (answer === "Skip") {
+                yield* queue.cancel({ sessionID, id: next.id }).pipe(Effect.orDie)
+                return true
+              }
+              const text = answer === "Send blank" ? "" : (answers[0]?.join("\n") ?? "")
+              yield* queue.edit({ sessionID, id: next.id, text, split: false }).pipe(Effect.orDie)
+              return {
+                id: next.id,
+                payload: {
+                  ...next.payload,
+                  parts: [
+                    ...(text.trim() ? [{ type: "text" as const, text }] : []),
+                    ...next.payload.parts.filter((part) => !SessionQueue.isTyped(part)),
+                  ],
+                  split: false,
+                },
+              }
+            }
+          }
+          return next
+        })
+        if (typeof expected === "boolean") return expected
+        let queued = expected ? yield* queue.claim(sessionID, idle, expected) : undefined
         for (let attempt = 1; !queued && attempt < 3; attempt++) {
           if (!(yield* queue.ready(sessionID)) || !(yield* idle)) break
           yield* Effect.sleep(25)
-          queued = yield* queue.claim(sessionID, idle)
+          if (!expected) return true
+          queued = yield* queue.claim(sessionID, idle, expected)
         }
         if (!queued) {
           if (!(yield* queue.ready(sessionID))) return false
@@ -2187,6 +2322,10 @@ const layer = Layer.effect(
           entry.target === "fork"
             ? yield* sessions.fork({ sessionID: entry.sessionID })
             : yield* sessions.create({ workspaceID: (yield* sessions.get(entry.sessionID)).workspaceID })
+        if ((entry.payload.commands?.length ?? 0) > 1 || entry.payload.split) {
+          if (yield* queue.transfer(entry, target.id)) yield* kick(target.id)
+          return
+        }
         yield* sendQueued(target.id, entry, yield* queue.prepare(entry.id))
       }).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return
@@ -2198,7 +2337,7 @@ const layer = Layer.effect(
     const queueOps: Interface["queue"] = {
       deadline: queue.deadline,
       snapshot: queue.snapshot,
-      add: (input) => queue.add(input).pipe(Effect.tap(() => kick(input.sessionID))),
+      add: (sessionID, inputs) => queue.add(sessionID, inputs).pipe(Effect.tap(() => kick(sessionID))),
       edit: (input) => queue.edit(input).pipe(Effect.tap(releaseWithoutChain(input.sessionID))),
       cancel: (input) =>
         queue.cancel(input).pipe(
@@ -2311,7 +2450,6 @@ export const CommandInput = Schema.Struct({
   arguments: Schema.String,
   command: Schema.String,
   variant: Schema.optional(Schema.String),
-  additionalCommands: Schema.optional(Schema.Array(Schema.String)),
   // Text parts carry synthetic context such as an editor selection. The file part is
   // inlined (no identifier annotation) to keep the original SDK output - the
   // PromptInput call site below references FilePartInput by ref via the

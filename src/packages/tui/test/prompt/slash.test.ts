@@ -5,6 +5,7 @@ import {
   extractSlashCommands,
   slashTokenEnd,
   slashTriggerIndex,
+  splitSlashSteps,
   typedText,
 } from "../../src/prompt/slash"
 import { promptOffsetWidth } from "../../src/prompt/display"
@@ -49,16 +50,14 @@ test("revive chains split typed commands into ordered steps around each revive",
       { type: "revive", mode: "install" },
       { type: "send", names: ["pass"] },
     ],
-    request: "",
   })
-  // Stream-of-consciousness text is one request shared by every command step.
-  expect(extractChain("/pass pass and cleanup then /revive revive then /agent-push push", available)).toEqual({
+  // Each command step gets its own text; a revive never takes text.
+  expect(extractChain("/test the sidebar /revive /ship", [{ name: "test" }, { name: "ship" }])).toEqual({
     steps: [
-      { type: "send", names: ["pass"] },
+      { type: "send", names: ["test"], text: "the sidebar" },
       { type: "revive", mode: "install" },
-      { type: "send", names: ["agent-push"] },
+      { type: "send", names: ["ship"] },
     ],
-    request: "pass and cleanup then\nrevive then  push",
   })
   expect(extractChain("/pass /revive-no-install /pass /revive-single", available)?.steps).toEqual([
     { type: "send", names: ["pass"] },
@@ -73,9 +72,37 @@ test("revive chains split typed commands into ordered steps around each revive",
       { type: "revive", mode: "install" },
       { type: "send", names: [], text: "say bye /revive/x https://a.b/revive" },
     ],
-    request: "",
   })
-  expect(extractChain("/revive", available)).toEqual({ steps: [{ type: "revive", mode: "install" }], request: "" })
+  expect(extractChain("/revive", available)).toEqual({ steps: [{ type: "revive", mode: "install" }] })
+})
+
+test("2+ commands split into ordered steps; text follows its command, a stack's text goes to its first", () => {
+  const available = [{ name: "imp" }, { name: "verify" }, { name: "spit" }, { name: "think" }]
+  expect(extractSlashCommands("fix the typo /imp in app.tsx", available)).toEqual({
+    names: ["imp"],
+    arguments: "fix the typo  in app.tsx",
+  })
+  expect(splitSlashSteps("fix the typo /imp in app.tsx /verify", available)).toEqual([
+    { text: "fix the typo" },
+    { command: "imp", text: "in app.tsx" },
+    { command: "verify", text: "" },
+  ])
+  expect(splitSlashSteps("/spit /think prompt", available)).toEqual([
+    { command: "spit", text: "prompt" },
+    { command: "think", text: "" },
+  ])
+  expect(splitSlashSteps("/spit mock it up /imp build B", available)).toEqual([
+    { command: "spit", text: "mock it up" },
+    { command: "imp", text: "build B" },
+  ])
+  expect(splitSlashSteps("/imp a /imp b", available)).toEqual([
+    { command: "imp", text: "a" },
+    { command: "imp", text: "b" },
+  ])
+  expect(splitSlashSteps("/spit compare '/imp' and /think", available)).toEqual([
+    { command: "spit", text: "compare '/imp' and" },
+    { command: "think", text: "" },
+  ])
 })
 
 test("commands inside quotes or code fences never run", () => {
@@ -92,16 +119,15 @@ test("commands inside quotes or code fences never run", () => {
     { type: "send", names: [], text: "it's fine" },
   ])
   expect(extractChain("/pass 'unclosed /revive", available)?.steps).toEqual([
-    { type: "send", names: ["pass"] },
+    { type: "send", names: ["pass"], text: "'unclosed" },
     { type: "revive", mode: "install" },
   ])
   expect(extractChain("/pass compare 'a' and 'b' /revive /agent-push", available)).toEqual({
     steps: [
-      { type: "send", names: ["pass"] },
+      { type: "send", names: ["pass"], text: "compare 'a' and 'b'" },
       { type: "revive", mode: "install" },
       { type: "send", names: ["agent-push"] },
     ],
-    request: "compare 'a' and 'b'",
   })
 })
 

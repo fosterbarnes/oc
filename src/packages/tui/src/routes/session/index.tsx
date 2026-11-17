@@ -672,7 +672,7 @@ export function Session() {
     current.submit()
   })
 
-  // Steps typed after a revive (`/revive /agent-push`) continue here once the session is ready, and chains
+  // Steps typed after a revive (`/revive /ship`) continue here once the session is ready, and chains
   // still in the session queue (queued before a restart) run here when they reach the front.
   const reviveChain = useReviveChain()
   const resumeChecked = new Set<string>()

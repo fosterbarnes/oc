@@ -9,13 +9,10 @@ import { Startup } from "@/config/startup"
 import { tmpdir } from "../fixture/fixture"
 
 const originalConfigPath = Global.Path.config
-const originalLegacyConfig = process.env.OPENCODE_OC_CONFIG
 const temporaryDirectories: string[] = []
 
 afterEach(async () => {
   ;(Global.Path as { config: string }).config = originalConfigPath
-  if (originalLegacyConfig === undefined) delete process.env.OPENCODE_OC_CONFIG
-  else process.env.OPENCODE_OC_CONFIG = originalLegacyConfig
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })),
   )
@@ -433,13 +430,10 @@ describe("OC config", () => {
     await expect(OcConfig.update("serverStartAtLogin", "yes")).rejects.toThrow("must be true or false")
   })
 
-  test("reads launcher settings only from the native config", async () => {
+  test("reading a missing oc.json returns no settings and writes nothing", async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), "opencode-oc-"))
     temporaryDirectories.push(directory)
     ;(Global.Path as { config: string }).config = directory
-    const legacy = path.join(directory, "legacy.json")
-    await fs.writeFile(legacy, JSON.stringify({ homeDir: "standalone-oc" }))
-    process.env.OPENCODE_OC_CONFIG = legacy
 
     expect(await OcConfig.read()).toEqual({})
     expect(await fs.stat(path.join(directory, "oc.json")).catch(() => undefined)).toBeUndefined()

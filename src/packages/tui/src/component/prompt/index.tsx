@@ -46,13 +46,14 @@ import {
   type PromptTabAction,
   typedSlashCommands,
 } from "../../prompt/part"
+import { activeCommand } from "../../prompt/slash"
 import { usePromptStash } from "../../prompt/stash"
 import { DialogStash } from "../dialog-stash"
 import { DialogImagePreview } from "../dialog-image-preview"
 import { openFolder } from "../../util/openFolder"
 import { type AutocompleteRef, Autocomplete } from "./autocomplete"
 import { useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
-import type { AssistantMessage, FilePart, UserMessage } from "@opencode-ai/sdk/v2"
+import type { AssistantMessage, FilePart, SessionQueueUpdateData, UserMessage } from "@opencode-ai/sdk/v2"
 import { Locale } from "../../util/locale"
 import { contextUsage } from "../../util/contextUsage"
 import { formatSubagentUsage, numberDuplicateLabels, sessionCost, subagentLabel } from "../../util/session"
@@ -352,6 +353,9 @@ export function Prompt(props: PromptProps) {
     if (!messages) return undefined
     return messages.findLast((m): m is UserMessage => m.role === "user")
   })
+  const active = createMemo(() =>
+    props.sessionID ? activeCommand(sync.data.message[props.sessionID] ?? [], sync.data.part) : undefined,
+  )
 
   const usage = createMemo(() => {
     if (!props.sessionID) return
@@ -1271,6 +1275,42 @@ export function Prompt(props: PromptProps) {
     return { inputText, nonTextParts, editorParts, commands }
   }
 
+  // 2+ commands: one queue entry per step, which the server drain sends in order (never a steer).
+  // Editor context and attachments go with the first step; `split` marks the later ones.
+  function stepEntries(
+    steps: { command?: string; text: string }[],
+    parts: Pick<ReturnType<typeof outgoingParts>, "editorParts" | "nonTextParts">,
+    target: { agent: string; model: { providerID: string; modelID: string }; variant?: string },
+  ) {
+    return steps.map((step, index) => ({
+      ...target,
+      parts: [
+        ...(index ? [] : parts.editorParts),
+        ...(step.text ? [{ type: "text" as const, text: step.text }] : []),
+        ...(index ? [] : parts.nonTextParts.filter((part) => !step.command || part.type === "file")),
+      ],
+      ...(step.command && { commands: [step.command] }),
+      ...(index > 0 && { split: true }),
+    }))
+  }
+
+  async function addEntries(
+    sessionID: string,
+    entries: readonly Omit<Extract<NonNullable<SessionQueueUpdateData["body"]>, { type: "add" }>, "type">[],
+  ) {
+    if (!entries[0]) return
+    await sdk.client.session.queue.update(
+      {
+        sessionID,
+        body:
+          entries.length === 1
+            ? { type: "add", ...entries[0] }
+            : { type: "batch", entries: [entries[0], ...entries.slice(1)] },
+      },
+      { throwOnError: true },
+    )
+  }
+
   // Alt+Enter in a session: the draft joins the session queue instead of steering the running turn.
   // With a schedule it waits for its time instead, and may go to a fork or a new session.
   // The draft is taken and cleared at the key press; adds go out one at a time so presses made while
@@ -1344,6 +1384,10 @@ export function Prompt(props: PromptProps) {
       toast.show({ message: "Revive chains cannot be scheduled", variant: "warning" })
       return
     }
+    if (commands.steps && schedule) {
+      toast.show({ message: "Multi-command messages cannot be scheduled", variant: "warning" })
+      return
+    }
     if (trimmed.startsWith("/") && !commands.names.length && !commands.chain) {
       toast.show({ message: "Only server commands can be queued", variant: "warning" })
       return
@@ -1356,7 +1400,7 @@ export function Prompt(props: PromptProps) {
     // keeps every attachment, as its plain prompt steps send them.
     const chain = commands.chain
     const parts = chain
-      ? [...editorParts, ...(chain.request ? [{ type: "text" as const, text: chain.request }] : []), ...nonTextParts]
+      ? [...editorParts, ...nonTextParts]
       : commands.names.length
         ? [
             ...editorParts,
@@ -1364,15 +1408,22 @@ export function Prompt(props: PromptProps) {
             ...nonTextParts.filter((part) => part.type === "file"),
           ]
         : [...editorParts, { type: "text" as const, text: inputText }, ...nonTextParts]
-    const body = {
-      type: "add" as const,
+    const target = {
       agent: agent.name,
       model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
       variant: local.model.variant.current(),
-      parts,
-      ...(chain ? { chain: chain.steps } : commands.names.length && { commands: commands.names }),
-      ...schedule,
     }
+    const entries =
+      commands.steps && !chain
+        ? stepEntries(commands.steps, { editorParts, nonTextParts }, target)
+        : [
+            {
+              ...target,
+              parts,
+              ...(chain ? { chain: chain.steps } : commands.names.length && { commands: commands.names }),
+              ...schedule,
+            },
+          ]
     // A copy: clearing the store below merges into the object `unwrap` returns.
     const draft = { ...unwrap(store.prompt) }
 
@@ -1385,7 +1436,7 @@ export function Prompt(props: PromptProps) {
     if (!schedule) flashQueued()
 
     return async () => {
-      const queued = await sdk.client.session.queue.update({ sessionID, body }, { throwOnError: true }).then(
+      const queued = await addEntries(sessionID, entries).then(
         () => true,
         (error) => {
           toast.show({
@@ -1579,9 +1630,28 @@ export function Prompt(props: PromptProps) {
       // Runs past this submit: each step waits for the previous turn, a revive hands the rest on.
       void reviveChain.run(
         sessionID,
-        { ...commands.chain, done: [] },
+        { ...commands.chain, done: [], request: "" },
         { agent: agent.name, model: selectedModel, variant },
         { editor: editorParts, attachments: nonTextParts },
+      )
+      if (editorParts.length > 0) editor.markSelectionSent()
+    } else if (commands.steps) {
+      move.startSubmit()
+      const draft = { ...unwrap(store.prompt) }
+      const target = {
+        agent: agent.name,
+        model: { providerID: selectedModel.providerID, modelID: selectedModel.modelID },
+        variant,
+      }
+      const entries = stepEntries(commands.steps, { editorParts, nonTextParts }, target)
+      queueSends = queueSends.then(() =>
+        addEntries(sessionID, entries)
+          .catch((error) => {
+            toast.show({ title: "Failed to queue commands", message: errorMessage(error), variant: "error" })
+            if (input.isDestroyed || store.prompt.input) return
+            ref.set(draft)
+          })
+          .finally(queue.refresh),
       )
       if (editorParts.length > 0) editor.markSelectionSent()
     } else if (commands.names.length) {
@@ -1592,7 +1662,6 @@ export function Prompt(props: PromptProps) {
           {
             sessionID,
             command: commands.names[0],
-            additionalCommands: commands.names.slice(1),
             arguments: commands.arguments,
             agent: agent.name,
             model: `${selectedModel.providerID}/${selectedModel.modelID}`,
@@ -2086,6 +2155,9 @@ export function Prompt(props: PromptProps) {
                       <text fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : local.agent.label(agent().name)}
                       </text>
+                      <Show when={store.mode === "normal" && active()}>
+                        {(name) => <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>/{name()}</text>}
+                      </Show>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto" && !narrow()}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>

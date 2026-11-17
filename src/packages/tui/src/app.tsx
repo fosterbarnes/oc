@@ -60,7 +60,7 @@ import { FrecencyProvider } from "./component/prompt/frecency"
 import { PromptStashProvider } from "./component/prompt/stash"
 import { DialogConfirm } from "./ui/dialog-confirm"
 import { createTodoCommand } from "./todos"
-import { createAgentPushAutoDelete } from "./agentPushAutoDelete"
+import { createPushAutoDelete } from "./pushAutoDelete"
 import { createClearSavedImagesCommand } from "./savedImages"
 import { createContextLimitCommands } from "./contextLimit"
 import { createClaudeWarmupCommands } from "./claudeWarmup"
@@ -903,7 +903,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
 
   const connected = useConnected()
   const todoCommand = createTodoCommand()
-  const agentPushAutoDeleteCommand = createAgentPushAutoDelete()
+  const pushAutoDeleteCommand = createPushAutoDelete()
   const clearSavedImagesCommand = createClearSavedImagesCommand()
   const contextLimitCommands = createContextLimitCommands()
   const claudeWarmup = createClaudeWarmupCommands()
@@ -1082,7 +1082,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       ...ocCommands.defaults,
       contextLimitCommands.contextLimit,
       todoCommand,
-      agentPushAutoDeleteCommand,
+      pushAutoDeleteCommand,
       clearSavedImagesCommand,
       ...ocCommands.settings,
       {

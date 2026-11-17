@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { terminalAppScript } from "@opencode-ai/core/util/terminal"
@@ -8,8 +8,8 @@ import { createBuiltinPlugins } from "../../src/feature-plugins/builtins.ts"
 import {
   defaultScriptSettings,
   ensureSessionScrollbarVisible,
-  hasConfiguredScripts,
   loadSidebarSettings,
+  migrateLegacySidebar,
   normalizeExtension,
   normalizeSidebarSettings,
   normalizeScriptSettings,
@@ -18,11 +18,10 @@ import {
   promptProjectDirectory,
   resolveScriptTerminal,
   scriptTerminals,
-  saveUserScriptSettings,
-  saveUserUsageProviders,
+  saveUserSidebarSetting,
   sessionProjectDirectory,
-  sidebarConfigPaths,
   sidebarStatePath,
+  sidebarUserPath,
   writeJsonObject,
 } from "../../src/routes/session/sidebar-tools/settings.ts"
 import {
@@ -717,20 +716,6 @@ test("normalizes root paths for identity on Windows-style separators", () => {
   assert.ok(sameRootPath(normalizeRootPath(first), normalizeRootPath(second)))
 })
 
-test("migrates recent file roots from legacy session customRoots", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-recent-"))
-  const custom = path.join(root, "custom")
-  mkdirSync(custom)
-  try {
-    const settings = normalizeSidebarSettings({
-      fileRoots: { session: { customRoots: [custom, custom], activeRoot: custom } },
-    })
-    assert.deepEqual(settings.recentFileRoots, [normalizeRootPath(custom)])
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
 test("builds Everything search query scoped to roots", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-es-query-"))
   const nested = path.join(root, "nested")
@@ -991,59 +976,23 @@ test("formats displayed paths relative to the home directory", () => {
   assert.equal(displayPath("C:\\Work\\openSidebar", "C:\\Users\\example"), "C:/Work/openSidebar")
 })
 
-test("loads user sidebar visibility with nested, legacy and partial project overrides", () => {
+test("loads user settings with per-project state over them and ignores invalid visibility", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-config-"))
   try {
-    const paths = sidebarConfigPaths(root, root)
-    mkdirSync(path.dirname(paths.user), { recursive: true })
-    mkdirSync(path.dirname(paths.project), { recursive: true })
-    writeFileSync(paths.user, JSON.stringify({ showMcp: false, showLsp: true, scripts: { terminal: "wezterm-tab" } }))
-    writeFileSync(paths.project, JSON.stringify({ showMcp: true, scripts: { terminal: "native" } }))
-    const settings = loadSidebarSettings(root, root, paths.user, paths.project)
-    assert.deepEqual(settings.visibility, { showMcp: true, showLsp: true })
-    assert.equal(settings.scripts.terminal, "native")
-    writeFileSync(
-      paths.user,
-      JSON.stringify({
-        showMcp: true,
-        showLsp: true,
-        visibility: { showMcp: false, showLsp: false },
-      }),
-    )
-    writeFileSync(paths.project, JSON.stringify({ visibility: { showMcp: true } }))
-    assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
-    writeFileSync(
-      paths.project,
-      JSON.stringify({
-        showMcp: false,
-        showLsp: false,
-        visibility: { showMcp: true, showLsp: "invalid" },
-      }),
-    )
-    assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: true, showLsp: false })
+    const userPath = sidebarUserPath(root)
+    const state = path.join(root, "state")
+    const statePath = sidebarStatePath(state, path.join(root, "project"))
+    assert.equal(path.relative(state, statePath).startsWith(".."), false)
+    writeJsonObject(userPath, { visibility: { showMcp: false }, scripts: { terminal: "wezterm-tab" } })
+    writeJsonObject(statePath, { scriptPins: ["build"] })
+    const settings = loadSidebarSettings(statePath, userPath)
+    assert.deepEqual(settings.visibility, { showMcp: false, showLsp: true })
+    assert.equal(settings.scripts.terminal, "wezterm-tab")
+    assert.deepEqual(settings.scriptPins, ["build"])
     for (const visibility of [null, "invalid", { showMcp: 0, showLsp: null }]) {
-      writeFileSync(paths.project, JSON.stringify({ visibility, showMcp: "invalid" }))
-      assert.deepEqual(loadSidebarSettings(root, root).visibility, { showMcp: false, showLsp: false })
+      writeJsonObject(userPath, { visibility, showMcp: false })
+      assert.deepEqual(loadSidebarSettings(statePath, userPath).visibility, { showMcp: true, showLsp: true })
     }
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("distinguishes explicit script config from inherited defaults", () => {
-  assert.equal(hasConfiguredScripts({ scripts: {} }), true)
-  assert.equal(hasConfiguredScripts({}), false)
-  assert.equal(hasConfiguredScripts(undefined), false)
-})
-
-test("persists a project directory separately from OpenCode settings", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-config-"))
-  const projectDirectory = path.join(root, "project")
-  mkdirSync(projectDirectory)
-  try {
-    const settings = normalizeSidebarSettings({ projectDirectory })
-    assert.equal(settings.projectDirectory, projectDirectory)
-    assert.equal(normalizeSidebarSettings({ projectDirectory: path.join(root, "missing") }).projectDirectory, undefined)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1073,14 +1022,13 @@ test("resolves a project from an initial cd prompt without changing directories"
 test("sidebar settings default to showing MCP and LSP and ignore malformed files", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-config-"))
   try {
-    const paths = sidebarConfigPaths(root, root)
-    mkdirSync(path.dirname(paths.user), { recursive: true })
-    writeFileSync(paths.user, "not json")
-    assert.deepEqual(loadSidebarSettings(root, root, paths.user, path.join(root, "missing.json")).visibility, {
+    const userPath = sidebarUserPath(root)
+    writeFileSync(userPath, "not json")
+    assert.deepEqual(loadSidebarSettings(path.join(root, "missing.json"), userPath).visibility, {
       showMcp: true,
       showLsp: true,
     })
-    assert.deepEqual(normalizeSidebarSettings({ showMcp: false, showLsp: "yes" }).visibility, {
+    assert.deepEqual(normalizeSidebarSettings({ visibility: { showMcp: false, showLsp: "yes" } }).visibility, {
       showMcp: false,
       showLsp: true,
     })
@@ -1107,53 +1055,101 @@ test("normalizes persisted pins and session roots", () => {
   }
 })
 
-test("migrates legacy file root pins to favorite file roots", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-favorites-"))
-  const custom = path.join(root, "custom")
-  mkdirSync(custom)
-  try {
-    const settings = normalizeSidebarSettings({ fileRootPins: [custom] })
-    assert.deepEqual(settings.favoriteFileRoots, [custom])
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("per-project state lives outside the project and keeps its hand-written override", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-state-"))
-  try {
-    const project = path.join(root, "project")
-    const state = path.join(root, "state")
-    const paths = sidebarConfigPaths(project, root)
-    mkdirSync(path.dirname(paths.project), { recursive: true })
-    writeFileSync(paths.project, JSON.stringify({ scripts: { terminal: "wezterm-tab" }, scriptPins: ["old"] }))
-    const statePath = sidebarStatePath(state, project)
-    assert.equal(path.relative(state, statePath).startsWith(".."), false)
-    writeJsonObject(statePath, { scriptPins: ["build"], favoriteFileRoots: [], recentFileRoots: [], fileRoots: {} })
-    const settings = loadSidebarSettings(project, root, paths.user, paths.project, undefined, statePath)
-    assert.deepEqual(settings.scriptPins, ["build"])
-    assert.equal(settings.scripts.terminal, "wezterm-tab")
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("saveUserScriptSettings persists a global default applied when the project config has no scripts", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-user-scripts-"))
+// Guards data loss: the openSidebar files are copied once into oc's own files and never changed.
+test("migrates openSidebar files once into oc's own files and leaves them untouched", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-migrate-"))
   try {
     const home = path.join(root, "home")
-    const userPath = path.join(home, ".config", "openSidebar", "config.json")
-    mkdirSync(path.dirname(userPath), { recursive: true })
-    writeFileSync(userPath, JSON.stringify({ showMcp: true, scripts: { terminal: "native" } }))
-    saveUserScriptSettings(
-      home,
+    const project = path.join(root, "project")
+    const favorite = path.join(root, "favorite")
+    const recent = path.join(root, "recent")
+    mkdirSync(favorite)
+    mkdirSync(recent)
+    const legacyUser = path.join(home, ".config", "openSidebar", "config.json")
+    const legacyProject = path.join(project, ".config", "openSidebar.json")
+    writeJsonObject(legacyUser, {
+      showMcp: true,
+      showLsp: false,
+      scripts: { terminal: "wezterm-tab" },
+      usageProviders: ["cursor"],
+      fileRootPins: [favorite],
+      cursorSessionToken: "legacy-token",
+    })
+    writeJsonObject(legacyProject, {
+      projectDirectory: project,
+      visibility: { showMcp: false, showLsp: true },
+      scriptPins: ["build"],
+      recentFileRoots: [],
+      fileRoots: { session: { customRoots: [recent] } },
+    })
+    const before = [readFileSync(legacyUser, "utf8"), readFileSync(legacyProject, "utf8")]
+    const userPath = path.join(root, "config", "sidebar.json")
+    const tokenPath = path.join(root, "data", "cursor-session")
+    const statePath = sidebarStatePath(path.join(root, "state"), project)
+    const noKv = () => ({ scriptPins: [], favoriteFileRoots: [], recentFileRoots: [], fileRoots: {} })
+    const migrate = (
+      projectRoot: string,
+      state: string,
+      kvState: Parameters<typeof migrateLegacySidebar>[0]["kvState"] = noKv,
+      user = userPath,
+    ) =>
+      migrateLegacySidebar({ projectRoot, statePath: state, kvState, homeDirectory: home, userPath: user, tokenPath })
+
+    migrate(project, statePath)
+    assert.deepEqual(JSON.parse(readFileSync(userPath, "utf8")), {
+      visibility: { showMcp: true, showLsp: false },
+      scripts: { terminal: "wezterm-tab" },
+      usageProviders: ["cursor"],
+    })
+    assert.equal(readCursorSessionToken(tokenPath), "legacy-token")
+    const settings = loadSidebarSettings(statePath, userPath)
+    assert.deepEqual(settings.scriptPins, ["build"])
+    assert.deepEqual(settings.favoriteFileRoots, [normalizeRootPath(favorite)])
+    assert.deepEqual(settings.recentFileRoots, [normalizeRootPath(recent)])
+    assert.deepEqual([readFileSync(legacyUser, "utf8"), readFileSync(legacyProject, "utf8")], before)
+
+    // One time only: a later change to the old user file is not copied again.
+    writeJsonObject(legacyUser, { scripts: { terminal: "native" } })
+    migrate(project, statePath)
+    assert.equal(loadSidebarSettings(statePath, userPath).scripts.terminal, "wezterm-tab")
+
+    // A user file without visibility takes the project's plugin-copied visibility.
+    const secondUser = path.join(root, "config2", "sidebar.json")
+    migrate(project, statePath, noKv, secondUser)
+    assert.deepEqual(JSON.parse(readFileSync(secondUser, "utf8")).visibility, { showMcp: false, showLsp: true })
+
+    // A project without its own file takes the old kv pins; one with nothing to import gets no state file.
+    const kvState = path.join(root, "state", "kv.json")
+    migrate(path.join(root, "other"), kvState, () => ({ ...noKv(), scriptPins: ["kv-pin"] }))
+    assert.deepEqual(loadSidebarSettings(kvState, userPath).scriptPins, ["kv-pin"])
+    const emptyState = path.join(root, "state", "empty.json")
+    migrate(path.join(root, "empty"), emptyState)
+    assert.equal(existsSync(emptyState), false)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test("saveUserSidebarSetting changes one key and keeps the rest of the file", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-user-settings-"))
+  try {
+    const userPath = sidebarUserPath(root)
+    const missing = path.join(root, "missing.json")
+    writeJsonObject(userPath, { visibility: { showMcp: false }, scripts: { terminal: "native" }, extra: "keep" })
+    saveUserSidebarSetting(
+      "scripts",
       normalizeScriptSettings({ terminal: "wezterm-vertical", wezterm: { vertical: { Cells: 20 } } }),
+      userPath,
     )
-    const projectPath = path.join(root, "project", ".config", "openSidebar.json")
-    const settings = loadSidebarSettings(path.join(root, "project"), home, userPath, projectPath)
+    saveUserSidebarSetting("usageProviders", ["opencode-go", "openrouter"], userPath)
+    assert.equal(JSON.parse(readFileSync(userPath, "utf8")).extra, "keep")
+    const settings = loadSidebarSettings(missing, userPath)
     assert.equal(settings.scripts.terminal, "wezterm-vertical")
     assert.deepEqual(settings.scripts.wezterm.vertical, { Cells: 20 })
-    assert.equal(settings.visibility.showMcp, true)
+    assert.deepEqual(settings.usageProviders, ["opencode-go", "openrouter"])
+    assert.equal(settings.visibility.showMcp, false)
+    saveUserSidebarSetting("usageProviders", undefined, userPath)
+    assert.equal(loadSidebarSettings(missing, userPath).usageProviders, undefined)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1182,6 +1178,12 @@ test("usage spacing defaults off and accepts only booleans", () => {
   assert.equal(normalizeSidebarSettings({}).usageSpacing, false)
   assert.equal(normalizeSidebarSettings({ usageSpacing: true }).usageSpacing, true)
   assert.equal(normalizeSidebarSettings({ usageSpacing: "yes" }).usageSpacing, false)
+})
+
+test("usage layout defaults to grouped and accepts only known layouts", () => {
+  assert.equal(normalizeSidebarSettings({}).usageLayout, "grouped")
+  assert.equal(normalizeSidebarSettings({ usageLayout: "table" }).usageLayout, "table")
+  assert.equal(normalizeSidebarSettings({ usageLayout: "classic" }).usageLayout, "grouped")
 })
 
 test("reads Claude Code usage with its OAuth login and falls back to the cached result", async () => {
@@ -1293,34 +1295,6 @@ test("a Claude pool with one live account reads as live even when another is cac
       assert.match(result.accounts[1].id ?? "", /claudeSecond$/i)
       assert.equal(result.accounts[0].usage.ok && result.accounts[0].usage.fiveHour.usedPercent, 1)
     }
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("saveUserUsageProviders persists the selection without overwriting other sidebar settings", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-user-usage-"))
-  try {
-    const home = path.join(root, "home")
-    const userPath = path.join(home, ".config", "openSidebar", "config.json")
-    mkdirSync(path.dirname(userPath), { recursive: true })
-    writeFileSync(userPath, JSON.stringify({ showMcp: false, scripts: { terminal: "wezterm-tab" }, extra: "keep" }))
-    saveUserUsageProviders(home, ["opencode-go", "openrouter"])
-    const stored = JSON.parse(readFileSync(userPath, "utf8")) as {
-      extra?: string
-      scripts?: { terminal?: string }
-      showMcp?: boolean
-      usageProviders?: string[]
-    }
-    assert.equal(stored.extra, "keep")
-    assert.equal(stored.showMcp, false)
-    assert.equal(stored.scripts?.terminal, "wezterm-tab")
-    assert.deepEqual(stored.usageProviders, ["opencode-go", "openrouter"])
-    const projectPath = path.join(root, "project", ".config", "openSidebar.json")
-    const settings = loadSidebarSettings(path.join(root, "project"), home, userPath, projectPath)
-    assert.deepEqual(settings.usageProviders, ["opencode-go", "openrouter"])
-    assert.equal(settings.scripts.terminal, "wezterm-tab")
-    assert.equal(settings.visibility.showMcp, false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -1730,42 +1704,20 @@ test("shows an unlimited Cursor plan with its reset date", async () => {
   }
 })
 
-test("persists a Cursor session token without disturbing other settings", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-config-"))
+test("persists a Cursor session token in its own owner-only file", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-token-"))
   try {
-    const configPath = path.join(root, ".config", "openSidebar", "config.json")
     const secretPath = cursorSessionSecretPath(root)
-    assert.equal(readCursorSessionToken(root), undefined)
-    mkdirSync(path.dirname(configPath), { recursive: true })
-    writeFileSync(configPath, JSON.stringify({ showMcp: false, visibility: { showMcp: false } }))
-    writeCursorSessionToken(root, "  auth0|user_test::eyJ.eyJ.x  ")
-    const settings = JSON.parse(readFileSync(configPath, "utf8"))
-    assert.equal(settings.showMcp, false)
-    assert.equal(settings.cursorSessionToken, undefined)
+    assert.equal(readCursorSessionToken(secretPath), undefined)
+    writeCursorSessionToken("  auth0|user_test::eyJ.eyJ.x  ", secretPath)
     assert.equal(readFileSync(secretPath, "utf8").trim(), "auth0|user_test::eyJ.eyJ.x")
-    assert.equal(readCursorSessionToken(root), "auth0|user_test::eyJ.eyJ.x")
-    writeCursorSessionToken(root, "next-token")
-    assert.equal(readCursorSessionToken(root), "next-token")
-    assert.equal(JSON.parse(readFileSync(configPath, "utf8")).cursorSessionToken, undefined)
-    clearCursorSessionToken(root)
-    assert.equal(readCursorSessionToken(root), undefined)
+    assert.equal(readCursorSessionToken(secretPath), "auth0|user_test::eyJ.eyJ.x")
+    if (process.platform !== "win32") assert.equal(statSync(secretPath).mode & 0o777, 0o600)
+    writeCursorSessionToken("next-token", secretPath)
+    assert.equal(readCursorSessionToken(secretPath), "next-token")
+    clearCursorSessionToken(secretPath)
+    assert.equal(readCursorSessionToken(secretPath), undefined)
     assert.equal(existsSync(secretPath), false)
-  } finally {
-    rmSync(root, { recursive: true, force: true })
-  }
-})
-
-test("moves a Cursor session token out of config.json into the secrets file", () => {
-  const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-cursor-migrate-"))
-  try {
-    const configPath = path.join(root, ".config", "openSidebar", "config.json")
-    mkdirSync(path.dirname(configPath), { recursive: true })
-    writeFileSync(configPath, JSON.stringify({ showMcp: false, cursorSessionToken: "legacy-token" }))
-    assert.equal(readCursorSessionToken(root), "legacy-token")
-    const settings = JSON.parse(readFileSync(configPath, "utf8"))
-    assert.equal(settings.showMcp, false)
-    assert.equal(settings.cursorSessionToken, undefined)
-    assert.equal(readFileSync(cursorSessionSecretPath(root), "utf8").trim(), "legacy-token")
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

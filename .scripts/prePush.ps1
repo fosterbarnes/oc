@@ -5,6 +5,7 @@ if ($Help) { Write-Host 'prePush.ps1'; return }
 . "$PSScriptRoot\scriptHelper.ps1"
 runNativeCommand bun @('turbo', 'typecheck') 'typecheck'
 runNativeCommand bun @('packages/tui/script/keybindDocs.ts', '--check') 'keybind docs check'
+runNativeCommand bun @('script/docLinks.ts') 'doc link check'
 # Keep the tracked OpenAPI spec in step with the server routes; the Prettier pass below formats it.
 $openApi = @(& bun run --cwd "$srcRoot/packages/opencode" dev generate)
 if ($LASTEXITCODE) { throw "OpenAPI generate failed (exit $LASTEXITCODE)." }

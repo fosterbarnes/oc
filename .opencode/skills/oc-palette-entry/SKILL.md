@@ -11,17 +11,19 @@ the user explicitly asks for it.
 ## Where
 
 Most oc entries live in `src/packages/tui/src/ocCommands.tsx` (`createOcCommands`), in three
-arrays App spreads into the `appCommands` memo in `src/app.tsx`: `newSession`, `defaults`, and
+fields App spreads into the `appCommands` memo in `src/packages/tui/src/app.tsx`: `newSession` (one
+object), `defaults`, and
 `settings` (everything else). Every item in
 `appCommands` is mapped to `namespace: "palette"` and registered through `useBindings`, so adding
 an object to the right array is all the wiring needed. The `oc.settings_palette` command opens the
-palette filtered to `category === "oc"`. Claude warm-up entries live in `src/claudeWarmup.tsx`;
-account switching and auto-resume live in `src/claudeCommands.tsx`. Both are spread into
+palette filtered to `category === "oc"`. Claude warm-up entries live in
+`src/packages/tui/src/claudeWarmup.tsx`; account switching and auto-resume live in
+`src/packages/tui/src/claudeCommands.tsx`. Both are spread into
 `appCommands` after the System entries.
 
 Insert the new object in `ocCommands.tsx`, near related commands. If the command needs its own
 state or several hooks, put a `createXCommand()` factory in its own module and spread it into
-`appCommands` like `todoCommand` (`src/todos.ts`). Otherwise keep it inline.
+`appCommands` like `todoCommand` (`src/packages/tui/src/todos.ts`). Otherwise keep it inline.
 
 ## Shape
 
@@ -41,18 +43,18 @@ state or several hooks, put a `createXCommand()` factory in its own module and s
 Optional fields, used only when needed:
 
 - `desc`: short tooltip-style detail.
-- `hidden`: boolean; hides from the palette (for example `process.env.OC_STABLE === "1"` or
-  `!Global.Path.debug` for debug-only).
+- `hidden`: boolean; hides from the palette (for example `Global.native` to hide an entry in a
+  native `opencode` window).
 - `enabled`, `suggested`: boolean or getter for dynamic state.
 - `slashAliases`: extra slash names.
-- `get title()`: dynamic labels (see `src/todos.ts`).
+- `get title()`: dynamic labels (see `oc.subagent_usage` in `ocCommands.tsx`).
 
 Rules:
 
 - No filler text in `title` or `desc`.
 - Errors surface through `toast.show({ message, variant: "error" })`, matching nearby entries.
 - Do not add a keybind unless asked. Keybinds go through `tuiConfig.keybinds`, not this array.
-- Order: `src/component/command-palette.tsx` ranks oc groups (`_GROUP_RANK`: Session, Claude,
+- Order: `src/packages/tui/src/component/command-palette.tsx` ranks oc groups (`_GROUP_RANK`: Session, Claude,
   Subagents, Defaults, Updates, Prompt, Appearance, Sidebar, Folders, Server and processes, Tools,
   About) and commands by `name` (`_COMMAND_RANK`). Pick an existing group by job and add the new
   `name` to `_COMMAND_RANK` where it belongs by how often it is used; unlisted names fall to the end

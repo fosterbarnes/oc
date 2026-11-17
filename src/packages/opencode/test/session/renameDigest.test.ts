@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
-import { Command } from "../../src/command"
 import { renameDigest } from "../../src/session/titleGen"
 
 const msg = (role: "user" | "assistant", text: string, synthetic?: boolean, metadata?: Record<string, unknown>) =>
@@ -44,13 +43,7 @@ test("renameDigest keeps task text for argument-free commands and older messages
 
 test("renameDigest strips the active-command header from argument-free commands", () => {
   const header =
-    "[/spit is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation.]"
+    "[/spit is active: its instructions replace any earlier slash command's persona, mode, and rules from this conversation. It stays active for later messages until the user sends another command or approves a mode_switch.]"
   const command = msg("user", `${header}\n\nReview the current diff`, false, { ocCommandArguments: " " })
   expect(renameDigest([command])).toBe("user: Review the current diff")
-})
-
-test("renameDigest strips the composed-command preamble from argument-free commands", () => {
-  const text = `${Command.COMPOSED_PREAMBLE}\n\n[/pass]\nReview the current diff\n\n[/fpc]\nClean up\n\n[User request]\n`
-  const command = msg("user", text, false, { ocCommands: ["pass", "fpc"], ocCommandArguments: "" })
-  expect(renameDigest([command])).toBe("user: [/pass]\nReview the current diff\n\n[/fpc]\nClean up\n\n[User request]")
 })

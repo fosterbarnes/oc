@@ -1,10 +1,9 @@
 # macOS support (dev notes)
 
 oc runs on Windows and macOS (Apple Silicon) from one source tree. Platform differences live in shared
-helpers with a `win32` and a `darwin` branch; callers stay platform-neutral. Plan:
-`~/.config/opencode/plans/macosSupport.md`.
+helpers with a `win32` and a `darwin` branch; callers stay platform-neutral.
 
-## Dev loop (Windows VM + Mac host)
+## Dev loop (Windows PC + Mac)
 
 - Mac: `ssh mac` (alias in `~/.ssh/config`, key `~/.ssh/id_ed25519`; any shell; `ssh` skill). The Mac
   reaches this PC as `ssh goon`. Non-interactive ssh reads only

@@ -104,6 +104,7 @@ if ($Stop) {
     }
     # WezTerm leaves its socket file behind when killed.
     Remove-Item -LiteralPath $run.socket -Force -ErrorAction SilentlyContinue
+    foreach ($log in @($run.logs)) { if ($log) { Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue } }
     $restored = foreach ($item in $run.state) {
         if ((Test-Path -LiteralPath $item.file) -and (Get-FileHash -LiteralPath $item.file).Hash -eq $item.hash) { continue }
         Copy-Item -LiteralPath (Join-Path $stateDir (Split-Path $item.file -Leaf)) -Destination $item.file -Force
@@ -161,7 +162,13 @@ Get-ChildItem Env: | Where-Object Name -match '^(OPENCODE|OC_|CLAUDE|WEZTERM_)|^
     ForEach-Object { Remove-Item "Env:$($_.Name)" }
 
 $quote = { param($value) '"' + $value + '"' }
-$gui = Start-Process -FilePath "wezterm-gui$exeSuffix" -PassThru -ArgumentList @(
+# Off Windows, Start-Process hands the child this script's stdout/stderr, so a caller reading them (a
+# background job) would wait for the window to close. Give the window its own streams instead.
+$logs = if ($IsWindows) { @() } else { @((Join-Path $runRoot 'wezterm.out.log'), (Join-Path $runRoot 'wezterm.err.log')) }
+$streams = if ($IsWindows) { @{} } else {
+    @{ RedirectStandardInput = '/dev/null'; RedirectStandardOutput = $logs[0]; RedirectStandardError = $logs[1] }
+}
+$gui = Start-Process -FilePath "wezterm-gui$exeSuffix" -PassThru @streams -ArgumentList @(
     'start', '--always-new-process', '--cwd', (& $quote $Project), '--', (& $quote $Exe), (& $quote $Project)
 )
 $created = "$((getProcess $gui.Id).CreationDate.ToFileTimeUtc())"
@@ -174,6 +181,7 @@ $run = [pscustomobject]@{
     project     = $Project
     ownsProject = $ownsProject
     started     = (Get-Date).ToString('o')
+    logs        = $logs
     state       = $state
 }
 # Recorded before the wait, so -Stop can clean up a window that never listed a pane.

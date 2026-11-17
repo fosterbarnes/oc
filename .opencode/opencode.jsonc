@@ -13,10 +13,6 @@
     },
   },
   "mcp": {},
-  "tools": {
-    "github-triage": false,
-    "github-pr-search": false,
-  },
   "plugin": [
     "opencode-history-search"
   ],

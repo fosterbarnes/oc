@@ -1,6 +1,6 @@
 # Export, import, and tailnet sync of settings
 
-Replaces the Tailscale import of v0.2.357 (`docs/dev/importPlan.md`). User-facing behavior: wiki
+Replaces the Tailscale import of v0.2.357 (its plan, `docs/dev/importPlan.md`, is in git history). User-facing behavior: wiki
 `Configuration.md` > Moving settings between machines.
 
 ## Status (2026-11-11): implemented

@@ -1,15 +1,7 @@
 import { isRecord } from "@/util/record"
-import { DEFAULT_ACCOUNT, poolAccountLabel } from "../accounts.js"
+import { poolAccountLabel } from "../accounts.js"
 import { log } from "../logger.js"
-import {
-  buildWarmupArgs,
-  buildWarmupEnv,
-  checkWarmupCli,
-  cliRunner,
-  warmupConfigDir,
-  warmupCwd,
-  type ChildTracker,
-} from "./cli"
+import { buildWarmupArgs, checkWarmupCli, cliRunner, warmupCwd, warmupEnv, type ChildTracker } from "./cli"
 import { accountLabel } from "./identity"
 import { listConnected, verifyAccountConnected } from "./inventory"
 import {
@@ -84,9 +76,7 @@ export async function sendWarmup(input: {
 }): Promise<SendResult> {
   // Abort gate: never spawn after shutdown was requested.
   if (input.signal?.aborted) return { outcome: "failed", detail: "aborted before spawn" }
-  const configDir = warmupConfigDir(input.accountID)
-  const env = buildWarmupEnv(input.accountID === DEFAULT_ACCOUNT ? undefined : input.accountID)
-  env.CLAUDE_CONFIG_DIR = configDir
+  const env = warmupEnv(input.accountID)
   if (input.extraEnv) {
     for (const [key, value] of Object.entries(input.extraEnv)) {
       if (value === undefined) delete env[key]

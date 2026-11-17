@@ -138,7 +138,7 @@ export function DialogQueue(props: { sessionID: string }) {
             const chain = extractChain(text, sync.data.command)
             if (chain) {
               // A plain prompt edited into a chain has no TUI waiting for it yet.
-              const body = { type: "edit" as const, id, text: chain.request, commands: [], chain: chain.steps }
+              const body = { type: "edit" as const, id, text: "", commands: [], chain: chain.steps }
               void update(body).then((done) => {
                 back()
                 if (done) void reviveChain.watchQueued(props.sessionID).catch((error: unknown) => toast.error(error))

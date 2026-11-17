@@ -1,6 +1,5 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, type ParentProps } from "solid-js"
 import type { BoxRenderable } from "@opentui/core"
-import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { useProject } from "../../../context/project"
@@ -23,18 +22,15 @@ import { useBindings, useKeymapSelector, useOpencodeKeymap } from "../../../keym
 import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
 import {
   defaultScriptSettings,
-  defaultSidebarSettings,
   ensureSessionScrollbarVisible,
-  hasConfiguredScripts,
   loadSidebarSettings,
+  migrateLegacySidebar,
   normalizeScriptSettings,
-  saveUserScriptSettings,
+  saveUserSidebarSetting,
   sessionProjectDirectory,
-  sidebarConfigPaths,
   sidebarStatePath,
   writeJsonObject,
   type ScriptSettings,
-  type SidebarSettings,
 } from "./settings.js"
 import { dedupeRootPaths, displayPath, isDirectory, normalizeRootPath, rootSections, sameRootPath } from "./roots.js"
 import {
@@ -102,6 +98,7 @@ function palerColor(color: { toInts(): [number, number, number, number] }): stri
     .join("")}`
 }
 
+// TODO: remove at 0.4.0 with `migrateLegacySidebar`: openSidebar plugin-era kv keys, read only by it.
 function pinKey(worktree: string): string {
   return `opencode-sidebar-tools:pins:${worktree}`
 }
@@ -114,21 +111,7 @@ function rootsKey(sessionID: string): string {
   return `opencode-sidebar-tools:file-roots:${sessionID}`
 }
 
-function scriptSettingsKey(worktree: string): string {
-  return `opencode-sidebar-tools:script-settings:${worktree}`
-}
-
 type RootState = { customRoots: string[]; activeRoot?: string }
-
-function globalScriptSettings(options: unknown): ScriptSettings {
-  if (!options || typeof options !== "object") return defaultScriptSettings()
-  const value = (options as { scripts?: unknown }).scripts
-  return normalizeScriptSettings(value)
-}
-
-function globalSidebarSettings(options: unknown): SidebarSettings {
-  return { ...defaultSidebarSettings(), scripts: globalScriptSettings(options) }
-}
 
 function loadRootState(kv: ReturnType<typeof useKV>, sessionID: string): RootState {
   const value = kv.get(rootsKey(sessionID), {})
@@ -197,31 +180,36 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       projectContext.instance.path().directory
     )
   }
+  const readSettings = (worktree: string, forSessionID: string) => {
+    const statePath = sidebarStatePath(paths.state, worktree)
+    migrateLegacySidebar({
+      projectRoot: worktree,
+      statePath,
+      kvState: () => {
+        const roots = loadRootState(kv, forSessionID)
+        return {
+          scriptPins: [...loadPins(kv, worktree)],
+          favoriteFileRoots: [...loadRootPins(kv, worktree)],
+          recentFileRoots: dedupeRootPaths(roots.customRoots),
+          fileRoots: roots.customRoots.length > 0 || roots.activeRoot ? { [forSessionID]: roots } : {},
+        }
+      },
+    })
+    return loadSidebarSettings(statePath)
+  }
   let sessionID = currentSessionID()
   let sessionDirectory = projectRoot()
-  let project = sessionDirectory
-  let rootState = loadRootState(kv, sessionID)
-  let root = rootState.activeRoot || project
-  const pluginDefaults = globalSidebarSettings(undefined)
   const initialPromptDirectory = sessionProjectDirectory(
     sync.data.message[sessionID] ?? [],
     (messageID) => sync.data.part[messageID] ?? [],
     os.homedir(),
   )
   let configRoot = sessionDirectory === os.homedir() ? initialPromptDirectory || sessionDirectory : sessionDirectory
-  const configPaths = sidebarConfigPaths(configRoot, os.homedir())
-  let sidebarSettings = loadSidebarSettings(
-    configRoot,
-    os.homedir(),
-    configPaths.user,
-    configPaths.project,
-    pluginDefaults,
-    sidebarStatePath(paths.state, configRoot),
-  )
+  let sidebarSettings = readSettings(configRoot, sessionID)
   let projectConfigRoot = configRoot
-  project = sidebarSettings.projectDirectory || configRoot
-  root = sidebarSettings.fileRoots[sessionID]?.activeRoot || project
-  if (!sidebarSettings.fileRoots[sessionID]) sidebarSettings.fileRoots[sessionID] = rootState
+  let project = configRoot
+  let rootState = sidebarSettings.fileRoots[sessionID] ?? { customRoots: [] }
+  let root = rootState.activeRoot || project
   let scriptSettings = sidebarSettings.scripts
   const hoverColor = midpointColor(theme.primary, DIRECTORY_COLORS[0])
   const headerButtonColor = palerColor(theme.accent)
@@ -268,52 +256,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     })
   }
 
-  const loadProjectOwnedState = () => {
-    const legacyRootState = loadRootState(kv, sessionID)
-    const legacyPins = loadPins(kv, project)
-    const legacyRootPins = loadRootPins(kv, project)
-    if (
-      !sidebarSettings.fileRoots[sessionID] &&
-      (legacyRootState.customRoots.length > 0 || legacyRootState.activeRoot)
-    ) {
-      sidebarSettings.fileRoots[sessionID] = legacyRootState
-    }
-    if (sidebarSettings.recentFileRoots.length === 0 && legacyRootState.customRoots.length > 0) {
-      sidebarSettings.recentFileRoots = dedupeRootPaths(legacyRootState.customRoots)
-    }
-    if (sidebarSettings.scriptPins.length === 0 && legacyPins.size > 0) sidebarSettings.scriptPins = [...legacyPins]
-    if (sidebarSettings.favoriteFileRoots.length === 0 && legacyRootPins.size > 0)
-      sidebarSettings.favoriteFileRoots = [...legacyRootPins]
-    const projectPath = sidebarConfigPaths(projectConfigRoot, os.homedir()).project
-    let hasProjectScripts = false
-    try {
-      hasProjectScripts = hasConfiguredScripts(JSON.parse(fs.readFileSync(projectPath, "utf8")))
-    } catch {
-      // Missing or malformed project config is handled by the normalized defaults.
-    }
-    let hasUserScripts = false
-    try {
-      hasUserScripts = hasConfiguredScripts(
-        JSON.parse(fs.readFileSync(sidebarConfigPaths(projectConfigRoot, os.homedir()).user, "utf8")),
-      )
-    } catch {
-      // Missing or malformed user config is handled by the normalized defaults.
-    }
-    if (!hasProjectScripts && !hasUserScripts) {
-      const legacyScripts = kv.get(scriptSettingsKey(project), undefined)
-      if (legacyScripts !== undefined)
-        sidebarSettings.scripts = normalizeScriptSettings(legacyScripts, sidebarSettings.scripts)
-    }
-    // Opening a project writes nothing unless old kv state was carried over.
-    if (
-      legacyRootState.customRoots.length > 0 ||
-      legacyRootState.activeRoot ||
-      legacyPins.size > 0 ||
-      legacyRootPins.size > 0
-    )
-      saveProjectState()
-  }
-
   const syncSidebarVisibility = async () => {
     if (visibilityRunning) return
     visibilityRunning = true
@@ -343,17 +285,8 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     )
     configRoot = sessionDirectory === os.homedir() ? promptDirectory || sessionDirectory : sessionDirectory
     projectConfigRoot = configRoot
-    const config = sidebarConfigPaths(projectConfigRoot, os.homedir())
-    sidebarSettings = loadSidebarSettings(
-      projectConfigRoot,
-      os.homedir(),
-      config.user,
-      config.project,
-      pluginDefaults,
-      sidebarStatePath(paths.state, projectConfigRoot),
-    )
-    project = sidebarSettings.projectDirectory || projectConfigRoot
-    loadProjectOwnedState()
+    sidebarSettings = readSettings(projectConfigRoot, sessionID)
+    project = projectConfigRoot
     scriptSettings = sidebarSettings.scripts
     rootState = sidebarSettings.fileRoots[sessionID] ?? { customRoots: [] }
     const nextFavorites = new Set(dedupeRootPaths(sidebarSettings.favoriteFileRoots))
@@ -546,15 +479,15 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const saveScriptSettings = (next: ScriptSettings, message = "Script settings updated") => {
     scriptSettings = normalizeScriptSettings(next, sidebarSettings.scripts)
     sidebarSettings.scripts = scriptSettings
-    saveUserScriptSettings(os.homedir(), scriptSettings)
+    saveUserSidebarSetting("scripts", scriptSettings)
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message })
   }
   const resetScriptSettings = () => {
-    scriptSettings = normalizeScriptSettings(null, sidebarSettings.scripts)
+    scriptSettings = defaultScriptSettings()
     sidebarSettings.scripts = scriptSettings
-    saveUserScriptSettings(os.homedir(), scriptSettings)
+    saveUserSidebarSetting("scripts", scriptSettings)
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message: "Global script settings reset" })

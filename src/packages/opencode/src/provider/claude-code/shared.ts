@@ -11,10 +11,13 @@ export const CLAUDE_CODE_COMMAND_PERMISSION_OPTION = "opencodeCommandPermission"
 
 /**
  * Claude Code built-ins behind each oc tool. A command turn gives Claude the built-in instead of
- * the oc proxy when the tool is in `CommandToolPlan.native`.
+ * the oc proxy when the tool is in `CommandToolPlan.native`, and a tool oc denies turns its
+ * built-ins off. Every built-in that does an oc tool's job belongs here, or that tool's permission
+ * misses it: `Monitor` runs shell commands and `TaskStop` stops Claude's background Bash jobs
+ * (which replace oc's `bgKill`), so both follow `bash`.
  */
 export const CLAUDE_NATIVE_TOOLS: Record<string, string[]> = {
-  bash: ["Bash", "PowerShell"],
+  bash: ["Bash", "PowerShell", "Monitor", "TaskStop"],
   edit: ["Edit", "MultiEdit", "NotebookEdit"],
   write: ["Write"],
   read: ["Read"],
@@ -22,6 +25,8 @@ export const CLAUDE_NATIVE_TOOLS: Record<string, string[]> = {
   grep: ["Grep"],
   webfetch: ["WebFetch"],
   todowrite: ["TodoWrite", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList"],
+  // oc skills reach `Skill` through the `--plugin-dir` link (skillPlugin.ts).
+  skill: ["Skill"],
 }
 
 /**

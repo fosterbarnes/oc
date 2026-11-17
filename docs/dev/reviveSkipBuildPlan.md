@@ -1,6 +1,7 @@
 # /revive: skip the build when the source is unchanged, and remove dead revive paths
 
-Status 2026-11-09: implemented (chunks 1-6); awaiting the user's live `/revive` check (Chunk 3).
+Status 2026-11-13: implemented (chunks 1-6). Live checks 1-2 passed, 3 checked without a restart, 4 pending;
+see "Live check results" at the end.
 Deviation: staging a change does not change the fingerprint (the tree hash is content-only, which is
 correct); the test asserts that instead.
 
@@ -206,3 +207,13 @@ Evidence: `revive.ts:58` says shell tabs are "no longer produced", and they stop
 
 About 30 lines for the helper, 4 in the build, 6 in revive, plus the tests. Chunks 5 and 6 delete about
 60 lines and three scripts. There are no new runtime files, settings, commands, or schema changes.
+
+## Live check results (2026-11-13)
+
+1. Pass. `/revive` at 07:59 UTC built (5.4 s) and installed.
+2. Pass. `/revive` at 08:00 UTC logged `Source unchanged since the installed build (8ea9887); skipping build`,
+   ran no `bun install` or build, and reopened the window (stop 0.1 s, server 0.4 s).
+3. Checked without a restart by running the installed `oc oc --revive-prepare` helper by hand: with an untracked
+   file added it built; with the file removed it skipped against the installed `8ea9887`. The "revert after
+   installing the edit" half is the same comparison and was not run live.
+4. Pending: `/revive <text>` on the skip path.

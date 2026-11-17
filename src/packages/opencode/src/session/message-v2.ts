@@ -39,6 +39,7 @@ import { CLAUDE_AGENT_PROVIDER_ID } from "@/provider/claude-agent/id"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Question } from "@/question"
 import { Effect, Schema } from "effect"
+import { ActiveCommand } from "./activeCommand"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -214,6 +215,13 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
     if (msg.parts.length === 0) continue
 
     if (msg.info.role === "user") {
+      const activePart = msg.parts.find(
+        (part) =>
+          part.type === "text" &&
+          !part.ignored &&
+          typeof part.metadata?.[ActiveCommand.KEY] === "string" &&
+          !part.metadata?.ocCommands,
+      )
       const userMessage: UIMessage = {
         id: msg.info.id,
         role: "user",
@@ -221,10 +229,13 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
       }
       for (const part of msg.parts) {
         // User message parts should never be empty
-        if (part.type === "text" && !part.ignored && part.text !== "")
+        if (part.type === "text" && !part.ignored && (part.text !== "" || part === activePart))
           userMessage.parts.push({
             type: "text",
-            text: part.text,
+            text:
+              part === activePart
+                ? `${ActiveCommand.marker(String(part.metadata?.[ActiveCommand.KEY]))}\n\n${part.text}`
+                : part.text,
             // Claude already read it mid-turn; the Claude Code provider leaves it out of the next envelope.
             ...(part.metadata?.[STEERED_METADATA_KEY]
               ? { providerMetadata: { [CLAUDE_CODE_PROVIDER_ID]: { [STEERED_METADATA_KEY]: true } } }

@@ -348,7 +348,11 @@ export async function planSpawn(input: {
     }
   }
 
-  const [tools, skills] = await Promise.all([assembleProxyTools(input), fetchOpencodeSkills(turn.cwd)])
+  // Started alongside the tool plan; only used when that plan leaves Claude's `Skill` on.
+  const skillsFetch = fetchOpencodeSkills(turn.cwd)
+  const tools = await assembleProxyTools(input)
+  const skillOn = tools.cliTools ? tools.cliTools.includes("Skill") : !tools.disallowed.includes("Skill")
+  const skills = skillOn ? await skillsFetch : undefined
   const proxyServer =
     tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
@@ -356,6 +360,7 @@ export async function planSpawn(input: {
     buildToolEnvironmentNote(
       tools.combined.map((t) => t.name),
       tools.replaced,
+      skillOn,
     ),
   )
   return {

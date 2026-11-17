@@ -17,12 +17,7 @@ import { useToast } from "../../../ui/toast"
 import { Locale } from "../../../util/locale"
 import { openLink } from "../../../util/browser"
 import { readOcConfig } from "../../../ocSettings"
-import {
-  saveUserUsageProviders,
-  saveUserUsageSpacing,
-  saveUserUsageSubscriptions,
-  type SidebarSettings,
-} from "./settings.js"
+import { saveUserSidebarSetting, type SidebarSettings } from "./settings.js"
 import { readCursorSessionToken, writeCursorSessionToken } from "./cursorToken.js"
 import {
   parseUsageDate,
@@ -44,13 +39,12 @@ import {
   compactResetDate,
   fullResetDate,
   formatUsagePercent,
-  formatUsageRows,
-  formatClaudeUsageRows,
-  usageColumns,
   orderUsageWindows,
-  windowLabel,
+  shortResetDate,
   windowName,
+  windowTag,
 } from "./usage/format"
+import { usageLines, type UsageEntry, type UsageSegment } from "./usage/layout"
 import {
   applyClaudeObservation,
   applyOpenAIObservation,
@@ -154,11 +148,12 @@ export function createSidebarUsage(input: {
   // Without a saved list every provider is probed; probes with no login return before any request.
   const probedProviders = () => savedProviders() ?? [...USAGE_PROVIDER_IDS]
   const [usageSpacing, setUsageSpacing] = createSignal(input.settings().usageSpacing)
+  const [usageLayout, setUsageLayout] = createSignal(input.settings().usageLayout)
   const [usageSubscriptions, setUsageSubscriptions] = createSignal([...input.settings().usageSubscriptions])
   // Same kv key as the sidebar section state in feature-plugins/sidebar/open.ts.
   const usageOpen = () => kv.get("sidebar_open_usage", true)
   const setUsageOpen = (next: boolean) => kv.set("sidebar_open_usage", next)
-  let cursorSessionToken = readCursorSessionToken(os.homedir())
+  let cursorSessionToken = readCursorSessionToken()
   const usageObservations = new Map<string, ProviderUsage.Info>()
   const [usageNow, setUsageNow] = createSignal(Date.now())
   const usageAbort = new AbortController()
@@ -391,7 +386,7 @@ export function createSidebarUsage(input: {
             toast.show({ variant: "error", message: "That does not look like a Cursor session cookie" })
             return
           }
-          writeCursorSessionToken(os.homedir(), trimmed)
+          writeCursorSessionToken(trimmed)
           cursorSessionToken = trimmed
           toast.show({ variant: "success", message: "Cursor usage connected" })
           dialog.clear()
@@ -414,164 +409,170 @@ export function createSidebarUsage(input: {
     ),
   )
   const openBilling = (plan: UsagePlan) => void openLink(kv, plan.url).catch(toast.error)
-  // Muted renewal line under a provider's meters; left click opens the provider's billing page.
-  // Without a meter reading, an unknown renewal date says nothing; with one, it invites a manual date.
-  const planLine = (provider: UsagePlanProvider, account?: string, hasData = true) => {
-    const plan = usagePlans().find(
-      (item) => item.provider === provider && (account === undefined || item.account === account),
-    )
-    if (!plan || (!hasData && plan.atMs === undefined)) return undefined
-    const line = usagePlanLine(plan, usageNow())
-    const key = `plan:${provider}:${account ?? ""}`
-    return (
-      <text
-        fg={hovered() === key ? hoverColor : line.urgent ? theme.warning : theme.textMuted}
-        wrapMode="none"
-        onMouseOver={(event) => {
-          // Keeps the Usage box's own hover from replacing this line's.
-          event.stopPropagation()
-          setHovered(key)
-        }}
-        onMouseUp={(event) => {
-          event.stopPropagation()
-          if (event.button === 0) openBilling(plan)
-        }}
-      >
-        {line.text}
-      </text>
-    )
-  }
   const usageRows = () => {
+    const nowMs = usageNow()
     const codex = codexWindows()
     const codexHasData = Boolean(codex.weekly || codex.monthly)
     const goSnapshot = goUsage()
-    const goOk = goSnapshot.ok ? goSnapshot : undefined
     const orSnapshot = openRouterUsage()
-    const orOk = orSnapshot.ok ? orSnapshot : undefined
-    const orValue = orOk
-      ? formatUsagePercent(orOk.usedPercent, showRemaining()) +
-        (orSnapshot.stale || usageNow() - (orSnapshot.fetchedAt ?? 0) > 300_000 ? "*" : "")
-      : !orSnapshot.ok && orSnapshot.reason === "no-credentials"
-        ? "not connected"
-        : "unavailable"
     const cursorSnapshot = cursorUsage()
-    const cursorOk = cursorSnapshot.ok ? cursorSnapshot.monthly : undefined
-    const cursorNeedsToken = !cursorSnapshot.ok && cursorSnapshot.reason !== undefined
     const claudeSnapshot = claudeCodeUsage()
     // Expire known windows against the local minute clock; no new request, no timestamp refresh.
-    const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, usageNow()) : claudeSnapshot
-    const claudeOk = claudeProjected.ok ? claudeProjected : undefined
+    const claudeProjected = claudeSnapshot.ok ? projectClaudeUsage(claudeSnapshot, nowMs) : claudeSnapshot
     const claudePooled = claudeDirectories().length > 1
-    const cell = (
-      window: UsageWindow,
-      snapshot: UsageSnapshot<{ ok: boolean }>,
-      suffix = windowLabel(window.minutes),
-    ) => ({
-      usedPercent: window.usedPercent,
-      resetAt: window.resetAt,
-      suffix: suffix + (usageWindowStale(window, snapshot, usageNow()) ? "*" : ""),
-    })
     const providers = usageProviders()
-    // Laid out twice: the first pass finds each window slot's widest date start, flipped clock, and flipped
-    // day; the second shares them across providers so later-slot dates end in one column.
-    const layout = (shared?: ReturnType<typeof usageColumns>) => {
-      const rows = (
-        show: unknown,
-        options: Omit<
-          Parameters<typeof formatUsageRows>[0],
-          "remaining" | "width" | "columns" | "clocks" | "days" | "lead"
-        >,
-      ) =>
-        show
-          ? formatUsageRows({
-              ...options,
-              remaining: showRemaining(),
-              width: usageWidth(),
-              columns: shared?.starts,
-              clocks: shared?.clocks,
-              days: shared?.days,
-              lead: shared?.lead,
-            })
-          : []
-      return {
-        codex: rows(providers.includes("openai") && codexHasData, {
-          label: "Codex :",
-          windows: [codex.weekly, codex.monthly].flatMap((window) => (window ? [cell(window, usage())] : [])),
-        }),
-        claude:
-          providers.includes("claude-code") && claudeOk
-            ? formatClaudeUsageRows(
-                claudeOk,
-                showRemaining(),
-                usageWidth(),
-                shared?.starts,
-                shared?.clocks,
-                shared?.days,
-                activeClaudeAccount(),
-                usageNow(),
-                shared?.lead,
-              )
-            : [],
-        cursor: rows(providers.includes("cursor") && cursorOk, {
-          label: "Cursor:",
-          windows: cursorOk
-            ? [
-                cell(cursorOk, cursorSnapshot, "m"),
-                {
-                  usedPercent: cursorOk.apiUsedPercent,
-                  resetAt: "",
-                  suffix: " api" + (usageWindowStale(cursorOk, cursorSnapshot, usageNow()) ? "*" : ""),
-                },
-              ]
-            : [],
-        }),
-        go: rows(providers.includes("opencode-go") && goOk, {
-          label: "OpenCode Go:",
-          windows: goOk
-            ? [goOk.weekly, goOk.monthly].flatMap((window) => (window ? [cell(window, goSnapshot)] : []))
-            : [],
-        }),
-      }
+    // Renewal segments by key, for the billing click.
+    const billing = new Map<string, UsagePlan>()
+    const window = (tag: string, reading: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>) => ({
+      tag,
+      usedPercent: reading.usedPercent,
+      reset:
+        reading.resetMs !== null ? shortResetDate(reading.resetMs, nowMs) : reading.usedPercent === 0 ? "idle" : "-",
+      stale: usageWindowStale(reading, snapshot, nowMs),
+    })
+    // Without a meter reading, an unknown renewal date says nothing; with one, it invites a manual date.
+    const plan = (provider: UsagePlanProvider, account?: string, hasData = true) => {
+      const item = usagePlans().find(
+        (entry) => entry.provider === provider && (account === undefined || entry.account === account),
+      )
+      if (!item || (!hasData && item.atMs === undefined)) return undefined
+      const line = usagePlanLine(item, nowMs)
+      const key = `plan:${provider}:${account ?? ""}`
+      billing.set(key, item)
+      return { text: line.text, short: line.short, warn: line.urgent, key }
     }
-    const rows = layout(usageColumns(Object.values(layout()).flat()))
-    const fallbackRow = (label: string, snapshot: UsageSnapshot<{ ok: boolean }>, text: string) => (
-      <box flexDirection="row" gap={1}>
-        <text fg={theme.text}>{label}</text>
-        <text fg={theme.textMuted}>{text}</text>
-      </box>
-    )
-    const aligned = (
-      label: string,
-      snapshot: UsageSnapshot<{ ok: boolean }>,
-      rows: (ReturnType<typeof formatUsageRows>[number] & {
-        label?: string
-        spaced?: boolean
-        snapshot?: UsageSnapshot<{ ok: boolean }>
-        account?: string
-      })[],
-      // Pooled Claude: the plan line follows each account's last row.
-      accountPlans = false,
-    ) => (
-      <For each={rows}>
-        {(row, index) => {
-          const rowLabel = row.label ?? label
-          return (
-            <box flexDirection="column" marginTop={"spaced" in row && row.spaced && usageSpacing() ? 1 : 0}>
-              <text fg={theme.textMuted} wrapMode="none">
-                <span style={{ fg: theme.text }}>{row.usage.startsWith(rowLabel) ? rowLabel : ""}</span>
-                {row.usage.startsWith(rowLabel) ? row.usage.slice(rowLabel.length) : row.usage}
-              </text>
-              <text fg={theme.textMuted} wrapMode="none">
-                {row.reset}
-              </text>
-              <Show when={accountPlans && row.account && rows[index() + 1]?.account !== row.account}>
-                {planLine("claude-code", row.account)}
-              </Show>
-            </box>
-          )
-        }}
-      </For>
-    )
+    const claude = (): UsageEntry[] => {
+      if (!claudeProjected.ok)
+        return [
+          {
+            name: "Claude",
+            table: true,
+            windows: [],
+            note:
+              claudeProjected.reason === "signed-out"
+                ? "run claude auth login"
+                : claudeProjected.reason === "expired"
+                  ? "login expired"
+                  : "unavailable",
+            plan: claudePooled ? undefined : plan("claude-code", undefined, false),
+          },
+        ]
+      // Pooled accounts without a readable reading stay out of the sidebar; the Usage menu lists them.
+      const accounts = claudeProjected.accounts?.flatMap((account) =>
+        account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
+      )
+      return (
+        accounts?.length ? accounts : [{ id: claudeProjected.accountID, name: "Claude", usage: claudeProjected }]
+      ).map((account) => ({
+        name: account.name,
+        active: claudePooled && (account.id ?? account.name) === activeClaudeAccount(),
+        table: true,
+        windows: [
+          window("5h", account.usage.fiveHour, account.usage),
+          window("wk", account.usage.weekly, account.usage),
+        ],
+        plan: claudePooled ? plan("claude-code", account.id) : plan("claude-code"),
+      }))
+    }
+    const entries: UsageEntry[] = [
+      ...(providers.includes("claude-code") ? claude() : []),
+      ...(providers.includes("openai")
+        ? [
+            codexHasData
+              ? {
+                  name: "Codex",
+                  table: true,
+                  windows: [codex.weekly, codex.monthly].flatMap((reading, index) =>
+                    reading ? [window(windowTag(reading.minutes, index ? "wk" : "5h"), reading, usage())] : [],
+                  ),
+                  plan: plan("openai"),
+                }
+              : {
+                  name: "Codex",
+                  table: true,
+                  windows: [],
+                  note: codex.reauthenticate ? "run /connect" : "unavailable",
+                  plan: plan("openai", undefined, false),
+                },
+          ]
+        : []),
+      ...(providers.includes("cursor")
+        ? [
+            cursorSnapshot.ok
+              ? {
+                  name: "Cursor",
+                  windows: [
+                    window("mo", cursorSnapshot.monthly, cursorSnapshot),
+                    {
+                      tag: "api",
+                      usedPercent: cursorSnapshot.monthly.apiUsedPercent,
+                      reset: "",
+                      stale: usageWindowStale(cursorSnapshot.monthly, cursorSnapshot, nowMs),
+                    },
+                  ],
+                  plan: plan("cursor"),
+                }
+              : {
+                  name: "Cursor",
+                  windows: [],
+                  note: cursorSnapshot.reason !== undefined ? "open Usage to sign in" : "unavailable",
+                  plan: plan("cursor", undefined, false),
+                },
+          ]
+        : []),
+      ...(providers.includes("opencode-go")
+        ? [
+            goSnapshot.ok
+              ? {
+                  name: "OpenCode Go",
+                  windows: [goSnapshot.weekly, goSnapshot.monthly].flatMap((reading, index) =>
+                    reading ? [window(windowTag(reading.minutes, index ? "mo" : "wk"), reading, goSnapshot)] : [],
+                  ),
+                }
+              : {
+                  name: "OpenCode Go",
+                  windows: [],
+                  note: goSnapshot.reason === "no-credentials" ? "not connected" : "unavailable",
+                },
+          ]
+        : []),
+      ...(providers.includes("openrouter")
+        ? [
+            orSnapshot.ok
+              ? {
+                  name: "OpenRouter",
+                  windows: [
+                    {
+                      tag: "cr",
+                      usedPercent: orSnapshot.usedPercent,
+                      reset: `$${orSnapshot.usedUsd.toFixed(2)}/$${orSnapshot.limitUsd.toFixed(2)}`,
+                      stale: orSnapshot.stale === true || nowMs - (orSnapshot.fetchedAt ?? 0) > 300_000,
+                    },
+                  ],
+                }
+              : {
+                  name: "OpenRouter",
+                  windows: [],
+                  note: orSnapshot.reason === "no-credentials" ? "not connected" : "unavailable",
+                },
+          ]
+        : []),
+    ]
+    const { header, lines } = usageLines(usageLayout(), entries, usageWidth() || 40, {
+      remaining: showRemaining(),
+      spacing: usageSpacing(),
+    })
+    const tones = {
+      text: theme.text,
+      muted: theme.textMuted,
+      accent: theme.accent,
+      primary: theme.primary,
+      warning: theme.warning,
+      error: theme.error,
+      track: theme.borderActive,
+    }
+    const spans = (segments: UsageSegment[]) =>
+      segments.map((segment) => <span style={{ fg: tones[segment.tone] }}>{segment.text}</span>)
     return (
       <box
         flexDirection="column"
@@ -594,11 +595,12 @@ export function createSidebarUsage(input: {
             }}
             onMouseUp={(event) => event.stopPropagation()}
           />
-          <text fg={hovered() === "usage" ? hoverColor : theme.text}>Usage:</text>
+          <text fg={hovered() === "usage" ? hoverColor : theme.text} wrapMode="none">
+            Usage:<span style={{ fg: theme.textMuted }}>{usageOpen() ? header : ""}</span>
+          </text>
         </box>
         <Show when={usageOpen()}>
-          {/* Each visible provider is one flex child, so gap spaces only providers that render. */}
-          <box flexDirection="column" gap={usageSpacing() ? 1 : 0}>
+          <box flexDirection="column">
             {/* Auto mode waits for every probe before saying nothing is connected. */}
             <Show
               when={
@@ -610,77 +612,38 @@ export function createSidebarUsage(input: {
                 {savedProviders() ? "No usage providers selected" : "No usage providers connected"}
               </text>
             </Show>
-            <Show when={usageProviders().includes("claude-code")}>
-              <box flexDirection="column">
-                <Show
-                  when={claudeOk}
-                  fallback={fallbackRow(
-                    "Claude:",
-                    claudeSnapshot,
-                    !claudeSnapshot.ok && claudeSnapshot.reason === "signed-out"
-                      ? "run claude auth login"
-                      : !claudeSnapshot.ok && claudeSnapshot.reason === "expired"
-                        ? "login expired"
-                        : "unavailable",
-                  )}
-                >
-                  {aligned("Claude:", claudeProjected, rows.claude, claudePooled)}
-                </Show>
-                {claudePooled ? undefined : planLine("claude-code", undefined, Boolean(claudeOk))}
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("openai")}>
-              <box flexDirection="column">
-                <Show
-                  when={codexHasData}
-                  fallback={fallbackRow("Codex :", usage(), codex.reauthenticate ? "run /connect" : "unavailable")}
-                >
-                  {aligned("Codex :", usage(), rows.codex)}
-                </Show>
-                {planLine("openai", undefined, codexHasData)}
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("cursor")}>
-              <box flexDirection="column">
-                <Show
-                  when={cursorOk}
-                  fallback={fallbackRow("Cursor:", cursorSnapshot, cursorNeedsToken ? "sign in" : "unavailable")}
-                >
-                  {aligned("Cursor:", cursorSnapshot, rows.cursor)}
-                </Show>
-                <Show when={!cursorOk && cursorNeedsToken}>
-                  <text fg={theme.textMuted}>open Usage to paste a cookie</text>
-                </Show>
-                {planLine("cursor", undefined, Boolean(cursorOk))}
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("opencode-go")}>
-              <box flexDirection="column">
-                <Show
-                  when={goOk}
-                  fallback={fallbackRow(
-                    "OpenCode Go:",
-                    goSnapshot,
-                    !goSnapshot.ok && goSnapshot.reason === "no-credentials" ? "not connected" : "unavailable",
-                  )}
-                >
-                  {aligned("OpenCode Go:", goSnapshot, rows.go)}
-                </Show>
-              </box>
-            </Show>
-            <Show when={usageProviders().includes("openrouter")}>
-              <box flexDirection="column">
-                <box flexDirection="row" gap={1}>
-                  <text fg={theme.text}>OpenRouter:</text>
-                  <text fg={theme.textMuted}>{orValue}</text>
-                </box>
-                <Show when={orOk}>
-                  <box flexDirection="row" gap={1}>
-                    <text fg={theme.textMuted}>{`$${orOk?.usedUsd.toFixed(2)} / $${orOk?.limitUsd.toFixed(2)}`}</text>
+            <For each={lines}>
+              {(line) => {
+                // A renewal is its own text so it takes hover and the billing click; it always ends its line.
+                const renewal = line.at(-1)
+                const key = renewal?.key
+                if (!renewal || !key) return <text wrapMode="none">{spans(line)}</text>
+                return (
+                  <box flexDirection="row">
+                    <text wrapMode="none" flexShrink={0}>
+                      {spans(line.slice(0, -1))}
+                    </text>
+                    <text
+                      fg={hovered() === key ? hoverColor : tones[renewal.tone]}
+                      wrapMode="none"
+                      flexShrink={0}
+                      onMouseOver={(event) => {
+                        // Keeps the Usage box's own hover from replacing this one.
+                        event.stopPropagation()
+                        setHovered(key)
+                      }}
+                      onMouseUp={(event) => {
+                        event.stopPropagation()
+                        const target = billing.get(key)
+                        if (event.button === 0 && target) openBilling(target)
+                      }}
+                    >
+                      {renewal.text}
+                    </text>
                   </box>
-                </Show>
-              </box>
-            </Show>
+                )
+              }}
+            </For>
           </box>
         </Show>
       </box>
@@ -715,7 +678,7 @@ export function createSidebarUsage(input: {
               ? usageProviders().filter((id) => id !== option.value)
               : USAGE_PROVIDER_IDS.filter((id) => selected.has(id) || id === option.value)
         input.settings().usageProviders = next
-        saveUserUsageProviders(os.homedir(), next)
+        saveUserSidebarSetting("usageProviders", next)
         setSavedProviders(next)
         usageScheduler.request()
         selectUsageSettings()
@@ -880,8 +843,19 @@ export function createSidebarUsage(input: {
         onSelect: () => {
           const next = !usageSpacing()
           input.settings().usageSpacing = next
-          saveUserUsageSpacing(os.homedir(), next)
+          saveUserSidebarSetting("usageSpacing", next)
           setUsageSpacing(next)
+          selectUsageMenu()
+        },
+      },
+      {
+        category: "Settings",
+        title: usageLayout() === "table" ? "Layout: table" : "Layout: grouped",
+        onSelect: () => {
+          const next = usageLayout() === "table" ? "grouped" : "table"
+          input.settings().usageLayout = next
+          saveUserSidebarSetting("usageLayout", next)
+          setUsageLayout(next)
           selectUsageMenu()
         },
       },
@@ -902,7 +876,7 @@ export function createSidebarUsage(input: {
 
   const saveUsageSubscriptions = (next: UsageSubscription[], then = selectUsageCalendar) => {
     input.settings().usageSubscriptions = next
-    saveUserUsageSubscriptions(os.homedir(), next)
+    saveUserSidebarSetting("usageSubscriptions", next)
     setUsageSubscriptions(next)
     then()
   }
@@ -1154,6 +1128,7 @@ export function createSidebarUsage(input: {
     loadSettings: (settings: SidebarSettings) => {
       setSavedProviders(settings.usageProviders?.slice())
       setUsageSpacing(settings.usageSpacing)
+      setUsageLayout(settings.usageLayout)
       setUsageSubscriptions([...settings.usageSubscriptions])
     },
   }

@@ -2007,10 +2007,13 @@ export type Config = {
       model?: string
       variant?: string
       subtask?: boolean
+      whenBlank?: "ask" | "send"
+      suggest?: boolean
       permission?: PermissionConfig
       toolHost?: {
         [key: string]: "auto" | "oc" | "harness"
       }
+      pushSession?: boolean
     }
   }
   command_palette?: {
@@ -2541,6 +2544,7 @@ export type Command = {
   source?: "command" | "mcp" | "skill"
   template?: string
   subtask?: boolean
+  whenBlank?: "ask" | "send"
   hints: Array<string>
 }
 
@@ -11880,7 +11884,6 @@ export type SessionCommandData = {
     arguments: string
     command: string
     variant?: string
-    additionalCommands?: Array<string>
     parts?: Array<
       | TextPartInput
       | {
@@ -12336,6 +12339,7 @@ export type SessionQueueUpdateData = {
         variant?: string
         parts: Array<TextPartInput | FilePartInput | AgentPartInput>
         commands?: Array<string>
+        split?: boolean
         chain?: Array<
           | {
               type: "send"
@@ -12351,10 +12355,39 @@ export type SessionQueueUpdateData = {
         target?: "current" | "fork" | "new"
       }
     | {
+        type: "batch"
+        entries: Array<{
+          id?: string
+          agent?: string
+          model?: {
+            providerID: string
+            modelID: string
+          }
+          variant?: string
+          parts: Array<TextPartInput | FilePartInput | AgentPartInput>
+          commands?: Array<string>
+          split?: boolean
+          chain?: Array<
+            | {
+                type: "send"
+                names: Array<string>
+                text?: string
+              }
+            | {
+                type: "revive"
+                mode: "install" | "no-install" | "single"
+              }
+          >
+          runAt?: number
+          target?: "current" | "fork" | "new"
+        }>
+      }
+    | {
         type: "edit"
         id: string
         text: string
         commands?: Array<string>
+        split?: boolean
         chain?: Array<
           | {
               type: "send"
@@ -12460,6 +12493,7 @@ export type SessionQueueTakeResponses = {
       variant?: string
       parts: Array<TextPartInput | FilePartInput | AgentPartInput>
       commands?: Array<string>
+      split?: boolean
       chain?: Array<
         | {
             type: "send"

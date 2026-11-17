@@ -446,6 +446,11 @@ export const RunCommand = effectCmd({
               action: "deny",
               pattern: "*",
             },
+            {
+              permission: "mode_switch",
+              action: "deny",
+              pattern: "*",
+            },
           ]
 
       function title() {

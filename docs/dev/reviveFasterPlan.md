@@ -1,7 +1,7 @@
 # /revive: build with the window open, compile once
 
-Status 2026-11-09: implemented (Chunks 0-6) in one working tree, not shipped as three releases; awaiting
-the user's live checks. See "Implementation notes" at the end for measurements and deviations. Builds on
+Status 2026-11-13: implemented (Chunks 0-6) in one working tree, not shipped as three releases. Live checks
+partly done; see "Live check results" at the end. See "Implementation notes" for measurements and deviations. Builds on
 the uncommitted skip-build work (`reviveSkipBuildPlan.md`); Chunk 3 moved that code into `prepare`.
 
 Implementing and unit-testing this plan needs no SSH, VM, or second machine. The live checks need
@@ -303,9 +303,9 @@ is per path. A moved file is scanned again at its new path (1.62 s), a clone is 
 so is a hard-linked second name (`occ`, 1.50 s). Every install creates new files, so after each revive
 the server's `oc` pays it during downtime, the reopened `occ` window pays it again, and the first native
 `opencode` paid 1.97 s.
-- Fix applied: `warmLaunch` (`reviveHost.ts`) runs `occ --version` and `opencode --version` on macOS
-  right after install, while the server start pays the `oc` scan. The reopened window and native skip
-  their scans.
+- Fix applied, then removed 2026-11-13 (v0.2.365): `warmLaunch` (`reviveHost.ts`) ran `occ --version`
+  and `opencode --version` on macOS during the server start. macOS checks new executables one at a time,
+  so the server start went from 2.3 s to 5.8 s on every install (see "Live check results").
 - Not fixable here: the `oc` scan itself. It needs the final path, which exists only after the stop.
 - Possibly fixable: Developer ID signing and notarization might shorten the scan. Not tested.
 
@@ -324,3 +324,37 @@ Deviations:
 
 Not run here: the Windows-only tests (`windowsTest` in `revive.test.ts`, including the edited
 context round-trip and build-step cases), and every live `/revive` check above.
+
+## Live check results (2026-11-13)
+
+macOS, from `revive.log` and the installed `oc oc --revive-prepare` helper run by hand (no restart):
+
+| check | result |
+|---|---|
+| Chunk 0: one compile | Pass: `compile` 3.5 s, `check` 1.7 s, native `copy` 0 ms; whole prepare 5.6 s |
+| Chunk 1: no `bun.lock` / `package.json` churn | Pass: neither shows in `git status` after the day's revives |
+| Chunk 2: offline build | Pass: `build.ts` with a dead proxy (`HTTPS_PROXY=http://127.0.0.1:9`) loaded the cache snapshot (3 ms); offline `bun install` also passes |
+| Chunk 3 #1: ~3 s downtime | **Failed, fixed in v0.2.365.** `Starting server` took 5.8 s on every install since 2026-11-10 (2.3 s before). Cause: `warmLaunch` started `occ` and `opencode` alongside the server; a fresh `oc` first launch measured 2.0 s alone and 4.0-5.6 s with the two others. Removed. Re-check pending |
+| Chunk 3 #2: broken build | Helper part passes: exit 1, and the log's last lines (the toast's source) give the error and `file:line`. Toast pending |
+| Chunk 3 #4: no edits | Pass: 08:00 UTC skip, ~1.4 s from the skip line to the reopened window |
+| Chunk 3 #6: `/update` | Not run: `/update` resets the source folder to GitHub main, which would overwrite uncommitted work, and nothing newer exists |
+| Chunk 3 #7: two at once | Helper part passes: the second prepare failed after 2.2 s with `Another revive is already building oc` |
+| Chunk 4 Mac: flavor by name | Pass: installed `oc` has the `oc` command; the byte-identical `opencode` does not |
+| Chunk 5: no false pane failures | Pass: single-tab revives log `No old panes left to close` |
+
+Windows (win10, source identical to the Mac working tree, tree `9796721`):
+
+| check | result |
+|---|---|
+| `.scripts/build.ps1` | Pass: one compile (5.4 s), native copy 43 ms; `bun.lock` and `package.json` unchanged |
+| `.scripts/install.ps1 -NoBuild` | Pass (1.1 s): `occ.exe` hard-linked to `oc.exe`; `opencode.exe` has the same bytes |
+| Native opens as native | Pass: `opencode.exe` in a remote terminal (`ssh -tt`) titles itself `⦿ OpenCode` and starts no server or `attach`; its `--help` has no `oc` command |
+| `oc` hosts as before | Pass: launcher, `oc.exe serve`, `oc.exe attach`; title `■ OpenCode` |
+| `--shutdown-all` leaves native running | Pass: `{"servers":[{"stopped":true,...}],"leftovers":0}`; `opencode.exe` still running |
+
+Note: when the oc launcher is an SSH session's own command, killing it ends the session and Windows kills the
+server with it, so `--shutdown-all` then fails with "Unable to connect". That is the test harness, not oc;
+keep the session open (`...; Start-Sleep 140`) when repeating this.
+
+Still pending (need the window): Chunk 3 #1 timing after the fix and the build toast, #2 toast, #3 chains, #5
+native and `occ` windows, and on the Mac a native window through a revive plus `/revive-single`.

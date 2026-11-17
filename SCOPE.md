@@ -27,7 +27,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Upstream release, publish, translation, and download-stats scripts | v0.2.174 | Built for upstream's npm packages and website. |
 | Localized `README.*.md` | v0.1.5 | oc docs are English only. |
 | `experimental.disable_paste_summary` config option | v0.2.241 | Paste summary is off by default and toggled with `/pasteSummary` (kv). The schema still accepts the key so existing configs load; the TUI ignores it. |
-| Session sharing (`/share`, `/unshare`, `run --share`, share-URL import, sidebar share link) | v0.2.264 | Upstream service discontinued (`d320177aa4`). The SDK `session.share`/`unshare` routes stay: share fails, unshare clears the stored link. |
+| Session sharing (`/share`, `/unshare`, `run --share`, share-URL import, sidebar share link) | v0.2.264 | Upstream service discontinued (`d320177aa4`). The SDK `session.share`/`unshare` routes stay: share fails, unshare clears the stored link. `run --share` only prints that sharing was discontinued. |
 
 ## Not planned
 
@@ -39,7 +39,7 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Option to turn off the background server | v0.2.174 | The resident server is part of oc. Native `opencode.exe` already runs without it. |
 | OpenCode 2 workspace, sandbox, and environment drivers | v0.2.174 | Part of the OpenCode 2 execution engine. |
 | `/goal` autonomous goal command | v0.2.174 | Upstream dropped it. |
-| Desktop app and PowerShell updates on macOS (Claude, Cursor, ChatGPT Desktop, PowerShell) | v0.2.332 | macOS apps update themselves; PowerShell comes from Homebrew. The palette hides these entries on macOS. CLI updates (Claude Code, Cursor, Codex) work on both. |
+| Desktop app updates on macOS (Claude, Cursor, ChatGPT Desktop) | v0.2.332 | macOS apps update themselves. The palette hides these entries on macOS. PowerShell (v0.2.338), WezTerm nightly, and CLI updates (Claude Code, Cursor, Codex) work on both. |
 | Everything Search on macOS | v0.2.332 | Windows-only tool. The sidebar root search returns nothing on macOS. |
 
 ## Planned for later
@@ -47,8 +47,10 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Item | Since | What it waits on |
 |---|---|---|
 | Upstream install channels (npm, brew, AUR, scoop, nix, winget) | v0.2.174 | oc's own release and update flow comes first. |
+| Linux support | v0.2.364 | oc works on Windows 10/11 and macOS (Apple Silicon). Full cross-platform support (Windows, macOS, Linux) ships on or before 0.3.0. |
 | macOS installer (pkg or Homebrew tap) and dependency window | v0.2.332 | `.scripts/install.ps1` under pwsh installs to `~/.local/bin` for now. |
 | macOS menu bar app (tray equivalent) | v0.2.332 | Separate project, like the Windows `octray`, which is frozen for 0.2. |
+| Soft revive (same window): reattach the session without restarting the terminal | v0.2.364 | Hard revive (new terminal window) comes first and still needs live checks. |
 | In-TUI session tabs and terminal panes | v0.2.174 | Must fit oc's real terminal tabs. |
 | Remote pairing (pair, OpenTunnel, QR codes) | v0.2.174 | Local use comes first. |
 | Console-managed policies and Console sign-in | v0.2.174 | Hosted service; revisit if useful without it. |
@@ -90,10 +92,10 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | Singular-only global `agent/` folder | before v0.2.174 | `agents/` (projects may still use both) |
 | Snake and wave startup animations | before v0.1.1 | Column sweep |
 | Windows `opencode-process-tree.exe` supervisor | before v0.1.1 | Direct spawn |
-| Open Computer Use MCP | before v0.1.2 | None (uninstalled) |
 | Intermediate clack "type to filter" project list | v0.1.4 | Real TUI picker |
 | Cursor native plan-mode bridge | before v0.2.141 | Stock Plan agent |
-| ocdebug PowerShell wrapper function | before v0.1.2 | Native `ocdebug.exe` |
 | Native `ocdebug.exe` flavor and isolated debug profile | v0.2.181 | `/revive-single` native test builds sharing production data |
 | OpenTUI raw-mode resume patch | v0.1.4 | Stock OpenTUI resume |
 | bgShell plugin (`bgRun`, `bgStatus`, `bgKill` sibling plugin) | v0.2.177 | Built-in background shell: `bash` with `background: true`. Migration: `bgRun` becomes `bash` with `background: true`; `bgStatus` and `bgKill` keep their names. |
+| `/bgRun` palette toggle and `bgRun` permission | v0.2.364 | Normal `bash` permission for background runs |
+| `~/.config/openSidebar` folder and project `.config/openSidebar.json` override | v0.2.364 | `~/.config/opencode/sidebar.json` and per-project state (one-time copy, old files left in place) |

@@ -73,55 +73,65 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
     return yield* promptSvc.queue.snapshot(ctx.params.sessionID)
   })
 
+  const checkAdd = Effect.fnUntraced(function* (
+    change: Omit<Extract<typeof QueuePayload.Type, { type: "add" }>, "type">,
+  ) {
+    // Synthetic text is allowed only as editor context, and never on its own.
+    if (
+      change.parts.some((part) => part.type === "text" && part.synthetic && part.metadata?.kind !== "editor_context") ||
+      (!change.commands?.length &&
+        !change.chain?.length &&
+        !change.parts.some((part) => part.type !== "text" || !part.synthetic))
+    ) {
+      return yield* new InvalidRequestError({
+        message: "A queued prompt needs a command or a part of its own; synthetic text is only editor context",
+        field: "parts",
+      })
+    }
+    // A TUI runs the chain once it reaches the front, with the agent and model it was queued with.
+    if (change.chain?.length && (change.runAt !== undefined || !change.agent || !change.model)) {
+      return yield* new InvalidRequestError({
+        message: "A revive chain needs an agent and model and cannot be scheduled",
+        field: "chain",
+      })
+    }
+    if (change.target && change.target !== "current" && change.runAt === undefined) {
+      return yield* new InvalidRequestError({
+        message: "Only a scheduled prompt can go to a fork or a new session",
+        field: "runAt",
+      })
+    }
+  })
+
   const queueChange = Effect.fn("SessionHttpApi.queueChange")(function* (
     sessionID: SessionID,
     change: typeof QueuePayload.Type,
   ) {
     switch (change.type) {
       case "add":
-        // Synthetic text is allowed only as editor context, and never on its own.
-        if (
-          change.parts.some(
-            (part) => part.type === "text" && part.synthetic && part.metadata?.kind !== "editor_context",
-          ) ||
-          (!change.commands?.length &&
-            !change.chain?.length &&
-            !change.parts.some((part) => part.type !== "text" || !part.synthetic))
-        ) {
-          return yield* new InvalidRequestError({
-            message: "A queued prompt needs a command or a part of its own; synthetic text is only editor context",
-            field: "parts",
-          })
-        }
-        // A TUI runs the chain once it reaches the front, with the agent and model it was queued with.
-        if (change.chain?.length && (change.runAt !== undefined || !change.agent || !change.model)) {
-          return yield* new InvalidRequestError({
-            message: "A revive chain needs an agent and model and cannot be scheduled",
-            field: "chain",
-          })
-        }
-        if (change.target && change.target !== "current" && change.runAt === undefined) {
-          return yield* new InvalidRequestError({
-            message: "Only a scheduled prompt can go to a fork or a new session",
-            field: "runAt",
-          })
-        }
-        return yield* promptSvc.queue.add({
+      case "batch": {
+        const entries = change.type === "add" ? [change] : change.entries
+        yield* Effect.forEach(entries, checkAdd, { discard: true })
+        return yield* promptSvc.queue.add(
           sessionID,
-          id: change.id,
-          payload: {
-            agent: change.agent,
-            model: change.model,
-            variant: change.variant,
-            parts: change.parts,
-            ...(change.commands?.length && { commands: change.commands }),
-            ...(change.chain?.length && { chain: change.chain }),
-          },
-          runAt: change.runAt,
-          target: change.target,
-        })
+          entries.map((change) => ({
+            id: change.id,
+            payload: {
+              agent: change.agent,
+              model: change.model,
+              variant: change.variant,
+              split: change.split,
+              parts: change.parts,
+              ...(change.commands?.length && { commands: change.commands }),
+              ...(change.chain?.length && { chain: change.chain }),
+            },
+            runAt: change.runAt,
+            target: change.target,
+          })),
+        )
+      }
       case "edit":
-        // Empty text is a bare command (`/agent-push`), so the edit must name its commands.
+        // Empty text is a bare command (`/ship`), so the edit must name its commands.
         if (!change.text.trim() && !change.commands?.length && !change.chain?.length) {
           return yield* new InvalidRequestError({ message: "Queued text cannot be empty", field: "text" })
         }
@@ -135,6 +145,7 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
           id: change.id,
           text: change.text,
           commands: change.commands,
+          split: change.split,
           chain: change.chain,
         })
       case "cancel":

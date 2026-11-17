@@ -3,8 +3,12 @@ import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import type { SessionQueueTakeResponse } from "@opencode-ai/sdk/v2"
 import { usePromptRef } from "./context/prompt"
 import { useSDK } from "./context/sdk"
+import { useSync } from "./context/sync"
 import type { PromptInfo } from "./prompt/history"
 import { useRevive } from "./reviveCommands"
+import { useDialog } from "./ui/dialog"
+import { DialogPrompt } from "./ui/dialog-prompt"
+import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 
 const { label, chainText } = ReviveResume
@@ -16,14 +20,17 @@ type Target = Pick<ReviveResume.Body, "agent" | "model" | "variant">
 type Part = PromptInfo["parts"][number]
 type Extra = { editor: Extract<Part, { type: "text" }>[]; attachments: Part[] }
 type Queued = NonNullable<SessionQueueTakeResponse["payload"]>
+type SendStep = Extract<ReviveResume.Step, { type: "send" }>
 
 // Sessions whose queued chains this TUI is waiting for, across every hook instance.
 const watching = new Set<string>()
 
-// Revive chains: `/pass /revive /agent-push` (slash.ts `extractChain`). Steps run in order from this TUI;
+// Revive chains: `/test /revive /ship` (slash.ts `extractChain`). Steps run in order from this TUI;
 // a revive saves the rest (ReviveResume) for the TUI that opens the session after the restart.
 export function useReviveChain() {
   const sdk = useSDK()
+  const sync = useSync()
+  const dialog = useDialog()
   const toast = useToast()
   const promptRef = usePromptRef()
   const revive = useRevive(toast)
@@ -50,7 +57,19 @@ export function useReviveChain() {
         stop("Revive did not start", chain.steps.slice(index), chain.request)
         return false
       }
-      const error = await send(sessionID, step, { ...chain, done, position: index }, target, index ? undefined : extra)
+      const answer = await askBlank(step, chain, done)
+      if (answer === "skip") continue
+      if (answer === undefined) {
+        stop("Chain stopped", chain.steps.slice(index), chain.request)
+        return false
+      }
+      const error = await send(
+        sessionID,
+        answer,
+        { ...chain, done, position: index },
+        target,
+        index ? undefined : extra,
+      )
       if (error) {
         stop(error, rest, chain.request)
         return false
@@ -122,9 +141,39 @@ export function useReviveChain() {
     )
   }
 
+  // A blank command after the first step asks first unless its `whenBlank` is "send". Resolves to the
+  // step to send, "skip", or undefined when dismissed.
+  const askBlank = async (step: SendStep, chain: Chain, done: readonly string[]) => {
+    const name = step.names[0]
+    const whenBlank = sync.data.command.find((command) => command.name === name)?.whenBlank
+    if (!name || !done.length || step.text || chain.request || whenBlank === "send") return step
+    const choice = await new Promise<"send" | "prompt" | "skip" | undefined>((resolve) => {
+      dialog.replace(
+        () => (
+          <DialogSelect
+            title={`/${name} is next and has no prompt.`}
+            options={[
+              { title: "Send blank", value: "send" as const },
+              { title: "Add prompt", value: "prompt" as const },
+              { title: "Skip", value: "skip" as const },
+            ]}
+            onSelect={(option) => resolve(option.value)}
+          />
+        ),
+        () => resolve(undefined),
+      )
+    })
+    if (choice === "send" || choice === "skip") dialog.clear()
+    if (choice !== "prompt") return choice === "send" ? step : choice
+    const text = await DialogPrompt.show(dialog, `/${name}`, { multiline: true })
+    if (text === null) return
+    dialog.clear()
+    return { ...step, text }
+  }
+
   const send = async (
     sessionID: string,
-    step: Extract<ReviveResume.Step, { type: "send" }>,
+    step: SendStep,
     chain: Chain & { position: number },
     target: Target,
     extra?: Extra,
@@ -137,8 +186,7 @@ export function useReviveChain() {
           {
             sessionID,
             command: step.names[0],
-            additionalCommands: step.names.slice(1),
-            arguments: chain.request,
+            arguments: step.text ?? chain.request,
             agent: target.agent,
             model: `${target.model.providerID}/${target.model.modelID}`,
             variant: target.variant,
@@ -192,7 +240,7 @@ export function useReviveChain() {
   return { run, resume, watchQueued, revive: revive.start }
 }
 
-// Read by each step's agent: without it, /pass reading "...then revive then push" may push itself.
+// Read by each step's agent: without it, /test reading "...then revive then push" may push itself.
 // The metadata draws the step line under the message (`chainLine` in util/revive.ts).
 function chainNote(chain: Chain & { position: number }) {
   const progress = {

@@ -83,6 +83,7 @@ function noticeOps(notices: string[]): TaskPromptOps {
     available: () => Effect.void,
     cancellation: () => Effect.succeed(0),
     partMetadata: () => Effect.void,
+    switchMode: () => Effect.die("switchMode not expected"),
   }
 }
 
@@ -332,14 +333,14 @@ describe("background shell jobs", () => {
     ),
   )
 
-  it.live("denied bgRun permission starts no job", () =>
+  it.live("denied bash permission starts no background job", () =>
     inInstance(
       Effect.gen(function* () {
         const sessionID = `ses_bg_denied_${Date.now()}`
         const shell = yield* initShell()
         const jobs = yield* ShellJobs.Service
         const denied = ctxFor(sessionID, {
-          ask: (request) => (request.permission === "bgRun" ? Effect.die(new Error("bgRun denied")) : Effect.void),
+          ask: (request) => (request.permission === "bash" ? Effect.die(new Error("bash denied")) : Effect.void),
         })
         const exit = yield* shell
           .execute({ command: script("console.log('never')"), background: true }, denied)

@@ -15,8 +15,13 @@ export const Info = Schema.Struct({
   model: Schema.optional(Schema.String),
   variant: Schema.optional(Schema.String),
   subtask: Schema.optional(Schema.Boolean),
-  // Permissions for the command's own turn only, not the persistent session.
+  whenBlank: Schema.optional(Schema.Literals(["ask", "send"])),
+  suggest: Schema.optional(Schema.Boolean),
+  // Permissions for turns under this command, not the persistent session.
   permission: Schema.optional(ConfigPermissionV1.Info),
   toolHost: Schema.optional(ToolHost),
+  // A push command: as a session's first message it titles the session `<folder> - <command>:`, and
+  // `session_complete` then appends the pushed commit and may flag the session for auto-delete.
+  pushSession: Schema.optional(Schema.Boolean),
 })
 export type Info = Schema.Schema.Type<typeof Info>

@@ -39,17 +39,18 @@ export const SchedulePromptTool = Tool.define(
         const model = lastUser?.role === "user" ? lastUser.model : undefined
         const id = MessageID.ascending()
         const prompt = yield* sessionPrompt()
-        yield* prompt.queue.add({
-          sessionID: ctx.sessionID,
-          id,
-          payload: {
-            agent: ctx.agent,
-            ...(model && { model: { providerID: model.providerID, modelID: model.modelID }, variant: model.variant }),
-            parts: [{ type: "text", text: params.prompt }],
+        yield* prompt.queue.add(ctx.sessionID, [
+          {
+            id,
+            payload: {
+              agent: ctx.agent,
+              ...(model && { model: { providerID: model.providerID, modelID: model.modelID }, variant: model.variant }),
+              parts: [{ type: "text", text: params.prompt }],
+            },
+            runAt: runAt.getTime(),
+            target: params.target ?? "current",
           },
-          runAt: runAt.getTime(),
-          target: params.target ?? "current",
-        })
+        ])
         const when = formatTime(runAt)
         return { title: `Scheduled for ${when}`, output: `Scheduled ${id} for ${when}.`, metadata: {} }
       }),
@@ -101,7 +102,8 @@ export const ScheduleCancelTool = Tool.define(
 
 /** The send time, or the reason there is none. */
 export function fireTime(params: { at?: string; delaySeconds?: number }, now: Date): Date | string {
-  if ((params.at === undefined) === (params.delaySeconds === undefined)) return "Give exactly one of `at` or `delaySeconds`."
+  if ((params.at === undefined) === (params.delaySeconds === undefined))
+    return "Give exactly one of `at` or `delaySeconds`."
   const date = params.at === undefined ? new Date(now.getTime() + params.delaySeconds! * 1000) : parseLocal(params.at)
   if (!date || Number.isNaN(date.getTime())) return "`at` must look like `YYYY-MM-DD HH:MM` (local time)."
   if (date.getTime() <= now.getTime()) return `${formatTime(date)} is not in the future.`

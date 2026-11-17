@@ -489,7 +489,7 @@ export function Autocomplete(props: {
   }
 
   const commands = createMemo((): AutocompleteOption[] => {
-    // Revives are chain steps (`/pass /revive /agent-push`, prompt/slash.ts `extractChain`): offered
+    // Revives are chain steps (`/test /revive /ship`, prompt/slash.ts `extractChain`): offered
     // anywhere and inserted as text, so submit runs the whole message in order.
     const results: AutocompleteOption[] = slashes().flatMap((slash) => {
       const name = slash.display.slice(1)

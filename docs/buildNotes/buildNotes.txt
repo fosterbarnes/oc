@@ -1,9 +1,26 @@
-v0.2.363 eloteLem [fix > queued edit on non-Claude models]
+v0.2.372 goombaUterus [feat. > active commands; patch > Usage layouts]
 
-messages sent while the agent works:
-On models other than Claude Code, Edit and Delete on a QUEUED message now work until the model's next call picks the message up. Before, they always failed while the agent was busy. Once the next call has read the message, taking it back is refused with the same "Too late to take back" notice as on Claude.
+commands:
+The last command you send now stays active: plain messages keep its rules, the prompt bar shows it, and the model knows it is still active. The model can ask to switch commands (for example from /spit to /imp), but nothing switches unless you pick Switch in the form, and it only proposes commands marked "suggest: true".
 
-clipboard tool:
-Asking an agent to copy two separate code blocks no longer pastes half-broken fences; a single fenced block is still copied without its backticks. If clicking a "Copied" row fails to copy, oc now says so instead of failing silently.
+Several commands in one message now run in order, one turn each, instead of being merged. A later command with no text asks for a prompt when its turn comes, unless it is marked "whenBlank: send". Multi-step submissions queue all at once and keep Enter and Alt+Enter in press order, and editing or cancelling a blank queued command closes its question and lets the queue continue.
 
-Under the hood: each step of oc's own loop builds every model request from one read of the session. That read now runs under a per-session lock and records the newest message it saw (new session/intake.ts). The delete route still asks a running Claude turn first; otherwise it removes a user message only if it is newer than the latest read and that step runs on oc's own loop, under the same lock, so a message is either read or removed, never both. The clipboard tool unwraps a code fence only when the text is a single block, and the clipboard row's copy now catches errors. The sidebar Claude pool test no longer reads the Mac's real Keychain login. Docs: wiki Sessions.md, FORK.md steering row, and the queued-edit plan marked resolved. Checks: new server test (a queued message is deleted and never sent; a message the next step read is refused with 409) fails on the old delete route and passes now; httpapi-sdk 19 pass and httpapi-session 22 pass; promptCacheDiagnostics 5 pass; Claude steering 11 pass with 5 known macOS failures; prompt tests 84 pass with 1 known macOS failure; clipboard probe through the real tool; sidebar tests 79 pass; opencode and tui typecheck clean. Not checked: a live non-Claude turn in the TUI.
+sidebar:
+The Usage block has two layouts, switched with Layout in the Usage menu: grouped (default) shows each account's renewal on its name line and one bar line per window; table shows one line per account under 5h / week / renew columns. Usage turns yellow at 80% and red at 95%, renewals turn yellow within 3 days, and stale numbers are dimmed instead of marked with "*". Sidebar settings now live in sidebar.json in oc's config folder (old openSidebar settings are copied over once), a project's own .config/openSidebar.json no longer overrides them, and Reset global script settings really restores the defaults.
+
+Claude Code:
+Skills now load in commands that limit tools, such as /spit. An agent or command that denies skills or the shell also turns off Claude Code's own Skill, Monitor, and TaskStop, and tool-limited commands that allow the shell let Claude watch and stop its background jobs. Warm-ups now list and send for the main ~/.claude login on the Mac, and the Times dialog accepts up to 24 times per day instead of 4.
+
+push commands:
+A commit-and-push command can set "pushSession: true" in its frontmatter; oc no longer looks for a command named agent-push. The palette entry is now Push session auto-delete (/pushAutoDelete) and keeps your saved choice.
+
+revive:
+Restarting after a rebuild is about 2 seconds faster again on macOS: oc no longer pre-launches occ and native opencode while the server starts.
+
+background shell:
+The bgRun entry is gone from the oc menu; background commands use the same approval as any other shell command.
+
+docs:
+The README, wiki, and repo docs were checked against the current code, finished plan files were removed, and the docs now say oc runs on Windows and Apple Silicon Macs. The key list has a macOS column, and wiki key tables link to it.
+
+Under the hood: new session/activeCommand.ts and the mode_switch tool; SessionQueue.add takes ordered batches in one transaction with an HTTP batch field; warm-up uses the inherited env for the default macOS account; usage layout split into usage/layout.ts; new src/script/docLinks.ts, run by prePush, fails on broken links or headings in repo docs and the wiki; leftover upstream GitHub tooling and translation files removed; build notes rotated to archive17. Checks: queue 30 pass, HTTP queue 2 pass, TUI prompt 39 pass; feature tests 16 pass, proxy selection 92 pass, subagent and CLI proxy 71 pass, a 5-file session run 130 pass with 2 known macOS failures; tui slash/part/queue/chain 21 pass; warm-up 41 and 46 pass, tui warm-up 28 pass; tui sidebar and usage 225 pass; task 45, oc config 30, revive 30, background shell 13 pass; Claude provider and llm tests showed only the known 11 failures; opencode, tui, and core typecheck clean; keybindDocs and docLinks checks pass. Not checked: live TUI runs of the new layouts and commands.

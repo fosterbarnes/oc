@@ -54,7 +54,7 @@ end
 
 ## Tab color square
 
-When the terminal helper reports WezTerm, oc sets the user variable `oc_agent_color` (`OSC 1337 SetUserVar`) to the active agent's hex color. The tab title still starts with a plain `■ ` (or `⦿ ` in a native `opencode` window). A `format-tab-title` handler strips that prefix and redraws the marker in `oc_agent_color`. Without this snippet the square stays uncolored.
+When the terminal helper reports WezTerm, oc sets two user variables on its pane (`OSC 1337 SetUserVar`): `oc_tui=1` at startup, and `oc_agent_color` to the active agent's hex color. The tab title still starts with a plain `■ ` (or `⦿ ` in a native `opencode` window). A `format-tab-title` handler strips that prefix and redraws the marker in `oc_agent_color`. oc clears both variables when it exits. Without this snippet the square stays uncolored.
 
 Add `title_pane` at the top level of the config and merge the handler body into an existing `format-tab-title` handler, or use it as the handler. In a split tab, `title_pane` picks oc's pane (user variable `oc_tui=1`), so the tab keeps oc's title and color when a shell pane beside it is focused:
 
@@ -94,7 +94,7 @@ wezterm.on('format-tab-title', function(tab, tabs, panes, config, hover, max_wid
 end)
 ```
 
-Expect the square to change color when you switch agents (for example with Tab).
+Expect the square to change color when you switch agents (for example with Shift+Tab). Palette **Disable tab agent square and status** (System) turns the square and color off; **Disable terminal title** turns off the whole title.
 
 ## Font
 

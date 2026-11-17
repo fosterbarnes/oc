@@ -7,7 +7,7 @@ import { testProviderConfig } from "./lib/test-provider"
 import { initRepo } from "./provider/claude-code/chatFixture"
 
 cliIt.live(
-  "command path rules persist on messages, block expansion, and expire on the next turn",
+  "command path rules persist on messages, block expansion, and stay active after restart",
   (fixture) =>
     Effect.gen(function* () {
       const project = path.join(fixture.home, "work")
@@ -43,8 +43,7 @@ cliIt.live(
       const command = yield* Effect.promise(() =>
         sdk.session.command({
           sessionID,
-          command: "plain",
-          additionalCommands: ["spit"],
+          command: "spit",
           arguments: "",
           model: "test/test-model",
         }),
@@ -88,7 +87,8 @@ cliIt.live(
       const reopened = createOpencodeClient({ baseUrl: restarted.url, directory: project, throwOnError: true })
       const reloaded = yield* Effect.promise(() => reopened.session.messages({ sessionID }))
       expect(reloaded.data![0].info).toMatchObject({ permission: expect.any(Array) })
-      yield* fixture.llm.tool("write", { filePath: forbidden, content: "next turn" })
+      const active = reloaded.data!.findLast((message) => message.info.role === "user")?.info
+      if (active?.role !== "user") throw new Error("Expected the active command message")
       yield* fixture.llm.text("done")
       yield* Effect.promise(() =>
         reopened.session.prompt({
@@ -97,11 +97,12 @@ cliIt.live(
           parts: [{ type: "text", text: "Implement now" }],
         }),
       )
-      expect(yield* Effect.promise(() => Bun.file(forbidden).text())).toBe("next turn")
+      expect(yield* Effect.promise(() => Bun.file(forbidden).exists())).toBe(false)
       const nextHistory = yield* Effect.promise(() => reopened.session.messages({ sessionID }))
-      expect(nextHistory.data!.findLast((message) => message.info.role === "user")!.info).not.toHaveProperty(
-        "permission",
-      )
+      const next = nextHistory.data!.findLast((message) => message.info.role === "user")?.info
+      if (next?.role !== "user") throw new Error("Expected the follow-up message")
+      expect(next.permission).toEqual(active.permission)
+      expect(next.permission).toContainEqual({ permission: "write", pattern: "*", action: "deny" })
     }),
   90_000,
 )

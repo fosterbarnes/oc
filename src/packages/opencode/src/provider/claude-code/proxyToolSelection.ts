@@ -89,8 +89,8 @@ export function filterProxyByModelTools(
  * Claude Code runs its built-ins itself, so oc's per-agent permissions reach
  * them only through `--disallowedTools`: an oc tool left out of the agent's
  * tool set (a read-only subagent, a denied tool) turns its built-ins off.
- * Missing tools are permission-denied or disabled capabilities. Websearch and
- * skill have separate provider settings.
+ * Missing tools are permission-denied or disabled capabilities. Websearch has
+ * no oc proxy, so its denial travels separately (`harnessToolsDenied`).
  */
 export function nativeToolsDeniedByHost(
   modelTools: readonly ModelToolEntry[] | undefined,

@@ -51,10 +51,11 @@ import {
  * Bash, Read, Write, Edit, Glob, Grep, NotebookEdit, WebFetch, WebSearch,
  * Task, TodoWrite, TaskCreate, TaskUpdate, TaskGet, TaskList, TaskStop,
  * Skill, REPL, JavaScript, AskUserQuestion, ToolSearch, SendUserMessage.
+ * Later CLIs add Monitor, which runs a shell command like Bash.
  *
  * The ones `read-only` refuses are the five that change this machine (Bash,
- * PowerShell, Write, Edit, NotebookEdit), the two that run code (REPL,
- * JavaScript) and WebFetch, which `--restricted` also strips. `WebSearch`
+ * PowerShell, Write, Edit, NotebookEdit), the three that run code (REPL,
+ * JavaScript, Monitor) and WebFetch, which `--restricted` also strips. `WebSearch`
  * stays: it reads.
  * `Task` stays because a Claude-internal subagent inherits the same
  * restricted tool set; the `task` PROXY def is dropped instead, since an
@@ -68,6 +69,7 @@ export const READ_ONLY_DISALLOWED_CLI_TOOLS = [
   "NotebookEdit",
   "REPL",
   "JavaScript",
+  "Monitor",
   "WebFetch",
 ] as const
 

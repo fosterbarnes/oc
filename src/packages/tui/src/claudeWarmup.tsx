@@ -45,7 +45,7 @@ const OUTCOME_LABEL = {
 } as const
 
 const TIME_PATTERN = /^(\d{2}):(\d{2})$/
-const MAX_TIMES = 4
+const MAX_TIMES = 24
 const RESET_MS = 5 * 60 * 60 * 1000
 
 export function emptyWarmupState(): ClaudeWarmupState {

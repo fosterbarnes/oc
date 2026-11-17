@@ -17,8 +17,8 @@ Send each message exactly as written and wait for the reply to finish, unless a 
 Without reading any files, quote the rule in your instructions about test inputs and the real caller.
 ```
 
-Expect: "Build test inputs from what the real caller sends. A test that uses a shape production
-never sends proves nothing." quoted from memory, with no Read tool row. That rule exists only in
+Expect: "Build test inputs and probes from what the real caller sends. A shape production never
+sends proves nothing." quoted from memory, with no Read tool row. That rule exists only in
 `principles.md`, so this proves it reached Claude through `~/.claude/CLAUDE.md`.
 
 ## 1. Seed and tool check
@@ -58,7 +58,7 @@ Expect: PELICAN-77, and two subagent rows that run at the same time.
 Read every file in the repo one at a time and summarize each.
 ```
 
-After 2 or 3 tool rows appear, press **Esc** (twice if oc asks to confirm). Then:
+After 2 or 3 tool rows appear, press **Esc** twice within 5 seconds (the first press only arms the interrupt). Then:
 
 ```text
 Ignore that. What's the codeword?
@@ -78,7 +78,7 @@ Then:
 What's the codeword, and what does ocToolCheck.txt say right now?
 ```
 
-Expect: Claude Code's summary under the "Compacted" divider (not "no conversation to compact"),
+Expect: Claude Code's summary under the "Compacted" divider (not "There is no Claude Code conversation to compact yet."),
 then PELICAN-77 and "hello from claude, edited".
 
 ## 5. Revert

@@ -1,13 +1,16 @@
-// openSidebar settings: types, defaults, normalization, the user/project config files, and oc's
-// per-project state file.
+// Sidebar settings: types, defaults, normalization, the user settings file
+// (`<config>/sidebar.json`), and oc's per-project state file.
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
+import { Global } from "@opencode-ai/core/global"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
+import { cursorSessionSecretPath, readCursorSessionToken, writeCursorSessionToken } from "./cursorToken"
 import { dedupeRootPaths, isDirectory, normalizeRootPath, rootPathKey } from "./roots"
 import { normalizeUsageSubscriptions, type UsageSubscription } from "./usage/calendar"
 import { normalizeUsageProviders, type UsageProviderId } from "./usage/providers"
+import type { UsageLayout } from "./usage/layout"
 
 export type ScriptLauncher = {
   executable: string
@@ -38,7 +41,6 @@ export type ScriptSettings = {
 }
 
 export type SidebarSettings = {
-  projectDirectory?: string
   visibility: {
     showMcp: boolean
     showLsp: boolean
@@ -51,6 +53,8 @@ export type SidebarSettings = {
   /** Undefined until the user picks: the sidebar then shows every provider with a login. */
   usageProviders?: UsageProviderId[]
   usageSpacing: boolean
+  /** Sidebar Usage block layout: account groups with bars, or one table line per account. */
+  usageLayout: UsageLayout
   usageSubscriptions: UsageSubscription[]
 }
 
@@ -231,6 +235,7 @@ export function defaultSidebarSettings(): SidebarSettings {
     fileRoots: {},
     usageProviders: undefined,
     usageSpacing: false,
+    usageLayout: "grouped",
     usageSubscriptions: [],
   }
 }
@@ -274,7 +279,6 @@ export function normalizeScriptSettings(value: unknown, base = defaultScriptSett
 export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSettings()): SidebarSettings {
   if (!value || typeof value !== "object")
     return {
-      projectDirectory: base.projectDirectory,
       visibility: { ...base.visibility },
       scripts: cloneSettings(base.scripts),
       scriptPins: [...base.scriptPins],
@@ -283,21 +287,19 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       fileRoots: structuredClone(base.fileRoots),
       usageProviders: base.usageProviders && [...base.usageProviders],
       usageSpacing: base.usageSpacing,
+      usageLayout: base.usageLayout,
       usageSubscriptions: [...base.usageSubscriptions],
     }
   const input = value as {
-    projectDirectory?: unknown
     visibility?: unknown
-    showMcp?: unknown
-    showLsp?: unknown
     scripts?: unknown
     scriptPins?: unknown
     favoriteFileRoots?: unknown
-    fileRootPins?: unknown
     recentFileRoots?: unknown
     fileRoots?: unknown
     usageProviders?: unknown
     usageSpacing?: unknown
+    usageLayout?: unknown
     usageSubscriptions?: unknown
   }
   const visibility =
@@ -305,64 +307,43 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
       ? (input.visibility as { showMcp?: unknown; showLsp?: unknown })
       : {}
   const fileRoots: SidebarSettings["fileRoots"] = { ...base.fileRoots }
-  const migratedRecentRoots: string[] = []
   if (input.fileRoots && typeof input.fileRoots === "object") {
     for (const [sessionID, rawState] of Object.entries(input.fileRoots)) {
       if (!rawState || typeof rawState !== "object") continue
       const state = rawState as { customRoots?: unknown; activeRoot?: unknown }
-      const customRoots = dedupeRootPaths(
-        Array.isArray(state.customRoots)
-          ? state.customRoots.filter((item): item is string => typeof item === "string")
-          : [],
-      )
-      migratedRecentRoots.push(...customRoots)
       const activeRoot = typeof state.activeRoot === "string" ? normalizeRootPath(state.activeRoot) : undefined
       fileRoots[sessionID] = {
-        customRoots,
+        customRoots: dedupeRootPaths(
+          Array.isArray(state.customRoots)
+            ? state.customRoots.filter((item): item is string => typeof item === "string")
+            : [],
+        ),
         activeRoot: activeRoot && isDirectory(activeRoot) ? activeRoot : undefined,
       }
     }
   }
-  let recentFileRoots = Array.isArray(input.recentFileRoots)
-    ? dedupeRootPaths(input.recentFileRoots.filter((item): item is string => typeof item === "string"))
-    : [...base.recentFileRoots]
-  if (recentFileRoots.length === 0 && migratedRecentRoots.length > 0) {
-    recentFileRoots = dedupeRootPaths(migratedRecentRoots)
-  }
-  const rawFavorites = Array.isArray(input.favoriteFileRoots) ? input.favoriteFileRoots : input.fileRootPins
-  const normalizedFavorites = Array.isArray(rawFavorites)
-    ? dedupeRootPaths(rawFavorites.filter((item): item is string => typeof item === "string"))
-    : dedupeRootPaths(base.favoriteFileRoots)
   return {
-    projectDirectory:
-      typeof input.projectDirectory === "string" && isDirectory(input.projectDirectory)
-        ? input.projectDirectory
-        : base.projectDirectory,
     visibility: {
-      showMcp:
-        typeof visibility.showMcp === "boolean"
-          ? visibility.showMcp
-          : typeof input.showMcp === "boolean"
-            ? input.showMcp
-            : base.visibility.showMcp,
-      showLsp:
-        typeof visibility.showLsp === "boolean"
-          ? visibility.showLsp
-          : typeof input.showLsp === "boolean"
-            ? input.showLsp
-            : base.visibility.showLsp,
+      showMcp: typeof visibility.showMcp === "boolean" ? visibility.showMcp : base.visibility.showMcp,
+      showLsp: typeof visibility.showLsp === "boolean" ? visibility.showLsp : base.visibility.showLsp,
     },
     scripts: normalizeScriptSettings(input.scripts, base.scripts),
     scriptPins: Array.isArray(input.scriptPins)
       ? [...new Set(input.scriptPins.filter((item): item is string => typeof item === "string"))]
       : [...base.scriptPins],
-    favoriteFileRoots: normalizedFavorites,
-    recentFileRoots,
+    favoriteFileRoots: Array.isArray(input.favoriteFileRoots)
+      ? dedupeRootPaths(input.favoriteFileRoots.filter((item): item is string => typeof item === "string"))
+      : dedupeRootPaths(base.favoriteFileRoots),
+    recentFileRoots: Array.isArray(input.recentFileRoots)
+      ? dedupeRootPaths(input.recentFileRoots.filter((item): item is string => typeof item === "string"))
+      : [...base.recentFileRoots],
     fileRoots,
     usageProviders: Array.isArray(input.usageProviders)
       ? normalizeUsageProviders(input.usageProviders)
       : base.usageProviders && [...base.usageProviders],
     usageSpacing: typeof input.usageSpacing === "boolean" ? input.usageSpacing : base.usageSpacing,
+    usageLayout:
+      input.usageLayout === "grouped" || input.usageLayout === "table" ? input.usageLayout : base.usageLayout,
     usageSubscriptions:
       "usageSubscriptions" in input
         ? normalizeUsageSubscriptions(input.usageSubscriptions)
@@ -370,18 +351,14 @@ export function normalizeSidebarSettings(value: unknown, base = defaultSidebarSe
   }
 }
 
-export function sidebarConfigPaths(
-  projectRoot: string,
-  homeDirectory = os.homedir(),
-): { user: string; project: string } {
-  return {
-    user: path.join(homeDirectory, ".config", "openSidebar", "config.json"),
-    project: path.join(projectRoot, ".config", "openSidebar.json"),
-  }
+// User settings (visibility, scripts, usage). Not tui.json: sidebar writes would live-reload every
+// open TUI.
+export function sidebarUserPath(configDirectory = Global.Path.config) {
+  return path.join(configDirectory, "sidebar.json")
 }
 
 // Pins, favorites, and file roots are machine state, so oc keeps them in its state folder and never
-// writes into the project; the project file above is a hand-written override oc only reads.
+// writes into the project.
 export function sidebarStatePath(stateDirectory: string, projectRoot: string) {
   return path.join(stateDirectory, "sidebar", `${Hash.fast(rootPathKey(projectRoot)).slice(0, 16)}.json`)
 }
@@ -425,54 +402,107 @@ export function readJsonFile(filePath: string): unknown {
   }
 }
 
-export function hasConfiguredScripts(value: unknown): boolean {
-  return Boolean(
-    value && typeof value === "object" && "scripts" in value && (value as { scripts?: unknown }).scripts !== undefined,
-  )
-}
-
 export function loadSidebarSettings(
-  projectRoot: string,
-  homeDirectory = os.homedir(),
-  userPath = sidebarConfigPaths(projectRoot, homeDirectory).user,
-  projectPath = sidebarConfigPaths(projectRoot, homeDirectory).project,
+  statePath: string,
+  userPath = sidebarUserPath(),
   base = defaultSidebarSettings(),
-  statePath?: string,
 ): SidebarSettings {
-  const user = readJsonFile(userPath)
-  const project = readJsonFile(projectPath)
-  const userSettings = normalizeSidebarSettings(user, base)
-  const projectSettings = normalizeSidebarSettings(project, userSettings)
-  return statePath ? normalizeSidebarSettings(readJsonFile(statePath), projectSettings) : projectSettings
+  return normalizeSidebarSettings(readJsonFile(statePath), normalizeSidebarSettings(readJsonFile(userPath), base))
 }
 
-export function saveUserScriptSettings(homeDirectory: string, scripts: ScriptSettings): void {
-  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
+const USER_KEYS = [
+  "visibility",
+  "scripts",
+  "usageProviders",
+  "usageSpacing",
+  "usageLayout",
+  "usageSubscriptions",
+] as const
+type SidebarState = Pick<SidebarSettings, "scriptPins" | "favoriteFileRoots" | "recentFileRoots" | "fileRoots">
+
+/** An undefined value removes the key, which returns that setting to its default. */
+export function saveUserSidebarSetting<K extends (typeof USER_KEYS)[number]>(
+  key: K,
+  value: SidebarSettings[K],
+  filePath = sidebarUserPath(),
+): void {
   const existing = readJsonFile(filePath)
   const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, scripts })
+  writeJsonObject(filePath, { ...base, [key]: value })
 }
 
-/** Undefined removes the saved list, which returns the sidebar to showing every provider with a login. */
-export function saveUserUsageProviders(homeDirectory: string, usageProviders: UsageProviderId[] | undefined): void {
-  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
-  const existing = readJsonFile(filePath)
-  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, usageProviders: usageProviders && [...usageProviders] })
+// TODO: remove at 0.4.0. One-time copy of the openSidebar plugin-era files into oc's own: the user file
+// `~/.config/openSidebar/config.json` and its Cursor token become `sidebar.json` and the data-folder
+// token; a project's `<project>/.config/openSidebar.json` and old kv pins become its state file. Old
+// files are only read, never changed, so an older oc build keeps working.
+export function migrateLegacySidebar(input: {
+  projectRoot: string
+  statePath: string
+  kvState: () => SidebarState
+  homeDirectory?: string
+  userPath?: string
+  tokenPath?: string
+}): void {
+  const legacyDirectory = path.join(input.homeDirectory ?? os.homedir(), ".config", "openSidebar")
+  const legacyUser = upgradeLegacySidebar(readJsonFile(path.join(legacyDirectory, "config.json")))
+  const legacyProject = upgradeLegacySidebar(readJsonFile(path.join(input.projectRoot, ".config", "openSidebar.json")))
+  const userPath = input.userPath ?? sidebarUserPath()
+  if (!fs.existsSync(userPath) && fs.existsSync(legacyDirectory)) {
+    const tokenPath = input.tokenPath ?? cursorSessionSecretPath()
+    const token =
+      readCursorSessionToken(path.join(legacyDirectory, "cursor-session")) ??
+      (typeof legacyUser.cursorSessionToken === "string"
+        ? legacyUser.cursorSessionToken.trim() || undefined
+        : undefined)
+    if (token && !readCursorSessionToken(tokenPath)) writeCursorSessionToken(token, tokenPath)
+    // Every project file holds the same plugin-copied visibility, so it stands in for a user file without one.
+    const user: Record<string, unknown> = {
+      ...legacyUser,
+      visibility: legacyUser.visibility ?? legacyProject.visibility,
+    }
+    // Written last: sidebar.json existing marks the user step done.
+    writeJsonObject(
+      userPath,
+      Object.fromEntries(USER_KEYS.map((key) => [key, user[key]]).filter((entry) => entry[1] !== undefined)),
+    )
+  }
+  if (fs.existsSync(input.statePath)) return
+  const legacy = normalizeSidebarSettings(legacyProject, normalizeSidebarSettings(legacyUser))
+  const kv = input.kvState()
+  const state: SidebarState = {
+    scriptPins: legacy.scriptPins.length > 0 ? legacy.scriptPins : kv.scriptPins,
+    favoriteFileRoots: legacy.favoriteFileRoots.length > 0 ? legacy.favoriteFileRoots : kv.favoriteFileRoots,
+    recentFileRoots: legacy.recentFileRoots.length > 0 ? legacy.recentFileRoots : kv.recentFileRoots,
+    fileRoots: { ...kv.fileRoots, ...legacy.fileRoots },
+  }
+  if (
+    state.scriptPins.length > 0 ||
+    state.favoriteFileRoots.length > 0 ||
+    state.recentFileRoots.length > 0 ||
+    Object.keys(state.fileRoots).length > 0
+  )
+    writeJsonObject(input.statePath, state)
 }
 
-export function saveUserUsageSpacing(homeDirectory: string, usageSpacing: boolean): void {
-  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
-  const existing = readJsonFile(filePath)
-  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, usageSpacing })
-}
-
-export function saveUserUsageSubscriptions(homeDirectory: string, usageSubscriptions: UsageSubscription[]): void {
-  const filePath = path.join(homeDirectory, ".config", "openSidebar", "config.json")
-  const existing = readJsonFile(filePath)
-  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, usageSubscriptions: [...usageSubscriptions] })
+// Old openSidebar shapes: top-level `showMcp`/`showLsp`, `fileRootPins`, and recent roots kept only in
+// `fileRoots.*.customRoots`.
+function upgradeLegacySidebar(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object") return {}
+  const input = value as Record<string, unknown>
+  const sessionRoots = Object.values(input.fileRoots && typeof input.fileRoots === "object" ? input.fileRoots : {})
+    .map((state) => (state && typeof state === "object" ? (state as { customRoots?: unknown }).customRoots : undefined))
+    .flatMap((roots) => (Array.isArray(roots) ? roots : []))
+  const hasRecent = Array.isArray(input.recentFileRoots) && input.recentFileRoots.length > 0
+  return {
+    ...input,
+    visibility:
+      input.visibility ??
+      (typeof input.showMcp === "boolean" || typeof input.showLsp === "boolean"
+        ? { showMcp: input.showMcp, showLsp: input.showLsp }
+        : undefined),
+    favoriteFileRoots: input.favoriteFileRoots ?? input.fileRootPins,
+    recentFileRoots: hasRecent || sessionRoots.length === 0 ? input.recentFileRoots : sessionRoots,
+  }
 }
 
 export function writeJsonObject(filePath: string, value: Record<string, unknown>): void {

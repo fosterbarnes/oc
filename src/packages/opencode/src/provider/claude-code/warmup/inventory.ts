@@ -1,6 +1,5 @@
 import { isRecord } from "@/util/record"
-import { DEFAULT_ACCOUNT } from "../accounts.js"
-import { buildWarmupEnv, cliRunner, warmupConfigDir, warmupCwd, type ChildTracker, type CliRunResult } from "./cli"
+import { cliRunner, warmupCwd, warmupEnv, type ChildTracker, type CliRunResult } from "./cli"
 
 export const AUTH_PROBE_TIMEOUT_MS = 15_000
 export const INVENTORY_TTL_MS = 60_000
@@ -33,9 +32,7 @@ async function probeAccount(
   signal?: AbortSignal,
   tracker?: ChildTracker,
 ): Promise<InventoryProbe> {
-  const configDir = warmupConfigDir(accountID)
-  const env = buildWarmupEnv(accountID === DEFAULT_ACCOUNT ? undefined : accountID)
-  env.CLAUDE_CONFIG_DIR = configDir
+  const env = warmupEnv(accountID)
   let result: CliRunResult
   try {
     // Raw argv: the runner alone resolves the launcher via cliCommand, so a

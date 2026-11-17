@@ -76,9 +76,12 @@ export function buildWarmupEnv(configDir: string | undefined): Record<string, st
   return env
 }
 
-export function warmupConfigDir(accountID: string): string {
-  if (accountID === DEFAULT_ACCOUNT) return materializeDefaultDir()
-  return accountID
+// The default account keeps the inherited environment, never an explicit
+// CLAUDE_CONFIG_DIR: on macOS the CLI keys its Keychain login by whether that
+// variable is set, so pinning it to ~/.claude reads as signed out.
+export function warmupEnv(accountID: string): Record<string, string | undefined> {
+  const isDefault = accountID === DEFAULT_ACCOUNT || accountID === materializeDefaultDir()
+  return buildWarmupEnv(isDefault ? undefined : accountID)
 }
 
 // Neutral owned working directory for auth probes and greetings: a data-dir

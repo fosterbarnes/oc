@@ -1,8 +1,8 @@
 # Contributing to oc
 
 oc is a personal fork of OpenCode that I've opened up. Issues and pull requests are welcome. I
-ask that pull requests be intentional, tested, and scoped to what oc is for: a Windows-first
-OpenCode with the features described in the [README](README.md) and the
+ask that pull requests be intentional, tested, and scoped to what oc is for: an OpenCode for
+Windows and macOS (Linux planned) with the features described in the [README](README.md) and the
 [wiki](https://github.com/fosterbarnes/oc/wiki).
 
 Good fits:
@@ -21,7 +21,9 @@ its sync scripts ([UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)).
 
 ## Setup
 
-You need Windows 10 or 11, PowerShell 7, Git, and Bun (not 1.4.0, which crashes the Windows TUI).
+You need Windows 10 or 11 (or macOS on Apple Silicon, newer and less tested), PowerShell 7, Git,
+and Bun (not 1.4.0, which crashes the Windows TUI). Linux is not supported yet; full Windows,
+macOS, and Linux support ships on or before 0.3.0. macOS notes: [docs/dev/macos.md](docs/dev/macos.md).
 
 The Bun workspace lives in `src/`. Run `bun` from `src` or a package under it, never from the
 repository root.
@@ -30,12 +32,13 @@ repository root.
 cd src
 bun install
 cd ..
-.\.scripts\.run.ps1          # runs oc from source (bun dev .)
+.\.scripts\.run.ps1          # runs oc from source (bun dev . oc launch); -Native runs opencode in one window
 ```
 
 Build and install scripts are described in [SCRIPTS.md](SCRIPTS.md). `.scripts\build.ps1` builds
-`opencode.exe` without touching an installed copy. Note that `.scripts\install.ps1` installs to a
-fixed folder for now and stops running oc processes.
+`oc.exe` and `opencode.exe` without touching an installed copy. `.scripts\install.ps1` installs
+into the PATH folder that already holds `oc` and `occ`, else `%LOCALAPPDATA%\Programs\oc` on
+Windows or `~/.local/bin` on macOS, and stops running oc processes.
 
 Where things are:
 
@@ -70,13 +73,16 @@ If you change the public server API, regenerate the clients with `bun run genera
 
 - Keep each pull request small and focused on one change.
 - Say what changed, why, and how you checked it. Include screenshots for UI changes.
-- Use a conventional title: `type(scope): summary`, with type `feat`, `fix`, `docs`, `chore`,
-  `refactor`, or `test`. Example: `fix(tui): keep sidebar scroll position`.
+- Title it `<label> > <summary>` with a label from
+  [docs/dev/commitMessage.md](docs/dev/commitMessage.md) (`fix`, `feat.`, `patch`, `docs`, ...).
+  Example: `fix > sidebar scroll position`. Commit subjects also carry the version and version
+  tag (`v<version> <versionTag> [<label> > <summary>]`); only the maintainer can generate tags.
 - Follow the code style in [AGENTS.md](AGENTS.md) (no `else`, prefer `const`, no aliased or star
   imports, Bun APIs where they fit).
 - Write descriptions in your own words and keep them short.
 
 ## Reporting bugs
 
-Use the bug report template. Include your oc version (shown in the sidebar footer as `oc vX`),
-your terminal, and steps to reproduce. Logs are in `%USERPROFILE%\.local\share\opencode\log`.
+Use the bug report template. Include your oc version (shown in the sidebar footer as `oc vX ∙ OG vY`),
+your terminal, and steps to reproduce. Logs are in `~/.local/share/opencode/log` (`~` is
+`%USERPROFILE%` on Windows).

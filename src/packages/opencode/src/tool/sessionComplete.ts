@@ -8,19 +8,20 @@ import DESCRIPTION from "./session-complete.txt"
 export const Parameters = Schema.Struct({
   autoDelete: Schema.optional(Schema.Boolean).annotate({
     description:
-      "Only after a successful agent-push: let the TUI delete this session once it is left (sessions opened by /agent-push only)",
+      "Only after a successful push: let the TUI delete this session once it is left (only sessions a push command started)",
   }),
 })
 
-// Title set when /agent-push starts; completion appends the pushed commit (`oc - agent-push:#b5e4f26`).
-export function agentPushTitle(directory: string) {
-  return `${path.basename(directory)} - agent-push:`
+// Title a push command gives the session it starts (`SessionPrompt.command`); completion appends the
+// pushed commit (`oc - ship:#b5e4f26`).
+export function pushTitle(directory: string, command: string) {
+  return `${path.basename(directory)} - ${command}:`
 }
 
-// Session metadata flag read by the TUI (`tui/src/agentPushAutoDelete.ts`).
+// Session metadata flag read by the TUI (`tui/src/pushAutoDelete.ts`).
 export const AUTO_DELETE_KEY = "ocAutoDelete"
-// Set when /agent-push is a session's first message (`SessionPrompt.command`). Only such sessions may
-// auto-delete; a push run in the middle of other work keeps its session and history.
+// Set when a push command (frontmatter `pushSession: true`) is a session's first message. Only such
+// sessions may auto-delete; a push run in the middle of other work keeps its session and history.
 export const PUSH_SESSION_KEY = "ocPushSession"
 
 export const SessionCompleteTool = Tool.define(
@@ -45,12 +46,19 @@ export const SessionCompleteTool = Tool.define(
             metadata: {},
           })
           yield* session.setSessionComplete({ sessionID: ctx.sessionID, sessionComplete: true })
-          const titled = info.title === agentPushTitle(info.directory)
+          const pushSession = info.metadata?.[PUSH_SESSION_KEY] === true
+          // Still the push title (`pushTitle`): not renamed, and no commit appended yet.
+          const titled =
+            pushSession && info.title.startsWith(`${path.basename(info.directory)} - `) && info.title.endsWith(":")
           const done = { title: "Session complete", output: "Marked the current session complete.", metadata: {} }
-          const autoDelete = params.autoDelete === true && info.metadata?.[PUSH_SESSION_KEY] === true
-          const reply = params.autoDelete && !autoDelete
-            ? { ...done, output: `${done.output} Not marked for auto-delete: the session did not start with /agent-push.` }
-            : done
+          const autoDelete = params.autoDelete === true && pushSession
+          const reply =
+            params.autoDelete && !autoDelete
+              ? {
+                  ...done,
+                  output: `${done.output} Not marked for auto-delete: the session did not start with a push command.`,
+                }
+              : done
           if (!titled && !autoDelete) return reply
           // Only a HEAD that matches its upstream counts as pushed; otherwise the bare title marks the failure.
           const refs = yield* git.run(["rev-parse", "HEAD", "@{u}"], { cwd: info.directory })

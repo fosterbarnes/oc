@@ -6,7 +6,7 @@ import { Global } from "../global"
 // revives; the revive pipeline settles the file `ready` or `failed`; the TUI that next opens the session
 // claims it and sends the steps (ready) or puts them back in the prompt (failed or expired).
 export type Mode = "install" | "no-install" | "single"
-// `text` only for a chain without slash commands, where each text segment is its own prompt.
+// `text`: a plain step's prompt, or a command step's request (slash.ts `splitSlashSteps`).
 export type Step = { type: "send"; names: string[]; text?: string } | { type: "revive"; mode: Mode }
 // A step as the session queue stores it (`Payload.chain`), with readonly arrays.
 export type ReadonlyStep = { type: "send"; names: readonly string[]; text?: string } | { type: "revive"; mode: Mode }
@@ -40,7 +40,10 @@ export function label(step: ReadonlyStep) {
 /** What the user would type to run these steps again. */
 export function chainText(steps: readonly ReadonlyStep[], request: string, separator = "\n") {
   const typed = steps
-    .map((step) => (step.type === "send" && !step.names.length ? (step.text ?? "") : label(step)))
+    .map((step) => {
+      if (step.type !== "send") return label(step)
+      return [...step.names.map((name) => `/${name}`), step.text ?? ""].filter(Boolean).join(" ")
+    })
     .join(" ")
   return [typed, request].filter(Boolean).join(separator)
 }

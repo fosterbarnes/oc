@@ -30,16 +30,25 @@ const spit = {
   websearch: "allow",
 } as const
 const imp = { read: "allow", edit: "allow", bash: "allow", task: "allow" } as const
-const ALL_NATIVE = ["bash", "edit", "write", "read", "glob", "grep", "webfetch", "todowrite", "websearch"]
+const ALL_NATIVE = ["bash", "edit", "write", "read", "glob", "grep", "webfetch", "todowrite", "skill", "websearch"]
 
 test("ordinary turns carry no plan", () => {
   expect(commandToolPlan(user())).toBeUndefined()
 })
 
+test("an unrestricted active command forwards mode_switch through oc", () => {
+  const plan = commandToolPlan(user({}))
+  expect(plan).toBeDefined()
+  if (!plan) throw new Error("expected an active-command tool plan")
+  const split = splitCommandTools(plan, [{ name: "read" }, { name: "mode_switch" }])
+  expect(split.forwarded).toContain("mode_switch")
+  expect(split.kept).toContain("Read")
+})
+
 test("auto keeps Claude's own tools unless the command limits them", () => {
   expect(commandToolPlan(user(imp))).toEqual({ native: ALL_NATIVE, closed: false })
   expect(commandToolPlan(user(spit))).toEqual({
-    native: ["bash", "read", "glob", "grep", "webfetch", "todowrite", "websearch"],
+    native: ["bash", "read", "glob", "grep", "webfetch", "todowrite", "skill", "websearch"],
     closed: true,
   })
   expect(commandToolPlan(user({ bash: { "*": "allow", "git push *": "ask" } }))!.native).not.toContain("bash")
@@ -49,6 +58,7 @@ test("auto keeps Claude's own tools unless the command limits them", () => {
     "bash",
     "webfetch",
     "todowrite",
+    "skill",
     "websearch",
   ])
 })
@@ -81,7 +91,7 @@ test("the split never offers a tool both ways, and denied tools stay off", () =>
   const split = splitCommandTools({ native: ["bash", "read", "glob"], closed: true }, offered)
   expect(split.forwarded.toSorted()).toEqual(["edit", "session_read", "task", "write"])
   // glob is not offered (denied), so Claude's Glob stays off too.
-  expect(split.kept).toEqual(["Bash", "PowerShell", "Read"])
+  expect(split.kept).toEqual(["Bash", "PowerShell", "Monitor", "TaskStop", "Read"])
   expect(split.off).toContain("Glob")
   expect(split.off).toContain("Edit")
   expect(split.off).not.toContain("Bash")
@@ -89,6 +99,24 @@ test("the split never offers a tool both ways, and denied tools stay off", () =>
   const ocShell = splitCommandTools({ native: [], closed: false }, offered)
   expect(ocShell.forwarded).toContain("bgStatus")
   expect(ocShell.kept).toEqual([])
+  expect(ocShell.off).toContain("Monitor")
+})
+
+test("a closed command turn that allows skill keeps Claude's Skill", () => {
+  const offered = ["read", "skill"].map((name) => ({ name }))
+  const allowed = splitCommandTools(commandToolPlan(user({ ...spit, skill: "allow" }))!, offered)
+  expect(allowed.kept).toContain("Skill")
+  expect(allowed.forwarded).not.toContain("skill")
+
+  // A skill pattern only oc can enforce: Skill off, oc's skill tool through the proxy.
+  const limited = commandToolPlan(user({ ...spit, skill: { "*": "deny", "tui-mockup": "allow" } }))!
+  expect(limited.native).not.toContain("skill")
+  const proxied = splitCommandTools(limited, offered)
+  expect(proxied.off).toContain("Skill")
+  expect(proxied.forwarded).toContain("skill")
+
+  // Denied: oc offers no skill tool, so Skill stays off.
+  expect(splitCommandTools(commandToolPlan(user(spit))!, [{ name: "read" }]).off).toContain("Skill")
 })
 
 test("agent rules denying websearch turn Claude's WebSearch off", () => {

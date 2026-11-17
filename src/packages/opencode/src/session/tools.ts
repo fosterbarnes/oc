@@ -1,5 +1,6 @@
 import { Agent } from "@/agent/agent"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Provider } from "@/provider/provider"
 import { ProviderTransform } from "@/provider/transform"
 import { MCP } from "@/mcp"
@@ -24,6 +25,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { ActiveCommand } from "./activeCommand"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -93,6 +95,23 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
   const flags = yield* RuntimeFlags.Service
   const user = input.messages.findLast((message) => message.info.role === "user")?.info
   const turnPermission = user?.role === "user" ? user.permission : undefined
+  const active = MessageV2.chronological(input.messages).findLast(
+    (message) =>
+      message.info.role === "user" &&
+      message.parts.some(
+        (part) => part.type === "text" && (!part.synthetic || (part.metadata && ActiveCommand.KEY in part.metadata)),
+      ),
+  )
+  const ruleset = Permission.merge(input.agent.permission, input.session.permission ?? [])
+  // A denial is where a model decides what to do next, so name mode_switch there instead of on every message.
+  // Live test 2026-11-16 (haiku): a denied edit in /imp made it tell the user to change permissions.
+  const switchHint =
+    !input.session.parentID &&
+    !!active &&
+    !!ActiveCommand.read(active.parts) &&
+    !Permission.disabled(["mode_switch"], ruleset).has("mode_switch")
+      ? "The active command does not allow this. If another command fits this request, ask the user to switch with mode_switch instead of asking them to change permissions."
+      : undefined
 
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
@@ -127,9 +146,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           ...req,
           sessionID: input.session.id,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
+          ruleset,
         })
-        .pipe(Effect.orDie),
+        .pipe(
+          Effect.mapError((error) =>
+            switchHint && error instanceof PermissionV1.DeniedError
+              ? new PermissionV1.DeniedError({ ruleset: error.ruleset, hint: switchHint })
+              : error,
+          ),
+          Effect.orDie,
+          Effect.interruptible,
+        ),
   })
 
   for (const item of yield* registry.tools({
@@ -138,11 +165,13 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
     agent: input.agent,
     permission: input.session.permission,
   })) {
+    if (item.id === "mode_switch" && (input.session.parentID || !active || !ActiveCommand.read(active.parts))) continue
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     const built: AITool = tool({
       description: item.description,
       inputSchema: jsonSchema(schema),
       execute(args, options) {
+        // Shell handles the abort signal itself, then saves its drained and truncated output.
         return run.promise(
           Effect.gen(function* () {
             // Set by the Claude Code executor in session/llm.ts; the provider emits the call just before running it.
@@ -173,7 +202,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
               yield* input.processor.completeToolCall(options.toolCallId, output)
             }
             return output
-          }),
+          }).pipe(item.id === "bash" ? Effect.uninterruptible : Effect.interruptible),
           { signal: options.abortSignal },
         )
       },

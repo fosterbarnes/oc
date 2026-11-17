@@ -6,6 +6,7 @@ import { Cause, Effect, Exit, Layer, Logger, Option } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
+import { Command } from "@/command"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
 import { ConfigVariable } from "../../src/config/variable"
@@ -1234,6 +1235,18 @@ it.instance("commands() rescans command files and keeps the last good version", 
     yield* FSUtil.use.writeWithDirs(path.join(test.directory, ".opencode", "commands", "added.md"), "Added")
     expect((yield* Config.use.commands()).commands["added"]?.template).toBe("Added")
   }),
+)
+
+testEffect(LayerNode.compile(LayerNode.group([Command.node, FSUtil.node]), [[Config.node, layer]])).instance(
+  "discovers commands in a .opencode directory created after the first list",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const commands = yield* Command.Service
+      expect((yield* commands.list()).some((command) => command.name === "x")).toBe(false)
+      yield* FSUtil.use.writeWithDirs(path.join(test.directory, ".opencode", "command", "x.md"), "New command")
+      expect((yield* commands.list()).find((command) => command.name === "x")?.template).toBe("New command")
+    }),
 )
 
 it.instance("updates config and writes to file", () =>

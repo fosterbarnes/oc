@@ -12,25 +12,24 @@ import { useDialog } from "./ui/dialog"
 import { useToast } from "./ui/toast"
 import { errorMessage } from "./util/error"
 
+// Saved under its original key so an existing on/off choice carries over.
 const _KV_KEY = "agent_push_auto_delete"
 // Set by session_complete with autoDelete after a verified push (`AUTO_DELETE_KEY` in
 // opencode/src/tool/sessionComplete.ts). A later prompt clears sessionComplete, which keeps the session.
 const _FLAG = "ocAutoDelete"
-// Set only when /agent-push opened the session (`PUSH_SESSION_KEY`), so a push run mid-work never deletes,
-// including sessions flagged before that rule existed.
+// Set only when a push command (frontmatter `pushSession: true`) opened the session (`PUSH_SESSION_KEY`),
+// so a push run mid-work never deletes, including sessions flagged before that rule existed.
 const _PUSH_SESSION = "ocPushSession"
 
 export function isAutoDeletable(session?: { metadata?: Record<string, unknown>; sessionComplete?: boolean }) {
   return (
-    session?.metadata?.[_FLAG] === true &&
-    session.metadata[_PUSH_SESSION] === true &&
-    session.sessionComplete === true
+    session?.metadata?.[_FLAG] === true && session.metadata[_PUSH_SESSION] === true && session.sessionComplete === true
   )
 }
 
 // When on, deletes a flagged session once this tab leaves it. Sessions left by closing oc are swept
 // when the setting turns on or oc next starts.
-export function createAgentPushAutoDelete() {
+export function createPushAutoDelete() {
   const kv = useKV()
   const sdk = useSDK()
   const sync = useSync()
@@ -62,7 +61,8 @@ export function createAgentPushAutoDelete() {
     if (deleted === 0) return
     toast.show({
       variant: "success",
-      message: targets.length === 1 ? `Deleted pushed session: ${targets[0].title}` : `Deleted ${deleted} pushed sessions`,
+      message:
+        targets.length === 1 ? `Deleted pushed session: ${targets[0].title}` : `Deleted ${deleted} pushed sessions`,
     })
   }
 
@@ -89,11 +89,11 @@ export function createAgentPushAutoDelete() {
   })
 
   return {
-    name: "oc.agent_push_auto_delete",
-    title: "Agent-push auto-delete",
+    name: "oc.push_auto_delete",
+    title: "Push session auto-delete",
     category: "oc",
     group: "Defaults",
-    slashName: "agentPushAutoDelete",
+    slashName: "pushAutoDelete",
     get desc() {
       return enabled() ? "on" : "off"
     },
@@ -112,9 +112,7 @@ export function openInOtherTabs(dir = path.join(Global.Path.state, "oc-tuis")) {
   return new Set(
     fs
       .readdirSync(dir)
-      .filter(
-        (name) => /^\d+\.json$/.test(name) && name !== `${process.pid}.json` && running(parseInt(name)),
-      )
+      .filter((name) => /^\d+\.json$/.test(name) && name !== `${process.pid}.json` && running(parseInt(name)))
       .flatMap((name) => {
         const file = path.join(dir, name)
         if (!fs.existsSync(file)) return []

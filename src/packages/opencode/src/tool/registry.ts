@@ -2,6 +2,8 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { PlanExitTool } from "./plan"
+import { ModeSwitchTool } from "./modeSwitch"
+import { Command } from "@/command"
 import { SessionCompleteTool } from "./sessionComplete"
 import { SessionFailedTool } from "./sessionFailed"
 import { SessionTailTool } from "./sessionTail"
@@ -132,6 +134,7 @@ const layer = Layer.effect(
     const truncate = yield* Truncate.Service
     const flags = yield* RuntimeFlags.Service
     const mcp = yield* MCP.Service
+    const commands = yield* Command.Service
 
     const invalid = yield* InvalidTool
     const task = yield* TaskTool
@@ -141,6 +144,7 @@ const layer = Layer.effect(
     const todo = yield* TodoWriteTool
     const lsptool = yield* LspTool
     const plan = yield* PlanExitTool
+    const modeSwitch = yield* ModeSwitchTool
     const sessionComplete = yield* SessionCompleteTool
     const sessionFailed = yield* SessionFailedTool
     const sessionTail = yield* SessionTailTool
@@ -302,6 +306,7 @@ const layer = Layer.effect(
           question: Tool.init(question),
           lsp: Tool.init(lsptool),
           plan: Tool.init(plan),
+          modeSwitch: Tool.init(modeSwitch),
           sessionComplete: Tool.init(sessionComplete),
           sessionFailed: Tool.init(sessionFailed),
           sessionTail: Tool.init(sessionTail),
@@ -321,6 +326,7 @@ const layer = Layer.effect(
           builtin: [
             tool.invalid,
             ...(questionEnabled ? [tool.question] : []),
+            ...(questionEnabled ? [tool.modeSwitch] : []),
             tool.shell,
             tool.bgStatus,
             tool.bgKill,
@@ -455,6 +461,14 @@ const layer = Layer.effect(
             description: [
               output.description,
               tool.id === TaskTool.id ? yield* describeTask(input.agent, input.permission) : undefined,
+              tool.id === ModeSwitchTool.id
+                ? [
+                    ...(yield* commands.list())
+                      .filter((command) => command.suggest)
+                      .map((command) => `- ${command.name}: ${command.description ?? ""}`),
+                    "- none: leave the active command; default agent rules.",
+                  ].join("\n")
+                : undefined,
               tool.id === "execute" ? codeModeDescription : undefined,
             ]
               .filter(Boolean)
@@ -559,6 +573,7 @@ export const node = LayerNode.make({
   layer,
   deps: [
     Config.node,
+    Command.node,
     Plugin.node,
     Question.node,
     Todo.node,

@@ -17,7 +17,10 @@ function fakeOps(options: { consumed?: boolean; gate?: Deferred.Deferred<void>; 
         calls.prompt.push(input.parts.map((part) => (part.type === "text" ? part.text : part.type)).join("\n"))
         calls.prompts.push(input)
         const parentID = options.consumed === false ? MessageID.ascending() : input.messageID
-        return { info: { id: MessageID.ascending(), role: "assistant", parentID }, parts: [] } as unknown as SessionV1.WithParts
+        return {
+          info: { id: MessageID.ascending(), role: "assistant", parentID },
+          parts: [],
+        } as unknown as SessionV1.WithParts
       }),
     loop: () =>
       Effect.sync(() => {
@@ -27,6 +30,7 @@ function fakeOps(options: { consumed?: boolean; gate?: Deferred.Deferred<void>; 
     available: () => (options.gate ? Deferred.await(options.gate) : Effect.void),
     cancellation: () => Effect.sync(() => options.cancellation?.() ?? 0),
     partMetadata: () => Effect.void,
+    switchMode: () => Effect.die("switchMode not expected"),
   }
   return { ops, calls }
 }
@@ -83,7 +87,9 @@ describe("notifySession", () => {
 
   test("delivers concurrent notices as separate messages", async () => {
     const { ops, calls } = fakeOps()
-    await Effect.runPromise(Effect.all([notifySession(ops, notice("A")), notifySession(ops, notice("B"))], { concurrency: "unbounded" }))
+    await Effect.runPromise(
+      Effect.all([notifySession(ops, notice("A")), notifySession(ops, notice("B"))], { concurrency: "unbounded" }),
+    )
     expect(calls.prompt.toSorted()).toEqual(["A", "B"])
     expect(calls.loop).toBe(0)
   })

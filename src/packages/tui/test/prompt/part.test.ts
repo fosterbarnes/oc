@@ -92,10 +92,21 @@ describe("prompt part", () => {
       ],
       [{ name: "spit" }, { name: "think" }, { name: "imp" }],
     )
-    expect(commands).toEqual({ names: ["spit", "think"], arguments: "你好 notes: run /imp now $&\n" })
+    // Two typed commands split into steps; the pasted `/imp` never becomes one.
+    expect(commands.steps).toEqual([
+      { command: "spit", text: "你好 notes: run /imp now $&\n" },
+      { command: "think", text: "" },
+    ])
   })
 
-  test("splits a revive chain in typed text only and expands pastes in its request", () => {
+  test("one command keeps every word as its request, with no steps", () => {
+    expect(typedSlashCommands("fix the typo /imp in app.tsx", [], [{ name: "imp" }])).toEqual({
+      names: ["imp"],
+      arguments: "fix the typo  in app.tsx",
+    })
+  })
+
+  test("splits a revive chain in typed text only and expands pastes in its step text", () => {
     const marker = "[Pasted ~2 lines]"
     const prefix = "/pass "
     const commands = typedSlashCommands(
@@ -105,11 +116,10 @@ describe("prompt part", () => {
     )
     expect(commands.chain).toEqual({
       steps: [
-        { type: "send", names: ["pass"] },
+        { type: "send", names: ["pass"], text: "then /revive-single $&" },
         { type: "revive", mode: "install" },
         { type: "send", names: ["agent-push"] },
       ],
-      request: "then /revive-single $&",
     })
   })
 })

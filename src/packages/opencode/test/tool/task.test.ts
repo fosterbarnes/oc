@@ -29,7 +29,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { Permission } from "../../src/permission"
 import { Provider } from "../../src/provider/provider"
-import { agentPushTitle, AUTO_DELETE_KEY, PUSH_SESSION_KEY, SessionCompleteTool } from "../../src/tool/sessionComplete"
+import { AUTO_DELETE_KEY, PUSH_SESSION_KEY, pushTitle, SessionCompleteTool } from "../../src/tool/sessionComplete"
 import { SessionFailedTool } from "../../src/tool/sessionFailed"
 
 afterEach(async () => {
@@ -150,6 +150,7 @@ const unusedNoticeOps = {
   available: () => Effect.void,
   cancellation: () => Effect.succeed(0),
   partMetadata: () => Effect.void,
+  switchMode: () => Effect.die("switchMode not expected"),
 }
 
 function stubOps(opts?: {
@@ -316,12 +317,14 @@ describe("tool.task", () => {
   )
 
   it.instance(
-    "completion appends the pushed commit to an agent-push title",
+    "completion appends the pushed commit to a push session's title",
     () =>
       Effect.gen(function* () {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
-        const title = agentPushTitle(chat.directory)
+        const title = pushTitle(chat.directory, "ship")
+        // A push command sets the title and this flag together (`SessionPrompt.command`).
+        yield* sessions.setMetadata({ sessionID: chat.id, metadata: { [PUSH_SESSION_KEY]: true } })
         const def = yield* (yield* SessionCompleteTool).init()
         const git = (...args: string[]) => {
           const out = Bun.spawnSync(["git", ...args], { cwd: chat.directory })
@@ -357,7 +360,7 @@ describe("tool.task", () => {
   )
 
   it.instance(
-    "autoDelete flags a session opened by agent-push only after a verified push",
+    "autoDelete flags a session opened by a push command only after a verified push",
     () =>
       Effect.gen(function* () {
         const sessions = yield* Session.Service
@@ -395,11 +398,11 @@ describe("tool.task", () => {
         git("push", "-q", "-u", "origin", "HEAD")
         expect(yield* complete).toEqual({ output: "Marked the current session complete.", flag: true })
         expect((yield* sessions.get(chat.id)).title).toBe(chat.title)
-        // Pushed, but agent-push ran mid-session: the session and its history stay.
+        // Pushed, but the push command ran mid-session: the session and its history stay.
         yield* sessions.setMetadata({ sessionID: chat.id, metadata: {} })
         expect(yield* complete).toEqual({
           output:
-            "Marked the current session complete. Not marked for auto-delete: the session did not start with /agent-push.",
+            "Marked the current session complete. Not marked for auto-delete: the session did not start with a push command.",
           flag: undefined,
         })
       }),

@@ -50,7 +50,7 @@ body:
     id: screenshot-or-link
     attributes:
       label: Screenshot or log
-      description: Attach a screenshot, or the relevant lines from %USERPROFILE%\.local\share\opencode\log\opencode.log
+      description: Attach a screenshot, or the relevant lines from ~/.local/share/opencode/log/opencode.log (~ is %USERPROFILE% on Windows)
       placeholder: Drag and drop a screenshot or paste log lines here
     validations:
       required: false
@@ -60,7 +60,7 @@ body:
     attributes:
       label: Operating System
       description: what OS are you using?
-      placeholder: e.g., Windows 11 24H2, Windows 10 22H2
+      placeholder: e.g., Windows 11 24H2, Windows 10 22H2, macOS 15 (Apple Silicon)
     validations:
       required: false
 

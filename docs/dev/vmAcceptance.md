@@ -10,7 +10,8 @@ failed. Edition-sensitive rows: default terminal, Store and MSIX installs, admin
 
 - Installer VM test package: when the user asks for one, put the setup exes (`.installer\Output\*.exe`) and a `TESTING.md` checklist in `D:\VirtualBox VMs\Shared Folder\ocInstallerTest` (VirtualBox shared folder), not the Desktop. Check it is a folder before copying into it (`Test-Path -PathType Container`).
 
-IDs refer to the inventory in the fresh-machine parity plan (I = data and install, E = env vars,
+IDs refer to the inventory in the fresh-machine parity plan
+(the maintainer's planning notes, not in the repo; I = data and install, E = env vars,
 C = config, X = commands and accounts, K = keys). `-` means no inventory row yet: a failing `-` row
 gets an ID. Dev and stable side by side is a check on the dev PC, not a VM row.
 
@@ -102,6 +103,6 @@ Install stock OpenCode on the same VM. Its program is also called `opencode`, so
 
 | ID | Action | Expected |
 |---|---|---|
-| - | `/update` from the previous release (needs a published release) | Installs, reopens where you were |
+| - | `/update` (no releases yet: it resets the saved `/revive` source to GitHub `main` and rebuilds) | With no saved source, a toast says to run `/revive` once; otherwise installs and reopens where you were |
 | - | Run a newer setup exe while oc is open | oc windows close, upgrade completes, oc starts |
 | - | Uninstall **oc** from Apps & features | Install folder and PATH entry removed; data folders and dependencies kept |

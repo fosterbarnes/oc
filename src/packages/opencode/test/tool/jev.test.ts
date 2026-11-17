@@ -161,7 +161,7 @@ describe("jev requests", () => {
     )
     await expect(
       runCheck({ state: "x", checks: { q: "Is it?" } }, undefined, { TYPESAFE_BASE_URL: env.TYPESAFE_BASE_URL }),
-    ).rejects.toThrow("TYPESAFE_API_KEY is not set")
+    ).rejects.toThrow("No Jev key")
     expect(received.length).toBe(before)
   })
 })

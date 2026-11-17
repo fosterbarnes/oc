@@ -28,15 +28,6 @@ export const Event = {
   Executed: LegacyEvent.CommandExecuted,
 }
 
-// Leads a turn that combines several slash commands (`SessionPrompt.command`); titles strip it (`titleGen.ts`).
-export const COMPOSED_PREAMBLE = [
-  "Apply all listed slash commands together to the user request below.",
-  "They are complementary unless their instructions directly conflict.",
-  "For direct conflicts at the same instruction priority, later command instructions take precedence.",
-  "These commands replace any earlier slash command's persona, mode, and rules from this conversation.",
-  "Follow higher-priority instructions and permission restrictions. Writing a plan does not authorize implementing it.",
-].join("\n")
-
 export const Info = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
@@ -46,14 +37,17 @@ export const Info = Schema.Struct({
   // Server-side only (lazy MCP prompt promises, full skill bodies); `GET /command` leaves it out.
   template: Schema.optional(Schema.Unknown),
   subtask: Schema.optional(Schema.Boolean),
+  whenBlank: Schema.optional(Schema.Literals(["ask", "send"])),
   hints: Schema.Array(Schema.String),
 }).annotate({ identifier: "Command" })
 
-// `permission` and `toolHost` stay server-side (not in the public schema); `command()` applies them to that turn only.
+// Turn rules and suggestion eligibility stay server-side, outside `GET /command`.
 export type Info = Omit<Schema.Schema.Type<typeof Info>, "template"> & {
   template: Promise<string> | string
   permission?: ConfigPermissionV1.Info
   toolHost?: ConfigCommandV1.ToolHost
+  pushSession?: boolean
+  suggest?: boolean
 }
 
 export function hints(template: string) {
@@ -115,6 +109,8 @@ const layer = Layer.effect(
 
       commands[Default.INIT] = {
         name: Default.INIT,
+        whenBlank: "ask",
+        suggest: false,
         description: "guided AGENTS.md setup",
         source: "command",
         get template() {
@@ -124,6 +120,8 @@ const layer = Layer.effect(
       }
       commands[Default.REVIEW] = {
         name: Default.REVIEW,
+        whenBlank: "ask",
+        suggest: false,
         description: "review changes [commit|branch|pr], defaults to uncommitted",
         source: "command",
         get template() {
@@ -134,6 +132,8 @@ const layer = Layer.effect(
       }
       commands[Default.PROMPT] = {
         name: Default.PROMPT,
+        whenBlank: "ask",
+        suggest: false,
         description: "write a handoff prompt for a new session, copied when done",
         source: "command",
         template: PROMPT_HANDOFF,
@@ -155,6 +155,9 @@ const layer = Layer.effect(
           subtask: command.subtask,
           permission: command.permission,
           toolHost: command.toolHost,
+          pushSession: command.pushSession,
+          whenBlank: command.whenBlank ?? "ask",
+          suggest: command.suggest ?? false,
           hints: hints(command.template),
         }
       }
@@ -163,6 +166,8 @@ const layer = Layer.effect(
         commands[name] = {
           name,
           source: "mcp",
+          whenBlank: "ask",
+          suggest: false,
           description: prompt.description,
           get template() {
             return bridge.promise(
@@ -195,6 +200,8 @@ const layer = Layer.effect(
           name: item.name,
           description: item.description,
           source: "skill",
+          whenBlank: "ask",
+          suggest: false,
           get template() {
             if (!dir) return item.content
             return [

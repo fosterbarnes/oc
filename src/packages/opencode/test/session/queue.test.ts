@@ -17,6 +17,7 @@ import { SessionQueue } from "@/session/queue"
 import { ScheduledDelivery } from "@/session/scheduledDelivery"
 import { SessionRevert } from "@/session/revert"
 import { SessionRunState } from "@/session/run-state"
+import { Question } from "@/question"
 import { MessageID, SessionID } from "@/session/schema"
 import { TestInstance } from "../fixture/fixture"
 import { pollWithTimeout, testEffect } from "../lib/effect"
@@ -29,6 +30,7 @@ const it = testEffect(
   LayerNode.compile(
     LayerNode.group([
       SessionPrompt.node,
+      Question.node,
       SessionQueue.node,
       SessionRunState.node,
       Database.node,
@@ -73,7 +75,7 @@ type Fixture = Effect.Success<ReturnType<typeof setup>>
 const text = (value: string) => ({ type: "text" as const, text: value })
 
 const add = (fixture: Fixture, sessionID: SessionID, value: string) =>
-  fixture.prompt.queue.add({ sessionID, payload: { model: ref, parts: [text(value)] } })
+  fixture.prompt.queue.add(sessionID, [{ payload: { model: ref, parts: [text(value)] } }])
 
 // Texts of the user messages, oldest first.
 const userTexts = (fixture: Fixture, sessionID: SessionID) =>
@@ -104,6 +106,179 @@ const waitForPause = (fixture: Fixture, sessionID: SessionID, reason: string) =>
     "90 seconds",
   )
 
+it.instance("a batch add stays contiguous beside a concurrent add", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "atomic batch" })
+    yield* Effect.all(
+      [
+        fixture.queue.add(session.id, [{ payload: { parts: [text("a")] } }, { payload: { parts: [text("b")] } }]),
+        fixture.queue.add(session.id, [{ payload: { parts: [text("c")] } }]),
+      ],
+      { concurrency: "unbounded" },
+    )
+    expect([
+      ["a", "b", "c"],
+      ["c", "a", "b"],
+    ]).toContainEqual((yield* fixture.queue.snapshot(session.id)).entries.map((entry) => entry.text))
+  }),
+)
+
+for (const change of ["cancel", "edit"] as const) {
+  it.instance(`a blank split question closes on ${change} and drains without an answer`, () =>
+    Effect.gen(function* () {
+      const fixture = yield* setup({ command: { check: { template: "Inspect $ARGUMENTS" } } })
+      const session = yield* fixture.sessions.create({ title: "changed blank split" })
+      const questions = yield* Question.Service
+      yield* fixture.llm.text("done")
+      const id = MessageID.ascending()
+      yield* fixture.prompt.queue.add(session.id, [
+        { id, payload: { model: ref, commands: ["check"], parts: [], split: true } },
+        ...(change === "cancel" ? [{ payload: { model: ref, parts: [text("next prompt")] } }] : []),
+      ])
+      yield* pollWithTimeout(
+        questions.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === session.id))),
+        "blank command did not ask",
+      )
+      expect(yield* fixture.llm.calls).toBe(0)
+      if (change === "cancel") yield* fixture.prompt.queue.cancel({ sessionID: session.id, id })
+      if (change === "edit") yield* fixture.prompt.queue.edit({ sessionID: session.id, id, text: "updated request" })
+      yield* pollWithTimeout(
+        questions.list().pipe(Effect.map((items) => (items.length === 0 ? true : undefined))),
+        "stale blank question stayed open",
+      )
+      yield* drained(fixture, session.id, 1)
+      const sent = yield* userTexts(fixture, session.id)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]).toContain(change === "cancel" ? "next prompt" : "Inspect updated request")
+    }),
+  )
+}
+
+for (const answer of ["Send blank", "Use the latest diff", "Skip", "rejected", "send"] as const) {
+  it.instance(`blank split command handles ${answer} before claiming the entry`, () =>
+    Effect.gen(function* () {
+      const fixture = yield* setup({
+        command: { check: { template: "Inspect $ARGUMENTS", whenBlank: answer === "send" ? "send" : "ask" } },
+      })
+      const session = yield* fixture.sessions.create({ title: "blank split" })
+      const questions = yield* Question.Service
+      yield* fixture.llm.text("done")
+      const added = yield* fixture.prompt.queue.add(session.id, [
+        { payload: { model: ref, commands: ["check"], parts: [], split: true } },
+      ])
+      if (answer !== "send") {
+        const request = yield* pollWithTimeout(
+          questions.list().pipe(Effect.map((items) => items.find((item) => item.sessionID === session.id))),
+          "blank command did not ask",
+        )
+        expect(yield* fixture.llm.calls).toBe(0)
+        expect((yield* fixture.queue.snapshot(session.id)).entries[0]?.state).toBe("pending")
+        // A plain prompt still saves normally while the queue's question is open.
+        yield* fixture.prompt.prompt({
+          sessionID: session.id,
+          model: ref,
+          noReply: true,
+          parts: [text("plain while waiting")],
+        })
+        if (answer === "rejected") {
+          yield* questions.reject(request.id)
+          const paused = yield* waitForPause(fixture, session.id, "interrupted")
+          expect(paused.entries).toMatchObject([{ id: added.entries[0]?.id, state: "pending" }])
+          return
+        }
+        yield* questions.reply({ requestID: request.id, answers: [[answer]] })
+      }
+      yield* drained(fixture, session.id, answer === "Skip" ? 0 : 1)
+      const sent = (yield* userTexts(fixture, session.id)).filter((value) => value !== "plain while waiting")
+      expect(sent).toHaveLength(answer === "Skip" ? 0 : 1)
+      if (answer === "Use the latest diff") expect(sent[0]).toContain("Inspect Use the latest diff")
+      expect(yield* questions.list()).toHaveLength(0)
+    }),
+  )
+}
+
+it.instance("legacy command stacks expand in place and run separately ahead of the existing tail", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({
+      command: {
+        first: { template: "First $ARGUMENTS", permission: { edit: "deny" } },
+        second: { template: "Second $ARGUMENTS", whenBlank: "send", permission: { edit: "allow" } },
+      },
+    })
+    const session = yield* fixture.sessions.create({ title: "legacy stack" })
+    for (const value of ["one", "two", "three"]) yield* fixture.llm.text(value)
+    yield* fixture.queue.add(session.id, [
+      {
+        payload: {
+          model: ref,
+          commands: ["first", "second"],
+          parts: [text("request"), { type: "text", synthetic: true, text: "editor context" }],
+        },
+      },
+    ])
+    yield* fixture.queue.add(session.id, [{ payload: { model: ref, parts: [text("tail")] } }])
+    yield* fixture.prompt.queue.resume(session.id)
+    yield* drained(fixture, session.id, 3)
+    const users = (yield* fixture.sessions.messages({ sessionID: session.id })).filter(
+      (message) => message.info.role === "user",
+    )
+    expect(users).toHaveLength(3)
+    expect(users[0].parts[0]).toMatchObject({ metadata: { ocCommands: ["first"], ocCommandArguments: "request" } })
+    expect(users[1].parts).toHaveLength(1)
+    expect(users[1].parts[0]).toMatchObject({ metadata: { ocCommands: ["second"], ocCommandArguments: "" } })
+    expect(users[1].info).toMatchObject({ permission: [{ permission: "edit", action: "allow", pattern: "*" }] })
+    expect(users[2].parts[0]).toMatchObject({ text: "tail" })
+  }),
+)
+
+it.instance("a scheduled legacy stack runs sequentially in one new destination session", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup({
+      command: {
+        first: { template: "First $ARGUMENTS" },
+        second: { template: "Second $ARGUMENTS", whenBlank: "send" },
+      },
+    })
+    const origin = yield* fixture.sessions.create({ title: "scheduled stack" })
+    yield* fixture.llm.text("first reply")
+    yield* fixture.llm.text("second reply")
+    yield* fixture.queue.add(origin.id, [
+      {
+        target: "new",
+        runAt: Date.now() - 1000,
+        payload: { model: ref, commands: ["first", "second"], parts: [text("request")] },
+      },
+    ])
+    // Other test files can share this database, so only a session created by fireDue counts.
+    const before = new Set((yield* fixture.sessions.list({ roots: true })).map((item) => item.id))
+    yield* fixture.prompt.queue.fireDue((_sessionID, effect) => effect)
+    const target = yield* pollWithTimeout(
+      fixture.sessions.list({ roots: true }).pipe(Effect.map((items) => items.find((item) => !before.has(item.id)))),
+      "no destination session",
+    )
+    // A new session can also make a naming call, so wait on its turns rather than the LLM call count.
+    yield* pollWithTimeout(
+      Effect.gen(function* () {
+        const entries = (yield* fixture.queue.snapshot(target.id)).entries
+        const replies = (yield* fixture.sessions.messages({ sessionID: target.id })).filter(
+          (message) => message.info.role === "assistant" && message.info.time.completed,
+        )
+        return entries.length === 0 && replies.length === 2 ? (true as const) : undefined
+      }),
+      "destination queue never drained",
+    )
+    expect(yield* userTexts(fixture, origin.id)).toEqual([])
+    const messages = (yield* fixture.sessions.messages({ sessionID: target.id })).filter(
+      (message) => message.info.role === "user",
+    )
+    expect(messages).toHaveLength(2)
+    expect(messages[0].parts[0]).toMatchObject({ metadata: { ocCommands: ["first"], ocCommandArguments: "request" } })
+    expect(messages[1].parts[0]).toMatchObject({ metadata: { ocCommands: ["second"], ocCommandArguments: "" } })
+    expect((yield* fixture.queue.snapshot(origin.id)).entries).toEqual([])
+  }),
+)
+
 it.instance("sends queued prompts one at a time, in the order they were added", () =>
   Effect.gen(function* () {
     const fixture = yield* setup()
@@ -133,10 +308,11 @@ it.instance("a queued slash command keeps its editor context through an edit and
     yield* fixture.state.maintenance(
       session.id,
       Effect.gen(function* () {
-        const added = yield* fixture.prompt.queue.add({
-          sessionID: session.id,
-          payload: { model: ref, parts: [selection, text("old")], commands: ["plain"] },
-        })
+        const added = yield* fixture.prompt.queue.add(session.id, [
+          {
+            payload: { model: ref, parts: [selection, text("old")], commands: ["plain"] },
+          },
+        ])
         expect(added.entries.map((entry) => entry.text)).toEqual(["/plain old"])
         const id = added.entries[0]!.id
         const edited = yield* fixture.prompt.queue.edit({
@@ -256,10 +432,11 @@ it.instance("a queued revive chain holds the queue until one waiting TUI takes i
       { type: "send" as const, names: ["verify"] },
       { type: "revive" as const, mode: "install" as const },
     ]
-    const added = yield* fixture.prompt.queue.add({
-      sessionID: session.id,
-      payload: { agent: "build", model: ref, parts: [text("request")], chain },
-    })
+    const added = yield* fixture.prompt.queue.add(session.id, [
+      {
+        payload: { agent: "build", model: ref, parts: [text("request")], chain },
+      },
+    ])
     expect(added.entries.map((entry) => [entry.text, entry.chain])).toEqual([["/verify /revive request", true]])
     yield* add(fixture, session.id, "behind")
 
@@ -379,11 +556,12 @@ it.instance("delivery admission and receipt survive crashes without admitting tw
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "delivery boundaries" })
     for (const boundary of ["after claim", "after admission", "before receipt"]) {
-      const added = yield* fixture.queue.add({
-        sessionID: session.id,
-        payload: { model: ref, parts: [text(boundary)] },
-        runAt: Date.now() - 1000,
-      })
+      const added = yield* fixture.queue.add(session.id, [
+        {
+          payload: { model: ref, parts: [text(boundary)] },
+          runAt: Date.now() - 1000,
+        },
+      ])
       const id = added.entries[0]!.id
       expect((yield* fixture.queue.claim(session.id, Effect.succeed(true)))?.id).toBe(id)
       const messageID = yield* fixture.queue.prepare(id)
@@ -507,21 +685,23 @@ it.instance("an earlier queued schedule re-arms the sleeping deadline", () =>
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "deadline wake" })
     yield* fixture.llm.text("on time")
-    const later = yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("later")] },
-      runAt: Date.now() + 60_000,
-    })
+    const later = yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("later")] },
+        runAt: Date.now() + 60_000,
+      },
+    ])
     yield* Effect.gen(function* () {
       const version = ScheduledDelivery.queueWake.version()
       yield* fireDue(fixture)
       yield* ScheduledDelivery.queueWake.wait(version, yield* fixture.queue.deadline())
     }).pipe(Effect.forever, Effect.forkScoped({ startImmediately: true }))
-    yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("earlier")] },
-      runAt: Date.now() + 50,
-    })
+    yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("earlier")] },
+        runAt: Date.now() + 50,
+      },
+    ])
     yield* fixture.llm.wait(1).pipe(Effect.timeout("2 seconds"))
     expect(yield* userTexts(fixture, session.id)).toEqual(["earlier"])
     yield* fixture.queue.cancel({ sessionID: session.id, id: later.entries[0]!.id })
@@ -534,11 +714,12 @@ it.instance("a scheduled prompt lets queued prompts pass, then fires when due", 
     const session = yield* fixture.sessions.create({ title: "scheduled" })
     yield* fixture.llm.text("reply now")
     yield* fixture.llm.text("reply later")
-    const scheduled = yield* fixture.prompt.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("later")] },
-      runAt: Date.now() + 3_600_000,
-    })
+    const scheduled = yield* fixture.prompt.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("later")] },
+        runAt: Date.now() + 3_600_000,
+      },
+    ])
     const id = scheduled.entries[0]!.id
     yield* add(fixture, session.id, "now")
     yield* pollWithTimeout(
@@ -604,12 +785,13 @@ it.instance("a new-session prompt fires once, even with a second process on the 
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "origin" })
     yield* fixture.llm.text("new session reply")
-    const added = yield* fixture.prompt.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("elsewhere")] },
-      runAt: Date.now() + 3_600_000,
-      target: "new",
-    })
+    const added = yield* fixture.prompt.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("elsewhere")] },
+        runAt: Date.now() + 3_600_000,
+        target: "new",
+      },
+    ])
     const id = added.entries[0]!.id
     expect(added.entries[0]!.target).toBe("new")
     yield* makeDue(fixture, id)
@@ -641,13 +823,14 @@ it.instance("a new-session prompt fires once, even with a second process on the 
     expect(sent?.session_id).toBeDefined()
     expect(sent?.session_id).not.toBe(session.id)
     expect(
-      (yield* fixture.prompt.queue.add({
-        sessionID: session.id,
-        id,
-        payload: { model: ref, parts: [text("duplicate")] },
-        runAt: Date.now() - 1000,
-        target: "new",
-      })).entries,
+      (yield* fixture.prompt.queue.add(session.id, [
+        {
+          id,
+          payload: { model: ref, parts: [text("duplicate")] },
+          runAt: Date.now() - 1000,
+          target: "new",
+        },
+      ])).entries,
     ).toEqual([])
     yield* fireDue(fixture)
     expect(yield* fixture.llm.calls).toBe(1)
@@ -661,12 +844,13 @@ it.instance("a scheduled fork assigns its prompt id after copying history", () =
     yield* fixture.llm.text("original reply")
     yield* fixture.llm.text("scheduled reply")
     yield* fixture.prompt.prompt({ sessionID: session.id, model: ref, parts: [text("original")] })
-    const added = yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("scheduled fork")] },
-      runAt: Date.now() - 1000,
-      target: "fork",
-    })
+    const added = yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("scheduled fork")] },
+        runAt: Date.now() - 1000,
+        target: "fork",
+      },
+    ])
     const id = added.entries[0]!.id
     yield* fireDue(fixture)
     yield* drained(fixture, session.id, 2)
@@ -700,12 +884,13 @@ it.instance("starting another queue service leaves an already-live claim untouch
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "live owner" })
     const at = Date.now() - 1000
-    const added = yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("owned")] },
-      runAt: at,
-      target: "new",
-    })
+    const added = yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("owned")] },
+        runAt: at,
+        target: "new",
+      },
+    ])
     const id = added.entries[0]!.id
     expect((yield* fixture.queue.due(Date.now())).detached.map((entry) => entry.id)).toEqual([id])
     const messageID = yield* fixture.queue.prepare(id)
@@ -734,11 +919,12 @@ it.instance("recovery uses the sent message id and keeps duplicate-add protectio
   Effect.gen(function* () {
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "saved before exit" })
-    const added = yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("persisted")] },
-      runAt: Date.now() - 1000,
-    })
+    const added = yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("persisted")] },
+        runAt: Date.now() - 1000,
+      },
+    ])
     const id = added.entries[0]!.id
     yield* Effect.gen(function* () {
       const owner = yield* SessionQueue.Service
@@ -758,9 +944,7 @@ it.instance("recovery uses the sent message id and keeps duplicate-add protectio
     // Polling also recovers claims whose owner ended after this service started.
     yield* fixture.queue.due(Date.now())
     expect((yield* fixture.queue.snapshot(session.id)).entries).toEqual([])
-    expect(
-      (yield* fixture.queue.add({ sessionID: session.id, id, payload: { parts: [text("retry")] } })).entries,
-    ).toEqual([])
+    expect((yield* fixture.queue.add(session.id, [{ id, payload: { parts: [text("retry")] } }])).entries).toEqual([])
     expect(yield* fixture.llm.calls).toBe(0)
   }),
 )
@@ -769,12 +953,13 @@ it.instance("a failed project load releases a detached claim into the paused que
   Effect.gen(function* () {
     const fixture = yield* setup()
     const session = yield* fixture.sessions.create({ title: "unavailable project" })
-    yield* fixture.queue.add({
-      sessionID: session.id,
-      payload: { model: ref, parts: [text("recover me")] },
-      runAt: Date.now() - 1000,
-      target: "fork",
-    })
+    yield* fixture.queue.add(session.id, [
+      {
+        payload: { model: ref, parts: [text("recover me")] },
+        runAt: Date.now() - 1000,
+        target: "fork",
+      },
+    ])
     yield* fixture.prompt.queue.fireDue(() => Effect.die(new Error("project unavailable")))
     const snapshot = yield* waitForPause(fixture, session.id, "error")
     expect(snapshot.entries).toHaveLength(1)

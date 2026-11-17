@@ -9365,12 +9365,6 @@
                   "variant": {
                     "type": "string"
                   },
-                  "additionalCommands": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
                   "parts": {
                     "type": "array",
                     "items": {
@@ -10810,6 +10804,9 @@
                           "type": "string"
                         }
                       },
+                      "split": {
+                        "type": "boolean"
+                      },
                       "chain": {
                         "type": "array",
                         "items": {
@@ -10868,6 +10865,125 @@
                     "properties": {
                       "type": {
                         "type": "string",
+                        "enum": ["batch"]
+                      },
+                      "entries": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "pattern": "^msg"
+                            },
+                            "agent": {
+                              "type": "string"
+                            },
+                            "model": {
+                              "type": "object",
+                              "properties": {
+                                "providerID": {
+                                  "type": "string"
+                                },
+                                "modelID": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["providerID", "modelID"],
+                              "additionalProperties": false
+                            },
+                            "variant": {
+                              "type": "string"
+                            },
+                            "parts": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "$ref": "#/components/schemas/TextPartInput"
+                                  },
+                                  {
+                                    "$ref": "#/components/schemas/FilePartInput"
+                                  },
+                                  {
+                                    "$ref": "#/components/schemas/AgentPartInput"
+                                  }
+                                ]
+                              }
+                            },
+                            "commands": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "split": {
+                              "type": "boolean"
+                            },
+                            "chain": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["send"]
+                                      },
+                                      "names": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "names"],
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["revive"]
+                                      },
+                                      "mode": {
+                                        "type": "string",
+                                        "enum": ["install", "no-install", "single"]
+                                      }
+                                    },
+                                    "required": ["type", "mode"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              }
+                            },
+                            "runAt": {
+                              "type": "integer"
+                            },
+                            "target": {
+                              "type": "string",
+                              "enum": ["current", "fork", "new"]
+                            }
+                          },
+                          "required": ["parts"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["type", "entries"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
                         "enum": ["edit"]
                       },
                       "id": {
@@ -10882,6 +10998,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "split": {
+                        "type": "boolean"
                       },
                       "chain": {
                         "type": "array",
@@ -11050,6 +11169,9 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "split": {
+                          "type": "boolean"
                         },
                         "chain": {
                           "type": "array",
@@ -24233,6 +24355,13 @@
                 "subtask": {
                   "type": "boolean"
                 },
+                "whenBlank": {
+                  "type": "string",
+                  "enum": ["ask", "send"]
+                },
+                "suggest": {
+                  "type": "boolean"
+                },
                 "permission": {
                   "$ref": "#/components/schemas/PermissionConfig"
                 },
@@ -24242,6 +24371,9 @@
                     "type": "string",
                     "enum": ["auto", "oc", "harness"]
                   }
+                },
+                "pushSession": {
+                  "type": "boolean"
                 }
               },
               "required": ["template"],
@@ -25835,6 +25967,10 @@
           },
           "subtask": {
             "type": "boolean"
+          },
+          "whenBlank": {
+            "type": "string",
+            "enum": ["ask", "send"]
           },
           "hints": {
             "type": "array",

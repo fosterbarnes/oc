@@ -82,18 +82,20 @@ test("command generation is empty with no accounts and stable by account ID", ()
   expect(two[0].name).not.toBe("oc.claude_warmup.0")
 })
 
-test("parser accepts four distinct sorted times and rejects invalid input", () => {
+test("parser accepts distinct sorted times and rejects invalid input", () => {
   expect(parseTimes("")).toEqual({ ok: true, times: [] })
   expect(parseTimes("  ")).toEqual({ ok: true, times: [] })
   expect(parseTimes("12:00, 00:00, 12:00, 07:00")).toEqual({
     ok: true,
     times: ["00:00", "07:00", "12:00"],
   })
-  expect(parseTimes("00:00, 06:00, 12:00, 18:00")).toEqual({
+  expect(parseTimes("04:00, 09:00, 14:00, 19:00, 00:00")).toEqual({
     ok: true,
-    times: ["00:00", "06:00", "12:00", "18:00"],
+    times: ["00:00", "04:00", "09:00", "14:00", "19:00"],
   })
-  expect(parseTimes("00:00, 06:00, 12:00, 18:00, 22:00").ok).toBe(false)
+  const hourly = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`)
+  expect(parseTimes(hourly.join(", "))).toEqual({ ok: true, times: hourly })
+  expect(parseTimes([...hourly, "23:30"].join(", ")).ok).toBe(false)
   expect(parseTimes("7:00").ok).toBe(false)
   expect(parseTimes("24:00").ok).toBe(false)
   expect(parseTimes("07:60").ok).toBe(false)
@@ -597,7 +599,10 @@ test("invalid names and persisted shapes never overwrite the library", () =>
         { mode: "daily", times: ["24:00"] },
         { mode: "daily", times: [""] },
         { mode: "daily", times: ["07:00,12:00"] },
-        { mode: "daily", times: ["00:00", "01:00", "02:00", "03:00", "04:00"] },
+        {
+          mode: "daily",
+          times: [...Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`), "23:30"],
+        },
         { mode: "weekly", days: { mon: [] } },
         { mode: "weekly", days: { ...emptyWeeklyDays(), sun: null } },
       ].map((schedule) => JSON.stringify({ presets: [{ name: "Bad", schedule }] })),

@@ -53,7 +53,13 @@ export function evaluateFile(
       if (!Wildcard.match("edit", rule.permission)) return false
       const target = path.isAbsolute(rule.pattern) ? absolute : relative
       // In file globs **/ includes zero directories, unlike a command wildcard.
-      return Wildcard.match(target, rule.pattern.replaceAll("**/", "*").replaceAll("**\\", "*"))
+      const glob = rule.pattern.replaceAll("**/", "*").replaceAll("**\\", "*")
+      if (Wildcard.match(target, glob)) return true
+      if (!path.isAbsolute(glob)) return false
+      // Resolve only the static directory prefix, preserving wildcard semantics and lexical denials.
+      const wildcard = glob.search(/[?*]/)
+      const prefix = wildcard < 0 ? glob : path.dirname(glob.slice(0, wildcard) + "_")
+      return Wildcard.match(actualFilePath(absolute), path.join(actualFilePath(prefix), glob.slice(prefix.length)))
     }) ?? { permission: "edit", pattern: "*", action: "ask" }
   )
 }

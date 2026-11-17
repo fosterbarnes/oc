@@ -63,7 +63,7 @@ const _COMMAND_RANK = rankOf(
       "oc.subagent_tabs",
       "oc.subagent_usage",
     ],
-    ["model.default", "agent.session", "oc.context_limit", "oc.todos.toggle", "oc.agent_push_auto_delete"],
+    ["model.default", "agent.session", "oc.context_limit", "oc.todos.toggle", "oc.push_auto_delete"],
     ["oc.update_all_harnesses", "oc.update_models"],
     [
       "app.toggle.paste_summary",
@@ -83,7 +83,7 @@ const _COMMAND_RANK = rankOf(
     ],
     ["oc.home_dir", "oc.home_dir_sort", "oc.oc_dir"],
     ["server.restart", "server.shutdown", "oc.server_startup", "oc.killall", "oc.process_report"],
-    ["oc.sync", "oc.import", "oc.export", "oc.import_undo", "oc.jev_key", "oc.bgrun"],
+    ["oc.sync", "oc.import", "oc.export", "oc.import_undo", "oc.jev_key"],
     ["oc.about"],
   ].flat(),
 )

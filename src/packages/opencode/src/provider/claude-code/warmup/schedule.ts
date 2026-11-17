@@ -10,7 +10,7 @@ export interface DueOccurrence {
   time: string
 }
 
-export const MAX_TIMES_PER_DAY = 4
+export const MAX_TIMES_PER_DAY = 24
 export const CLAIM_RETENTION_DAYS = 8
 
 const TIME_RE = /^(\d{2}):(\d{2})$/

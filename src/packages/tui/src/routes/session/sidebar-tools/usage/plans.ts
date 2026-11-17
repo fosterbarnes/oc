@@ -103,9 +103,12 @@ export function usagePlanLabel(plan: UsagePlan) {
     .join(" ")
 }
 
-/** Sidebar text such as `Renews ~11/14 (18d)`; `~` marks an estimate. Urgent only once ended. */
+/**
+ * Sidebar text such as `Renews ~11/14 (18d)` (`~` marks an estimate) and the table column's `18d`
+ * (`end` once ended, `-` without a date). Urgent within 3 days or once ended.
+ */
 export function usagePlanLine(plan: UsagePlan, nowMs: number) {
-  if (plan.atMs === undefined) return { text: "Renewal date unknown", urgent: false }
+  if (plan.atMs === undefined) return { text: "Renewal date unknown", short: "-", urgent: false }
   const date = new Date(plan.atMs)
   // Rounded: a daylight-saving change makes one day 23 or 25 hours long.
   const days = Math.round((startOfDay(plan.atMs) - startOfDay(nowMs)) / DAY_MS)
@@ -113,7 +116,8 @@ export function usagePlanLine(plan: UsagePlan, nowMs: number) {
   const left = days > 0 ? ` (${days}d)` : days === 0 ? " (today)" : ""
   return {
     text: `${capitalize(plan.verb)} ${plan.source === "estimate" ? "~" : ""}${date.getMonth() + 1}/${date.getDate()}${year}${left}`,
-    urgent: plan.verb === "ended",
+    short: plan.verb === "ended" ? "end" : `${Math.max(0, days)}d`,
+    urgent: plan.verb === "ended" || days <= 3,
   }
 }
 
