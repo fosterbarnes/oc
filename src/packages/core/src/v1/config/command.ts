@@ -23,7 +23,8 @@ export const Info = Schema.Struct({
   // A push command: as a session's first message it titles the session `<folder> - <command>:`, and
   // `session_complete` then appends the pushed commit and may flag the session for auto-delete.
   pushSession: Schema.optional(Schema.Boolean),
-  // Extra names that rank this command first in the slash menu when typed exactly (`/push`).
+  // Extra names: typed `/push` runs this command and ranks it first in the slash menu. A real command
+  // name wins over an alias; oc's own TUI commands (`/btw`, `/revive*`) cannot be aliased away.
   aliases: Schema.optional(Schema.mutable(Schema.Array(Schema.String))),
 })
 export type Info = Schema.Schema.Type<typeof Info>

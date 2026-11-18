@@ -3,6 +3,7 @@ import {
   commandUse,
   extractChain,
   extractSlashCommands,
+  slashNames,
   slashTokenEnd,
   slashTriggerIndex,
   splitSlashSteps,
@@ -103,6 +104,26 @@ test("2+ commands split into ordered steps; text follows its command, a stack's 
     { command: "spit", text: "compare '/imp' and" },
     { command: "think", text: "" },
   ])
+})
+
+test("typed aliases resolve to their command everywhere commands are parsed", () => {
+  const available = [{ name: "agent-push", aliases: ["push"] }, { name: "spit" }]
+  expect(extractSlashCommands("/push notes", available)).toEqual({ names: ["agent-push"], arguments: "notes" })
+  expect(extractSlashCommands("/push /agent-push", available).names).toEqual(["agent-push"])
+  expect(extractSlashCommands("see '/push'", available).names).toEqual([])
+  expect(splitSlashSteps("/spit idea /push", available)).toEqual([
+    { command: "spit", text: "idea" },
+    { command: "agent-push", text: "" },
+  ])
+  expect(extractChain("/push /revive", available)?.steps[0]).toEqual({ type: "send", names: ["agent-push"] })
+  // A real name beats another command's alias; a shared alias goes to the first command listed.
+  expect(slashNames([{ name: "a", aliases: ["b"] }, { name: "b" }]).get("b")).toBe("b")
+  expect(
+    slashNames([
+      { name: "a", aliases: ["x"] },
+      { name: "c", aliases: ["x"] },
+    ]).get("x"),
+  ).toBe("a")
 })
 
 test("commands inside quotes or code fences never run", () => {

@@ -1,8 +1,8 @@
-v0.2.386 potentialBidnis [feat. > Claude account for next Home chat]
+v0.2.387 ummTension [fix > typed command aliases]
 
-Claude account for next Home chat:
-On the Home screen, "Switch Claude account (this session)" in the oc palette now picks the Claude account for the next chat you start from the prompt. The palette entry shows the pick (or "global"), the chat is pinned to that account before its first turn, and the pick then resets. Chats started from the New oc session folder picker do not use it.
+Typed command aliases:
+A command alias such as `/push` (from `aliases: [push]` frontmatter) now works when typed, not only when picked from the slash menu. Queueing `/push` with Alt+Enter no longer warns "Only server commands can be queued", `/push some notes` sent with the menu closed runs the command with "some notes" as its request, and aliases also work in messages with several commands, revive chains, and queued-prompt edits. When two commands share an alias, the menu and the typed message now pick the same one. `oc run` and ACP editors still need the real name.
 
-Under the hood: tui claudeCommands.tsx holds the pick in a module-level signal with takeNextSessionAccount(); the prompt's session-create path calls it after the model and agent attach and awaits claudeAccount.set(id, sessionID). No server or SDK change: pinSessionAccount only checks pool membership and the pin is read at turn start. Wiki Claude-Code.md updated.
+Under the hood: tui prompt/slash.ts adds a SlashCommand type and slashNames(), which maps typed names to command names (a real name beats any alias, and a shared alias goes to the first command listed). splitSlashSteps and extractSlashCommands resolve through it and emit real names, so queue entries, session.command, and the server never see an alias. The autocomplete server rows list only the aliases they own under the same rule. Wiki Agents-and-Skills.md updated.
 
-Checks: tui typecheck clean. Throwaway WezTerm pane probe with two accounts: Home pick showed in the palette, the first turn ran on the picked account and the pool file pinned that session, and after /new a second session got no pin (1 pass; probe deleted).
+Checks: new alias cases in tui slash.test.ts and part.test.ts (a typed alias resolves; the same alias in a paste or quotes stays text; collision rules); slash, part, and autocomplete tests 24 pass; tui typecheck clean.

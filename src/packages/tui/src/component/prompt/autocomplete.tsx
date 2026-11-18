@@ -34,7 +34,7 @@ import type { PromptInfo } from "../../prompt/history"
 import { useFrecency } from "../../prompt/frecency"
 import { useBindings, useCommandShortcut, useCommandSlashes, useOpencodeModeStack } from "../../keymap"
 import { displayCharAt, mentionTriggerIndex } from "../../prompt/display"
-import { REVIVE_MODES, slashTokenEnd, slashTriggerIndex } from "../../prompt/slash"
+import { REVIVE_MODES, slashNames, slashTokenEnd, slashTriggerIndex } from "../../prompt/slash"
 import type { FileSystemEntry } from "@opencode-ai/sdk/v2"
 
 function removeLineRange(input: string) {
@@ -518,13 +518,17 @@ export function Autocomplete(props: {
       ]
     })
 
+    // Each alias belongs to one row, by the same rule the submit and queue parser uses.
+    const names = slashNames(sync.data.command)
     for (const serverCommand of sync.data.command) {
       const label = serverCommand.source ? `:(${serverCommand.source})` : ""
       results.push({
         favoriteKey: `${serverCommand.source ?? "command"}:${serverCommand.name}`,
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
-        aliases: serverCommand.aliases?.map((alias) => "/" + alias),
+        aliases: serverCommand.aliases
+          ?.filter((alias) => names.get(alias) === serverCommand.name)
+          .map((alias) => "/" + alias),
         kind: serverCommand.source,
         onSelect: () => insertSlash(serverCommand.name),
       })

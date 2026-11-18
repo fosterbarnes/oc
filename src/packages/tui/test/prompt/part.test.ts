@@ -99,6 +99,17 @@ describe("prompt part", () => {
     ])
   })
 
+  test("a typed alias runs its command while the same alias in a paste stays text", () => {
+    const marker = "[Pasted ~1 lines]"
+    const prefix = "/push "
+    const commands = typedSlashCommands(
+      `${prefix}${marker}`,
+      [{ start: Bun.stringWidth(prefix), end: Bun.stringWidth(prefix + marker), text: "then /push again" }],
+      [{ name: "agent-push", aliases: ["push"] }],
+    )
+    expect(commands).toEqual({ names: ["agent-push"], arguments: "then /push again" })
+  })
+
   test("one command keeps every word as its request, with no steps", () => {
     expect(typedSlashCommands("fix the typo /imp in app.tsx", [], [{ name: "imp" }])).toEqual({
       names: ["imp"],

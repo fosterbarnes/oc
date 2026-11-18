@@ -56,8 +56,21 @@ export const REVIVE_MODES = {
   "revive-single": "single",
 } as const satisfies Record<string, ReviveResume.Mode>
 
+export type SlashCommand = { name: string; aliases?: readonly string[] }
+
+// Typed name -> command name, shared by the parser and the slash menu. A real name beats any alias;
+// a shared alias goes to the first command in list order (aliases go in reversed: a Map keeps the last write).
+export function slashNames(available: readonly SlashCommand[]) {
+  return new Map([
+    ...available
+      .toReversed()
+      .flatMap((command) => (command.aliases ?? []).map((alias) => [alias, command.name] as const)),
+    ...available.map((command) => [command.name, command.name] as const),
+  ])
+}
+
 // Revives never take text: a stack's text goes to its first other command, else to a plain step.
-export function extractChain(text: string, available: readonly { name: string }[]) {
+export function extractChain(text: string, available: readonly SlashCommand[]) {
   const revives = Object.keys(REVIVE_MODES)
   const steps = splitSlashSteps(text, [...available, ...revives.map((name) => ({ name }))], revives)
   if (!steps.some((step) => step.command && step.command in REVIVE_MODES)) return
@@ -75,18 +88,19 @@ export type SlashStep = { command?: string; text: string }
 // A message with 2+ commands runs as ordered steps. Text before the first command is a plain step;
 // each command gets the text up to the next command, and in a stack (`/spit /think text`) the first
 // command takes the text while the rest stay blank. `textless` commands are skipped as takers.
-export function splitSlashSteps(text: string, available: readonly { name: string }[], textless: string[] = []) {
-  const known = new Set(available.map((command) => command.name))
+export function splitSlashSteps(text: string, available: readonly SlashCommand[], textless: string[] = []) {
+  const names = slashNames(available)
   const ranges = quotedRanges(text)
   const found = [...text.matchAll(/(?<=^|\s)\/(\S+)(?=\s|$)/g)].filter(
-    (match) => known.has(match[1]) && !quoted(ranges, match.index),
+    (match) => names.has(match[1]) && !quoted(ranges, match.index),
   )
   const lead = text.slice(0, found[0]?.index).trim()
   return found.reduce<{ steps: SlashStep[]; taker?: number }>(
     (acc, match, index) => {
       const after = text.slice(match.index + match[0].length, found[index + 1]?.index).trim()
-      const steps = [...acc.steps, { command: match[1], text: "" }]
-      const taker = acc.taker ?? (textless.includes(match[1]) ? undefined : steps.length - 1)
+      const command = names.get(match[1])!
+      const steps = [...acc.steps, { command, text: "" }]
+      const taker = acc.taker ?? (textless.includes(command) ? undefined : steps.length - 1)
       if (!after) return { steps, taker }
       if (taker === undefined) return { steps: [...steps, { text: after }] }
       steps[taker] = { ...steps[taker], text: after }
@@ -96,18 +110,19 @@ export function splitSlashSteps(text: string, available: readonly { name: string
   ).steps
 }
 
-export function extractSlashCommands(text: string, available: readonly { name: string }[]) {
-  const known = new Set(available.map((command) => command.name))
+export function extractSlashCommands(text: string, available: readonly SlashCommand[]) {
+  const names = slashNames(available)
   const ranges = quotedRanges(text)
-  const names = new Set<string>()
+  const found = new Set<string>()
   const argumentsText = text
     .replace(/(^|\s)\/(\S+)(?=\s|$)/g, (match, lead: string, name: string, offset: number) => {
-      if (!known.has(name) || quoted(ranges, offset + lead.length)) return match
-      names.add(name)
+      const command = names.get(name)
+      if (!command || quoted(ranges, offset + lead.length)) return match
+      found.add(command)
       return lead
     })
     .trim()
-  return { names: [...names], arguments: argumentsText }
+  return { names: [...found], arguments: argumentsText }
 }
 
 // Quoted examples and code fences cite commands; they never run them. A quote opens only after the

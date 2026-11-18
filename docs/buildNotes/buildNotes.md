@@ -131,6 +131,26 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~04:11) - v0.2.387 ummTension - Typed command aliases run outside the slash menu - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp (plan `~/.config/opencode/plans/2026-11-18-slash-alias-parse.md`, second opinion from Sol 6.2, Terra 6.1, DeepSeek free); completed
+- Version: 0.2.387 ummTension
+- Fixed `/push` + Alt+Enter toasting "Only server commands can be queued": v0.2.378 aliases were menu-only, and `splitSlashSteps`/`extractSlashCommands` (`tui/src/prompt/slash.ts`) matched `name` only.
+- Added `SlashCommand` type and `slashNames(available)` in `slash.ts`: typed name -> canonical name; real name beats any alias; shared alias goes to the first command in list order. Both parsers emit canonical names, so queue payloads, `session.command`, `typedText`, and the server never see aliases. `extractChain` revives still win over a server alias `revive`.
+- Changed `typedSlashCommands` param to `SlashCommand[]` (`prompt/part.ts`).
+- Changed autocomplete server rows (`component/prompt/autocomplete.tsx` `commands` memo) to list only aliases they own per `slashNames`, so menu and parser agree (menu used alphabetical-first before).
+- Updated `aliases` comment in `core/src/v1/config/command.ts`; wiki `Agents-and-Skills.md` Aliases bullet.
+- Kept out of scope: `oc run` footer (`cli/cmd/run/footer.prompt.tsx:178`) and ACP (`acp/service.ts:546`) still match real names only; both already hold `aliases`.
+- Verification: added alias cases in `tui/test/prompt/slash.test.ts` and `part.test.ts` (typed alias resolves, pasted alias stays text); `bun test --timeout 30000` slash/part/autocomplete 24 pass; tui `bun run typecheck` clean. Live Alt+Enter not run (needs `/revive`).
+
+### User
+Slash commands
+- A typed alias such as `/push` now runs its command anywhere in a message, including queued prompts and messages with several commands.
+- When two commands share an alias, the menu and the typed message now pick the same one.
+
+---
+
 ## 2026-11-18 (~03:44) - v0.2.386 potentialBidnis - Claude session account pick on Home - Claude Opus 5.5, low; Imp
 
 ### Agent
