@@ -38,6 +38,9 @@ export type Settings = Partial<Record<Key, Value>> & {
   // Tailnet config sync for this machine (server/syncPeer.ts, core util/ocSync.ts). `exclude`: picker
   // tree keys (id prefixes, item ids, `tag:<name>`). Written by the TUI `/sync` dialog.
   sync?: { enabled?: boolean; exclude?: string[] }
+  // /mirror (core util/ocMirror.ts): what the other machine does with its own changes, whether to
+  // revive it afterwards, and how to reach each tailnet host (`auto`, `tailscale`, or an ssh destination).
+  mirror?: { dirty?: string; revive?: string; hosts?: Record<string, { ssh?: string }> }
 }
 
 export type ClaudeAccountEntry = {

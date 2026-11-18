@@ -328,7 +328,8 @@ export type TailscaleStatus = {
   /** This machine's tailnet host name (DNS label), or "" when Tailscale reports none. */
   selfHost: string
   selfIps: string[]
-  peers: { host: string; ips: string[]; online: boolean; user: number }[]
+  // `ssh`: the peer runs the Tailscale SSH server (core util/ocMirror.ts).
+  peers: { host: string; ips: string[]; online: boolean; user: number; ssh: boolean }[]
 }
 
 export async function tailscaleStatus(): Promise<TailscaleStatus> {
@@ -340,7 +341,14 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
     Self?: { UserID?: number; TailscaleIPs?: string[]; HostName?: string; DNSName?: string }
     Peer?: Record<
       string,
-      { HostName?: string; DNSName?: string; TailscaleIPs?: string[]; Online?: boolean; UserID?: number }
+      {
+        HostName?: string
+        DNSName?: string
+        TailscaleIPs?: string[]
+        Online?: boolean
+        UserID?: number
+        sshHostKeys?: string[]
+      }
     >
   }
   if (status.BackendState !== "Running") throw new Error(`Tailscale is ${status.BackendState ?? "not running"}`)
@@ -353,6 +361,7 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
       ips: peer.TailscaleIPs ?? [],
       online: peer.Online === true,
       user: peer.UserID ?? -2,
+      ssh: (peer.sshHostKeys?.length ?? 0) > 0,
     })),
   }
 }

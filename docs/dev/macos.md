@@ -12,8 +12,9 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral.
   profile (`~/.config/powershell/Microsoft.PowerShell_profile.ps1`) prepends the same folders. Build
   toolchain: Bun 1.4.2 (`src/package.json` pin), pwsh 7, git, tar.
 - Windows and the Mac are both full dev machines: each has its own git clone of GitHub `origin`
-  (Mac: `~/Documents/GitHub/oc`) with its own `node_modules`. Changes move between them only through
-  git (commit, push, pull); `/update` resets a machine's revive source to `origin/main` and rebuilds.
+  (Mac: `~/Documents/GitHub/oc`) with its own `node_modules`. Changes move between them through
+  git (commit, push, pull) or `/mirror` (git bundle over ssh into the other machine's revive source,
+  uncommitted work included; `FORK.md`); `/update` resets a machine's revive source to `origin/main` and rebuilds.
   The old rsync mirror from `/Volumes/C` is retired, and goonstation has no file shares since
   2026-11-12: read or copy its files over SSH (`ssh goon`, `scp`). Never `bun install` or build on the
   PC from the Mac (`node_modules` holds per-OS native packages).

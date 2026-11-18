@@ -131,6 +131,52 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~21:59) - v0.2.382 dongGuy - /mirror compares content, not "has changes" - Claude Opus 5.5, low; Debug, Plan, Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug -> Think -> Imp; completed
+- Version: 0.2.382 dongGuy (same uncommitted bump as the /mirror entry below)
+- ERROR (fixed): after a mirror the target held the sender's uncommitted files (blob hashes identical, measured Mac vs goonstation), yet every later /mirror prompted and `refuse` failed: presence check (`status --porcelain` non-empty). Notes: `~/.config/opencode/plans/2026-11-17-debug-mirror-dirty-prompt.md`; plan `2026-11-17-mirror-dirty-compare.md`.
+- Changed `OcMirror.Info`: `dirty: string[]` -> `tree` (work tree id via `worktreeTree`: temp index seeded from real, `add -A`, `write-tree`) + `changes` (`diff-tree -r -z --no-renames head tree`; `untracked` = new and not in `ls-files`).
+- Added `OcMirror.lost(changes, senderBlobs)`: lost = target content != sender snapshot content for that path; untracked file the sender lacks survives (restore leaves it); staged-new file is lost (`reset --hard` removes it). `Probe.lost`, `Probe.inSync` (equal head + tree).
+- Changed `receive`: re-checks with `lost` against `ls-tree <snapshot>^{tree}`; `refuse`/`backup` act only on lost paths. `snapshotCommit` now reuses `info().tree`.
+- Kept skew path `remoteInfo` (TODO): v0.2.382 targets send `dirty`; every path counts as lost (matches their own presence-based receive).
+- Changed `dialog-mirror.tsx`: row `in sync` / `N own change(s)`; Enter on in-sync row toasts and stops; prompt lists lost paths only.
+- Verification: core + tui typecheck exit 0; throwaway probe (deleted) via real CLI fake remote: re-mirror in sync with `refuse` and no stash; target edits (shared, untouched, spaced path) all lost, refuse throws, backup stashes; untracked own file not lost and kept; staged-new file lost; old-shape remote counts all lost. `info()` on the real oc repo 58-66 ms (3 runs) vs `git status` ~10 ms. Not run: real goonstation (still on the presence-based v0.2.382 build until revived).
+
+### User
+Mirror oc source
+- A machine that already matches shows "in sync", and Enter on it does nothing.
+- The "has changes" prompt now appears only for files the other machine changed itself, and lists just those files.
+- Files a previous mirror copied there no longer count as the other machine's changes, so "refuse" and "backup" no longer trigger on them.
+
+---
+
+## 2026-11-17 (~21:49) - v0.2.382 dongGuy - /mirror: push oc source to another tailnet machine - Claude Opus 5.5, low; Plan, Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Plan (/spit) then Implementation (/imp); completed, real-network checks pending
+- Version: 0.2.382 dongGuy
+- Added core `util/ocMirror.ts`: `settings` (oc.json `mirror.dirty`/`revive`/`hosts`), `info`, `targets`, `probe`, `push`, `revive` (sender); `receive`, `requestRevive`, `takeRevive` (target). Plan: `~/.config/opencode/plans/ocSourceBeam.md` (named before the rename to mirror).
+- Added hidden CLI `oc oc mirror info|receive|revive` (`cli/cmd/oc.ts` `MirrorCommand`); one JSON line on stdout, error last on stderr. Remote args must match `_SAFE_ARG` (passed through zsh/bash/cmd/pwsh unquoted).
+- Snapshot: temp `GIT_INDEX_FILE` seeded from the real index, `add -A`, `commit-tree` with a fixed `oc mirror` identity; real index/worktree untouched. `git stash create` misses untracked files.
+- Bundle: refs `refs/oc-mirror/{head,snapshot}` thin against the peer HEAD; empty file when nothing new. ERROR (fixed): `bundle create` drops a ref whose commit the basis excludes (HEAD unchanged), so receive fetches the `refs/oc-mirror/*` glob, then `cat-file -e` checks both commits.
+- Receive order: branch check, fetch, extra-commit guard (`--allow-extra`), dirty policy (`stash push -u` for backup), `reset --hard head`, `restore --source snapshot --staged --worktree :/`, `reset`. Untracked target files not in the snapshot stay (counted in the result).
+- Revive: `requestRevive` writes `state/mirror/revive.json` and waits 10 s for `claim-<id>` (exclusive `wx`); `useMirrorRevive` (`reviveCommands.tsx`, called once in `app.tsx`, non-native only) watches the folder and runs `revive.start("install", session)`. Claim files are not deleted right away, so a late second window cannot claim again; old ones are pruned.
+- Added `OcSync.TailscaleStatus.peers[].ssh` (`sshHostKeys` present). `mirror.hosts` `auto` uses `tailscale ssh` then, else `ssh -o BatchMode=yes -o ConnectTimeout=5 <host>`.
+- Added `tui/src/component/dialog-mirror.tsx`, palette `oc.mirror` (`/mirror`, Tools, ranked after `oc.sync`); `persistOcPath` in `ocSettings.ts` (persistOcSync now uses it).
+- Docs: wiki `Developing.md` section, `FORK.md` row, `docs/dev/macos.md` dev loop line. principles.md (user file, both machines) still says GitHub-only sync: not edited.
+- Verification: core/tui/opencode typecheck exit 0; `ocSync.test.ts` + `ocSource.test.ts` pass; throwaway probe (deleted) ran the real CLI as a fake remote with two temp repos: refuse, backup, unchanged-HEAD bundle, overwrite, target-only commits, branch mismatch, one-claim revive race. Not run: real ssh (Windows OpenSSH stdin, Tailscale SSH), the dialog, the TUI watcher revive.
+- Risk: every machine needs a build with `oc oc mirror` before it can receive; older ones show the ssh/yargs error in the dialog row.
+
+### User
+Mirror oc source
+- New `/mirror` (palette: Mirror oc source to another machine) lists your other tailnet machines with oc version, clean or changed files, and commits behind or ahead.
+- Enter on a machine makes its oc source folder match this one, including uncommitted and new files; it builds for itself on revive.
+- `oc.json` `mirror.dirty` (ask, refuse, overwrite, backup) and `mirror.revive` (ask, always, never) can be changed in the dialog; `mirror.hosts` sets how to ssh to each machine.
+
+---
+
 ## 2026-11-17 (~21:26) - v0.2.381 gorlfriendOrganize - /spit plan writes after a command switch; mockups get their own folder - Claude Opus 5.5, low; Debug, Plan, Implementation
 
 ### Agent

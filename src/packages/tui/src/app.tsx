@@ -107,7 +107,7 @@ import { validateHotkey } from "./hotkeyValidate"
 import { handleCrowTargetedCommandExecute, validatedCrowSessionHandle } from "./crow"
 import { createOcCommands } from "./ocCommands"
 import { persistTuiSetting } from "./ocSettings"
-import { reviveCommands, SKIPPED_VERSION, updateNotice } from "./reviveCommands"
+import { reviveCommands, SKIPPED_VERSION, updateNotice, useMirrorRevive } from "./reviveCommands"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -1509,6 +1509,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
     })
   })
 
+  useMirrorRevive(toast)
   createEffect(
     on(ready, (value) => {
       if (!value || sync.data.config.autoupdate === false) return

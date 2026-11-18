@@ -12,6 +12,7 @@ import { DialogModel } from "./component/dialog-model"
 import { DialogSessionCleanup } from "./component/dialog-session-cleanup"
 import { DialogSessionSubagents } from "./component/dialog-session-subagents"
 import { DialogSubagents } from "./component/dialog-subagents"
+import { DialogMirror } from "./component/dialog-mirror"
 import { DialogSync } from "./component/dialog-sync"
 import { Spinner } from "./component/spinner"
 import { DAILY_THEME_KEY, useTuiConfig } from "./config"
@@ -1217,6 +1218,14 @@ export function createOcCommands(input: {
         },
         slashName: "sync",
         run: () => dialog.replace(() => <DialogSync />),
+      },
+      {
+        name: "oc.mirror",
+        title: "Mirror oc source to another machine",
+        category: "oc",
+        group: "Tools",
+        slashName: "mirror",
+        run: () => dialog.replace(() => <DialogMirror />),
       },
       {
         name: "oc.import_undo",

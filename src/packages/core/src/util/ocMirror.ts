@@ -1,0 +1,438 @@
+// /mirror: make another tailnet machine's oc source folder (oc.json `revive.build.source`) equal to
+// this machine's: its commits plus uncommitted and untracked (not ignored) files. The sender (TUI
+// `component/dialog-mirror.tsx`) reaches each peer over ssh and runs the hidden `oc oc mirror`
+// commands there (opencode `cli/cmd/oc.ts`), which call `info`, `receive`, and `requestRevive`
+// below. Git moves the data as a bundle on ssh stdin, so `node_modules` and builds never cross OSes.
+import { readFileSync } from "node:fs"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { Global } from "../global"
+import { InstallationDisplayVersion } from "../installation/version"
+import { OcSync } from "./ocSync"
+
+export const DIRTY = ["ask", "refuse", "overwrite", "backup"] as const
+export const REVIVE = ["ask", "always", "never"] as const
+export type Dirty = (typeof DIRTY)[number]
+export type ReviveMode = (typeof REVIVE)[number]
+// `ssh` per tailnet host: `auto` (Tailscale SSH when the peer runs it, else `ssh <host>`),
+// `tailscale`, or an ssh destination (`goon`, `user@host`).
+export type Settings = { dirty: Dirty; revive: ReviveMode; hosts: Record<string, { ssh?: string }> }
+// One uncommitted change: blob at HEAD (`before`) and in the work tree (`after`); null = absent.
+// `untracked`: new and not in the index, so a mirror that lacks it leaves it in place.
+export type Change = { path: string; before: string | null; after: string | null; untracked?: true }
+// `tree`: the work tree (tracked + untracked, not ignored) as a git tree id. Tree ids are
+// deterministic, so equal `head` + `tree` means identical sources.
+export type Info = { version: string; source: string; branch: string; head: string; tree: string; changes: Change[] }
+export type Target = { host: string; command: string[] }
+// `missing`: sender commits the target lacks. `extra`: target commits the sender lacks; -1 when the
+// sender does not have the target's HEAD at all (so it has commits of its own). `lost`: target
+// changes a mirror would overwrite or delete. `inSync`: the target already equals this machine.
+export type Probe = Target & {
+  info?: Info
+  error?: string
+  missing?: number
+  extra?: number
+  lost?: string[]
+  inSync?: boolean
+}
+export type Received = { head: string; stashed: boolean; untracked: number }
+
+const _PROBE_TIMEOUT = 20_000
+const _REVIVE_WAIT = 10_000
+const _REVIVE_FRESH = 30_000
+const _REF = { head: "refs/oc-mirror/head", snapshot: "refs/oc-mirror/snapshot" }
+// Every argument is passed through the remote shell (zsh, bash, cmd, or pwsh): allow no quoting.
+const _SAFE_ARG = /^[A-Za-z0-9._/-]+$/
+// Temporary commit identity: the snapshot commit never lands on a branch.
+const _GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: "oc mirror",
+  GIT_AUTHOR_EMAIL: "oc-mirror@localhost",
+  GIT_COMMITTER_NAME: "oc mirror",
+  GIT_COMMITTER_EMAIL: "oc-mirror@localhost",
+}
+
+// A missing or unparsable oc.json means defaults, as `OcSync.settings` treats it.
+export function settings(): Settings {
+  const parsed = readOcJson().mirror as { dirty?: unknown; revive?: unknown; hosts?: unknown } | undefined
+  const hosts = parsed?.hosts && typeof parsed.hosts === "object" ? (parsed.hosts as Settings["hosts"]) : {}
+  return {
+    dirty: DIRTY.find((value) => value === parsed?.dirty) ?? "ask",
+    revive: REVIVE.find((value) => value === parsed?.revive) ?? "ask",
+    hosts,
+  }
+}
+
+/** This machine's oc source folder (`revive.build.source`), or undefined before the first /revive. */
+export function sourceDir() {
+  const build = (readOcJson().revive as { build?: { source?: unknown } } | undefined)?.build
+  return typeof build?.source === "string" && build.source.trim() ? build.source : undefined
+}
+
+export async function info(dir = sourceDir()): Promise<Info> {
+  if (!dir) throw new Error("No oc source folder saved on this machine; run /revive once to choose one")
+  const [branch, head, tree] = await Promise.all([
+    git(dir, ["rev-parse", "--abbrev-ref", "HEAD"]).then((value) => value.trim()),
+    git(dir, ["rev-parse", "HEAD"]).then((value) => value.trim()),
+    worktreeTree(dir),
+  ])
+  return {
+    version: InstallationDisplayVersion,
+    source: dir,
+    branch,
+    head,
+    tree,
+    changes: await changes(dir, head, tree),
+  }
+}
+
+/**
+ * Target changes a mirror would destroy: content that differs from what the sender writes
+ * (`sender`: path -> blob of its work tree). An untracked file the sender lacks survives.
+ */
+export function lost(list: readonly Change[], sender: ReadonlyMap<string, string>) {
+  return list
+    .filter((change) => {
+      const incoming = sender.get(change.path) ?? null
+      if (incoming === null && change.untracked) return false
+      return change.after !== incoming
+    })
+    .map((change) => change.path)
+}
+
+// --- Sender ---
+
+/** Online same-account tailnet peers and the command prefix that reaches each one. */
+export async function targets(current = settings()): Promise<Target[]> {
+  const tail = await OcSync.tailscaleStatus()
+  return tail.peers
+    .filter((peer) => peer.online && peer.user === tail.selfUser && peer.host)
+    .map((peer) => ({ host: peer.host, command: connect(peer.host, peer.ssh, current.hosts[peer.host]?.ssh) }))
+    .sort((a, b) => a.host.localeCompare(b.host))
+}
+
+/** Runs `oc oc mirror info` on the target and compares its HEAD with `local`. Never throws. */
+export async function probe(target: Target, local: Info): Promise<Probe> {
+  const result = await run([...target.command, "oc", "oc", "mirror", "info"], { timeout: _PROBE_TIMEOUT })
+    .then((output) => ({ info: remoteInfo(lastJson(output)) }))
+    .catch((error: unknown) => ({ error: firstLine(error) }))
+  if (!("info" in result)) return { ...target, ...result }
+  const remote = result.info
+  const inSync = remote.head === local.head && remote.tree === local.tree
+  // Old targets send no tree: every change they report counts as lost (their own receive agrees).
+  const lostPaths = !remote.tree
+    ? remote.changes.map((change) => change.path)
+    : remote.changes.length
+      ? lost(remote.changes, await blobs(local.source, local.tree))
+      : []
+  const known = await git(local.source, ["cat-file", "-e", `${remote.head}^{commit}`]).then(
+    () => true,
+    () => false,
+  )
+  if (!known) return { ...target, info: remote, extra: -1, lost: lostPaths, inSync }
+  const [missing, extra] = await Promise.all([
+    count(local.source, `${remote.head}..${local.head}`),
+    count(local.source, `${local.head}..${remote.head}`),
+  ])
+  return { ...target, info: remote, missing, extra, lost: lostPaths, inSync }
+}
+
+// TODO: drop once no machine runs v0.2.382 (sent `dirty: string[]`, no `tree`/`changes`).
+function remoteInfo(raw: unknown): Info {
+  const value = raw as Info & { dirty?: string[] }
+  if (Array.isArray(value.changes)) return value
+  const dirty = Array.isArray(value.dirty) ? value.dirty : []
+  return { ...value, tree: "", changes: dirty.map((file) => ({ path: file, before: null, after: null })) }
+}
+
+/**
+ * Sends this machine's source to `target`. `dirty`: what the target does with its own changes
+ * (`ask` is resolved by the caller). `allowExtra`: the target may lose commits this machine lacks.
+ */
+export async function push(
+  target: Target,
+  remote: Info,
+  options: { dirty: Exclude<Dirty, "ask">; allowExtra: boolean },
+): Promise<Received> {
+  const local = await info()
+  if (!_SAFE_ARG.test(local.branch)) throw new Error(`Branch name not supported by /mirror: ${local.branch}`)
+  if (local.branch !== remote.branch)
+    throw new Error(`${target.host} is on ${remote.branch}, this machine on ${local.branch}`)
+  const snapshot = await snapshotCommit(local.source, local.head, local.tree)
+  const bundle = path.join(os.tmpdir(), `oc-mirror-${process.pid}-${Date.now()}.bundle`)
+  try {
+    await writeBundle(local.source, bundle, local.head, snapshot, remote.head)
+    const args = ["--head", local.head, "--snapshot", snapshot, "--branch", local.branch, "--dirty", options.dirty]
+    const from = senderName()
+    if (_SAFE_ARG.test(from)) args.push("--from", from)
+    if (options.allowExtra) args.push("--allow-extra")
+    const output = await run([...target.command, "oc", "oc", "mirror", "receive", ...args], { stdin: bundle })
+    return lastJson(output) as Received
+  } finally {
+    await fs.rm(bundle, { force: true })
+  }
+}
+
+/** Asks the target's open oc window to revive. False when no window took it. */
+export async function revive(target: Target) {
+  const from = senderName()
+  const args = _SAFE_ARG.test(from) ? ["--from", from] : []
+  const output = await run([...target.command, "oc", "oc", "mirror", "revive", ...args], { timeout: _PROBE_TIMEOUT })
+  return (lastJson(output) as { claimed: boolean }).claimed
+}
+
+// Commit of the work tree `tree` (from `worktreeTree`) on top of HEAD; HEAD itself when clean.
+async function snapshotCommit(dir: string, head: string, tree: string) {
+  if (tree === (await git(dir, ["rev-parse", `${head}^{tree}`])).trim()) return head
+  return (await git(dir, ["commit-tree", tree, "-p", head, "-m", "oc mirror snapshot"], _GIT_IDENTITY)).trim()
+}
+
+// The work tree (tracked + untracked, not ignored) as a tree id, built in a temporary index so the
+// real index and work tree stay untouched. `git stash create` would miss untracked files.
+async function worktreeTree(dir: string) {
+  const index = path.join(os.tmpdir(), `oc-mirror-index-${process.pid}-${Date.now()}-${Math.random()}`)
+  // Starting from the real index keeps its stat data, so `add -A` only hashes changed files.
+  const real = path.resolve(dir, (await git(dir, ["rev-parse", "--git-path", "index"])).trim())
+  await fs.copyFile(real, index).catch(() => undefined)
+  const env = { GIT_INDEX_FILE: index }
+  try {
+    await git(dir, ["add", "-A"], env)
+    return (await git(dir, ["write-tree"], env)).trim()
+  } finally {
+    await fs.rm(index, { force: true })
+  }
+}
+
+// Uncommitted changes as blob pairs (`diff-tree -z`: ":<modes> <old> <new> <status>\0<path>\0").
+async function changes(dir: string, head: string, tree: string): Promise<Change[]> {
+  const fields = (await git(dir, ["diff-tree", "-r", "-z", "--no-renames", head, tree])).split("\0")
+  const indexed = new Set((await git(dir, ["ls-files", "-z"])).split("\0"))
+  const blob = (value: string | undefined) => (!value || /^0+$/.test(value) ? null : value)
+  const result: Change[] = []
+  for (let i = 0; i + 1 < fields.length; i += 2) {
+    const meta = fields[i]!.split(" ")
+    const change: Change = { path: fields[i + 1]!, before: blob(meta[2]), after: blob(meta[3]) }
+    result.push(change.before === null && !indexed.has(change.path) ? { ...change, untracked: true } : change)
+  }
+  return result
+}
+
+// Path -> blob for every file in `tree` (`ls-tree -z`: "<mode> <type> <blob>\t<path>\0").
+async function blobs(dir: string, tree: string) {
+  const entries = (await git(dir, ["ls-tree", "-r", "-z", tree])).split("\0").filter(Boolean)
+  return new Map(
+    entries.map((entry) => {
+      const tab = entry.indexOf("\t")
+      return [entry.slice(tab + 1), entry.slice(0, tab).split(" ")[2]!] as const
+    }),
+  )
+}
+
+// Leaves `file` empty when the target already has every object.
+async function writeBundle(dir: string, file: string, head: string, snapshot: string, basis: string) {
+  const known = await git(dir, ["cat-file", "-e", `${basis}^{commit}`]).then(
+    () => true,
+    () => false,
+  )
+  const exclude = known ? [`^${basis}`] : []
+  if ((await count(dir, [head, snapshot, ...exclude])) === 0) return fs.writeFile(file, "")
+  await git(dir, ["update-ref", _REF.head, head])
+  await git(dir, ["update-ref", _REF.snapshot, snapshot])
+  try {
+    await git(dir, ["bundle", "create", "--quiet", file, _REF.head, _REF.snapshot, ...exclude])
+  } finally {
+    await git(dir, ["update-ref", "-d", _REF.head]).catch(() => undefined)
+    await git(dir, ["update-ref", "-d", _REF.snapshot]).catch(() => undefined)
+  }
+}
+
+// --- Target ---
+
+/**
+ * Applies a mirror: `bundle` (may be empty) holds the sender's commits, `head` its HEAD, `snapshot`
+ * its work tree. Ends with HEAD = `head`, index at HEAD, and the work tree = `snapshot`, so this
+ * machine shows the sender's uncommitted changes as its own. Untracked files the sender lacks stay.
+ */
+export async function receive(
+  bundle: string,
+  options: {
+    head: string
+    snapshot: string
+    branch: string
+    dirty: Exclude<Dirty, "ask">
+    from?: string
+    allowExtra?: boolean
+  },
+): Promise<Received> {
+  const dir = sourceDir()
+  if (!dir) throw new Error("No oc source folder saved on this machine; run /revive once to choose one")
+  const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()
+  if (branch !== options.branch) throw new Error(`oc source is on ${branch}, the sender on ${options.branch}: ${dir}`)
+  if ((await fs.stat(bundle)).size > 0)
+    // A glob: `bundle create` leaves out a ref the target already has (HEAD unchanged).
+    await git(dir, ["fetch", "--quiet", "--no-tags", bundle, "refs/oc-mirror/*:refs/oc-mirror/*"])
+  try {
+    for (const commit of [options.head, options.snapshot]) await git(dir, ["cat-file", "-e", `${commit}^{commit}`])
+    const extra = await count(dir, `${options.head}..HEAD`)
+    if (extra > 0 && !options.allowExtra)
+      throw new Error(`oc source has ${extra} commit(s) the sender lacks; mirroring would drop them: ${dir}`)
+    // Re-checked here: the probe may be stale, and only content the mirror changes counts.
+    const head = (await git(dir, ["rev-parse", "HEAD"])).trim()
+    const own = lost(await changes(dir, head, await worktreeTree(dir)), await blobs(dir, `${options.snapshot}^{tree}`))
+    if (own.length && options.dirty === "refuse")
+      throw new Error(`oc source has changes the mirror would overwrite (${own.slice(0, 5).join(", ")}): ${dir}`)
+    const stashed = own.length > 0 && options.dirty === "backup"
+    if (stashed) {
+      const stamp = new Date().toISOString().replace(/\.\d+Z$/, "Z")
+      await git(dir, [
+        "stash",
+        "push",
+        "--include-untracked",
+        "-m",
+        `oc mirror backup before ${options.from ?? "peer"} ${stamp}`,
+      ])
+    }
+    await git(dir, ["reset", "--hard", "--quiet", options.head])
+    // Writes the snapshot's files (also over untracked ones in the way) and removes tracked files it lacks.
+    await git(dir, ["restore", "--source", options.snapshot, "--staged", "--worktree", ":/"])
+    await git(dir, ["reset", "--quiet"])
+    const untracked = (await git(dir, ["ls-files", "--others", "--exclude-standard"])).split(/\r?\n/).filter(Boolean)
+    const snapshotFiles = new Set(
+      (await git(dir, ["ls-tree", "-r", "--name-only", options.snapshot])).split(/\r?\n/).filter(Boolean),
+    )
+    return { head: options.head, stashed, untracked: untracked.filter((file) => !snapshotFiles.has(file)).length }
+  } finally {
+    await git(dir, ["update-ref", "-d", _REF.head]).catch(() => undefined)
+    await git(dir, ["update-ref", "-d", _REF.snapshot]).catch(() => undefined)
+  }
+}
+
+export type ReviveRequest = { id: string; from: string; at: number }
+
+export function reviveDir() {
+  return path.join(Global.Path.state, "mirror")
+}
+
+/**
+ * Leaves a revive request for an open oc window (`takeRevive`) and waits for one to claim it.
+ * Claims are exclusive-create files named by request id, so two windows never both revive.
+ */
+export async function requestRevive(from: string) {
+  const dir = reviveDir()
+  await fs.mkdir(dir, { recursive: true })
+  const request: ReviveRequest = { id: `${Date.now()}-${process.pid}`, from, at: Date.now() }
+  const file = path.join(dir, "revive.json")
+  await fs.writeFile(`${file}.tmp`, JSON.stringify(request))
+  await fs.rename(`${file}.tmp`, file)
+  const claim = path.join(dir, `claim-${request.id}`)
+  const until = Date.now() + _REVIVE_WAIT
+  while (Date.now() < until) {
+    if (await Bun.file(claim).exists()) break
+    await Bun.sleep(250)
+  }
+  const claimed = await Bun.file(claim).exists()
+  // A window that wakes up later must not revive for a request nobody waits on anymore.
+  if (!claimed) await fs.rm(file, { force: true })
+  await removeOldClaims(dir)
+  return claimed
+}
+
+/** Claims a fresh pending revive request; the caller revives only when this returns one. */
+export async function takeRevive(): Promise<ReviveRequest | undefined> {
+  const dir = reviveDir()
+  const request = await fs
+    .readFile(path.join(dir, "revive.json"), "utf8")
+    .then((text) => JSON.parse(text) as ReviveRequest)
+    .catch(() => undefined)
+  if (!request || typeof request.id !== "string" || Date.now() - request.at > _REVIVE_FRESH) return
+  const claimed = await fs.writeFile(path.join(dir, `claim-${request.id}`), String(process.pid), { flag: "wx" }).then(
+    () => true,
+    () => false,
+  )
+  if (!claimed) return
+  await fs.rm(path.join(dir, "revive.json"), { force: true })
+  return request
+}
+
+async function removeOldClaims(dir: string) {
+  const names = await fs.readdir(dir).catch(() => [] as string[])
+  await Promise.all(
+    names
+      .filter((name) => name.startsWith("claim-") && Date.now() - Number(name.split("-")[1]) > 2 * _REVIVE_FRESH)
+      .map((name) => fs.rm(path.join(dir, name), { force: true })),
+  )
+}
+
+// --- Helpers ---
+
+function connect(host: string, tailscaleSsh: boolean, configured = "auto") {
+  if (configured === "tailscale" || (configured === "auto" && tailscaleSsh)) {
+    const binary = OcSync.tailscaleBinary()
+    if (!binary) throw new Error("Tailscale CLI not found")
+    return [binary, "ssh", host]
+  }
+  return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", configured === "auto" ? host : configured]
+}
+
+function senderName() {
+  return os.hostname().split(".")[0]!.toLowerCase()
+}
+
+function readOcJson(): Record<string, unknown> {
+  try {
+    const text = readFileSync(path.join(Global.Path.config, "oc.json"), "utf8")
+    return JSON.parse(text.replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+// Remote shells may print banners first; the result is the last JSON line.
+function lastJson(output: string): unknown {
+  const line = output
+    .split(/\r?\n/)
+    .reverse()
+    .find((item) => item.trim().startsWith("{"))
+  if (!line) throw new Error(`No result from the other machine: ${output.trim().slice(-300) || "empty output"}`)
+  return JSON.parse(line)
+}
+
+function firstLine(error: unknown) {
+  return (error instanceof Error ? error.message : String(error)).split(/\r?\n/)[0]!
+}
+
+async function count(dir: string, range: string | string[]) {
+  return Number((await git(dir, ["rev-list", "--count", ...(Array.isArray(range) ? range : [range])])).trim())
+}
+
+function git(dir: string, args: string[], env: Record<string, string> = {}) {
+  return run(["git", "-C", dir, ...args], { env })
+}
+
+async function run(
+  command: string[],
+  options: { stdin?: string; timeout?: number; env?: Record<string, string> } = {},
+) {
+  // No prompts: ssh BatchMode and GIT_TERMINAL_PROMPT keep a hidden caller from waiting forever.
+  const child = Bun.spawn(command, {
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...options.env },
+    stdin: options.stdin ? Bun.file(options.stdin) : "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    timeout: options.timeout,
+  })
+  const [out, error, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ])
+  if (code !== 0) {
+    const name = command[0] === "git" ? `git ${command[3]}` : path.basename(command[0]!)
+    const reason = child.signalCode ? `timed out` : `exit code ${code}`
+    // A failed remote `oc` prints its error last on stderr.
+    throw new Error(`${name} failed: ${error.trim().split(/\r?\n/).pop() || reason}`)
+  }
+  return out
+}
+
+export * as OcMirror from "./ocMirror"

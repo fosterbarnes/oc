@@ -220,26 +220,31 @@ export function persistTuiSetting(
   return persistTuiSettingQueue
 }
 
-let persistOcSyncQueue: Promise<void> = Promise.resolve()
+let persistOcQueue: Promise<void> = Promise.resolve()
 
-// Saves oc.json `sync` (`/sync` dialog). The resident server rereads it every sync tick. Holds the
-// shared oc.json lock (server writes and sync applies take it too) and re-reads inside it, so a
-// concurrent server write is never lost. Queued: rapid toggles land in order.
+// Saves oc.json `sync` (`/sync` dialog). The resident server rereads it every sync tick.
 export function persistOcSync(value: { enabled: boolean; exclude: readonly string[] }): Promise<void> {
+  return persistOcPath(["sync"], value)
+}
+
+// Sets one oc.json value by path. Holds the shared oc.json lock (server writes and sync applies take
+// it too) and re-reads inside it, so a concurrent server write is never lost. Queued: rapid toggles
+// land in order.
+export function persistOcPath(keys: string[], value: unknown): Promise<void> {
   const run = () =>
     Flock.withLock(OcItems.OC_CONFIG_LOCK, async () => {
       const file = ocConfigPath()
       const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
       const next = applyEdits(
         text,
-        modify(text, ["sync"], value, { formattingOptions: { tabSize: 2, insertSpaces: true } }),
+        modify(text, keys, value, { formattingOptions: { tabSize: 2, insertSpaces: true } }),
       )
       if (next === text) return
       const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
       fs.writeFileSync(temporary, next)
       fs.renameSync(temporary, file)
     })
-  const result = persistOcSyncQueue.then(run)
-  persistOcSyncQueue = result.catch(() => undefined)
+  const result = persistOcQueue.then(run)
+  persistOcQueue = result.catch(() => undefined)
   return result
 }

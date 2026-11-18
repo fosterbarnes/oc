@@ -376,6 +376,68 @@ const DepsCommand = cmd({
   handler: async () => {},
 })
 
+// Hidden: the target side of /mirror, run over ssh by another machine's TUI (core util/ocMirror.ts).
+// Each prints one JSON line; errors go to stderr with exit 1.
+const MirrorCommand = cmd({
+  command: "mirror",
+  describe: false,
+  builder: (yargs: Argv) =>
+    yargs
+      .command({
+        command: "info",
+        describe: "print this machine's oc source state",
+        handler: async () => {
+          const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+          console.log(JSON.stringify(await OcMirror.info()))
+        },
+      })
+      .command({
+        command: "receive",
+        describe: "apply a mirror bundle read from stdin",
+        builder: (nested) =>
+          nested
+            .option("head", { type: "string", demandOption: true })
+            .option("snapshot", { type: "string", demandOption: true })
+            .option("branch", { type: "string", demandOption: true })
+            .option("dirty", {
+              type: "string",
+              choices: ["refuse", "overwrite", "backup"] as const,
+              demandOption: true,
+            })
+            .option("from", { type: "string" })
+            .option("allow-extra", { type: "boolean", default: false }),
+        handler: async (args) => {
+          const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+          const bundle = path.join(os.tmpdir(), `oc-mirror-in-${process.pid}-${Date.now()}.bundle`)
+          try {
+            await Bun.write(bundle, Bun.stdin)
+            const result = await OcMirror.receive(bundle, {
+              head: args.head,
+              snapshot: args.snapshot,
+              branch: args.branch,
+              dirty: args.dirty,
+              from: args.from,
+              allowExtra: args["allow-extra"],
+            })
+            console.log(JSON.stringify(result))
+          } finally {
+            await fs.rm(bundle, { force: true })
+          }
+        },
+      })
+      .command({
+        command: "revive",
+        describe: "ask an open oc window to revive",
+        builder: (nested) => nested.option("from", { type: "string" }),
+        handler: async (args) => {
+          const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+          console.log(JSON.stringify({ claimed: await OcMirror.requestRevive(args.from ?? "peer") }))
+        },
+      })
+      .demandCommand(),
+  handler: async () => {},
+})
+
 // Hidden: the TUI's /killall and /procReport run this in its own window, since it stops the oc that launched it.
 const KillallCommand = cmd({
   command: "killall",
@@ -436,6 +498,7 @@ export const OcCommand = cmd({
       .command(ConfigCommand)
       .command(DepsCommand)
       .command(KillallCommand)
+      .command(MirrorCommand)
       .command({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",

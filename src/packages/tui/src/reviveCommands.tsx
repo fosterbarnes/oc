@@ -8,13 +8,14 @@ import {
   InstallationSourceTree,
 } from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { OcMirror } from "@opencode-ai/core/util/ocMirror"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { detectTerminal } from "@opencode-ai/core/util/terminal"
 import { WeztermWindow } from "@opencode-ai/core/util/weztermWindow"
-import { createEffect, createRoot } from "solid-js"
+import { createEffect, createRoot, onCleanup } from "solid-js"
 import { useExit } from "./context/exit"
 import { useLocal } from "./context/local"
 import { useRoute } from "./context/route"
@@ -390,6 +391,28 @@ export function useRevive(toast: ToastContext) {
     return true
   }
   return { start, prepare, swap, idle }
+}
+
+// /mirror on another machine leaves a revive request here (core util/ocMirror.ts); the first oc
+// window to claim it revives. Native windows leave it to an oc window.
+export function useMirrorRevive(toast: ToastContext) {
+  const revive = useRevive(toast)
+  const route = useRoute()
+  if (Global.native) return
+  const dir = OcMirror.reviveDir()
+  fs.mkdirSync(dir, { recursive: true })
+  const check = async () => {
+    const request = await OcMirror.takeRevive()
+    if (!request) return
+    toast.show({ message: `oc source mirrored from ${request.from}; reviving`, variant: "info" })
+    await revive.start("install", route.data.type === "session" ? route.data.sessionID : undefined)
+  }
+  // The request is renamed into place; some platforms report the temporary name.
+  const watcher = fs.watch(dir, (_event, name) => {
+    if (!name || name.startsWith("revive")) void check()
+  })
+  watcher.on("error", () => watcher.close())
+  onCleanup(() => watcher.close())
 }
 
 // Release version the user chose to skip; the startup notice stays quiet until a newer one ships.
