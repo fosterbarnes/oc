@@ -591,7 +591,7 @@ export class Sub extends HeyApiClient {
   /**
    * List editable subagents
    *
-   * Names defined in the configured writable subagent file.
+   * Entries defined in an editable `agents:` block of the global config, with their file.
    */
   public list<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -619,9 +619,9 @@ export class Sub extends HeyApiClient {
   }
 
   /**
-   * Add subagent
+   * Add or update subagent
    *
-   * Add an entry to the subagent file.
+   * Create an entry in the subagent file, or merge reasoning levels into the existing entry of that name.
    */
   public add<ThrowOnError extends boolean = false>(
     parameters?: {
@@ -629,7 +629,9 @@ export class Sub extends HeyApiClient {
       workspace?: string
       name?: string
       model?: string
-      variant?: string
+      reasoning?: {
+        [key: string]: "on" | "off" | "manual"
+      }
       description?: string
       claudeAccount?: string
     },
@@ -644,7 +646,7 @@ export class Sub extends HeyApiClient {
             { in: "query", key: "workspace" },
             { in: "body", key: "name" },
             { in: "body", key: "model" },
-            { in: "body", key: "variant" },
+            { in: "body", key: "reasoning" },
             { in: "body", key: "description" },
             { in: "body", key: "claudeAccount" },
           ],
@@ -666,7 +668,7 @@ export class Sub extends HeyApiClient {
   /**
    * Remove subagent
    *
-   * Remove an entry from the subagent file.
+   * Remove an entry from the file that defines it.
    */
   public remove<ThrowOnError extends boolean = false>(
     parameters: {

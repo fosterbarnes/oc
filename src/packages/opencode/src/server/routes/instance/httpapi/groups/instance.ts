@@ -176,12 +176,12 @@ export const InstanceApi = HttpApi.make("instance")
         ),
         HttpApiEndpoint.get("agentSubList", InstancePaths.agentSub, {
           query: WorkspaceRoutingQuery,
-          success: Schema.Array(Schema.String),
+          success: Schema.Array(Schema.Struct({ name: Schema.String, file: Schema.String })),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "app.agent.sub.list",
             summary: "List editable subagents",
-            description: "Names defined in the configured writable subagent file.",
+            description: "Entries defined in an editable `agents:` block of the global config, with their file.",
           }),
         ),
         HttpApiEndpoint.post("agentSub", InstancePaths.agentSub, {
@@ -189,17 +189,19 @@ export const InstanceApi = HttpApi.make("instance")
           payload: Schema.Struct({
             name: Schema.String,
             model: Schema.String,
-            variant: Schema.optional(Schema.String),
+            // Levels to set; merged into the entry's existing `reasoning` map.
+            reasoning: Schema.optional(Schema.Record(Schema.String, Schema.Literals(["on", "off", "manual"]))),
             description: Schema.optional(Schema.String),
             // Claude pool account id (`/session/claude/account`); written as its `accounts` entry.
             claudeAccount: Schema.optional(Schema.String),
           }),
-          success: described(Schema.Boolean, "Subagent added"),
+          success: described(Schema.Boolean, "Subagent saved"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "app.agent.sub.add",
-            summary: "Add subagent",
-            description: "Add an entry to the subagent file.",
+            summary: "Add or update subagent",
+            description:
+              "Create an entry in the subagent file, or merge reasoning levels into the existing entry of that name.",
           }),
         ),
         HttpApiEndpoint.delete("agentSubRemove", InstancePaths.agentSubRemove, {
@@ -210,7 +212,7 @@ export const InstanceApi = HttpApi.make("instance")
           OpenApi.annotations({
             identifier: "app.agent.sub.remove",
             summary: "Remove subagent",
-            description: "Remove an entry from the subagent file.",
+            description: "Remove an entry from the file that defines it.",
           }),
         ),
         HttpApiEndpoint.get("skill", InstancePaths.skill, {

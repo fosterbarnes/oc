@@ -87,6 +87,20 @@ test("extractAgentTypeList keeps the agent names and drops the preamble", () => 
   assert.match(list, /\.\.\./)
 })
 
+test("extractAgentTypeList keeps reasoning levels whole and adds the format hint", () => {
+  const list = extractAgentTypeList(
+    [
+      "Available agent types and the tools they have access to:",
+      'For an agent that lists reasoning levels, pass subagent_type as "<agent>:<level>".',
+      `- worker: reasoning low|medium|high. ${"x".repeat(300)}`,
+      "- explore: Plain",
+    ].join("\n"),
+  )!
+  assert.match(list, /"<agent>:<level>"/)
+  assert.match(list, /- worker: reasoning low\|medium\|high\. x{140}\.\.\./)
+  assert.match(list, /- explore: Plain/)
+})
+
 test("extractAgentTypeList declines when there is no parsable list", () => {
   assert.equal(extractAgentTypeList(undefined), undefined)
   assert.equal(extractAgentTypeList("   "), undefined)

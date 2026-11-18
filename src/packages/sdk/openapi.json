@@ -3899,7 +3899,17 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "file": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["name", "file"],
+                    "additionalProperties": false
                   }
                 }
               }
@@ -3916,7 +3926,7 @@
             }
           }
         },
-        "description": "Names defined in the configured writable subagent file.",
+        "description": "Entries defined in an editable `agents:` block of the global config, with their file.",
         "summary": "List editable subagents",
         "x-codeSamples": [
           {
@@ -3948,12 +3958,12 @@
         ],
         "responses": {
           "200": {
-            "description": "Subagent added",
+            "description": "Subagent saved",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "boolean",
-                  "description": "Subagent added"
+                  "description": "Subagent saved"
                 }
               }
             }
@@ -3969,8 +3979,8 @@
             }
           }
         },
-        "description": "Add an entry to the subagent file.",
-        "summary": "Add subagent",
+        "description": "Create an entry in the subagent file, or merge reasoning levels into the existing entry of that name.",
+        "summary": "Add or update subagent",
         "requestBody": {
           "content": {
             "application/json": {
@@ -3983,8 +3993,12 @@
                   "model": {
                     "type": "string"
                   },
-                  "variant": {
-                    "type": "string"
+                  "reasoning": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string",
+                      "enum": ["on", "off", "manual"]
+                    }
                   },
                   "description": {
                     "type": "string"
@@ -4060,7 +4074,7 @@
             }
           }
         },
-        "description": "Remove an entry from the subagent file.",
+        "description": "Remove an entry from the file that defines it.",
         "summary": "Remove subagent",
         "x-codeSamples": [
           {
@@ -23775,6 +23789,13 @@
           "variant": {
             "type": "string"
           },
+          "reasoning": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["on", "off", "manual"]
+            }
+          },
           "temperature": {
             "type": "number"
           },
@@ -26052,6 +26073,13 @@
           },
           "variant": {
             "type": "string"
+          },
+          "reasoning": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "enum": ["on", "off", "manual"]
+            }
           },
           "prompt": {
             "type": "string"

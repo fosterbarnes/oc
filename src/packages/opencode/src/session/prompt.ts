@@ -18,6 +18,7 @@ import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
 import { disabledSubagentRules } from "../agent/subagent-permissions"
+import { SubagentRef } from "../agent/subagentRef"
 import { Provider } from "@/provider/provider"
 
 import { type Tool as AITool, tool, jsonSchema } from "ai"
@@ -353,8 +354,10 @@ const layer = Layer.effect(
 
           const info = yield* fsys.stat(filepath).pipe(Effect.option)
           if (Option.isNone(info)) {
-            const found = yield* agents.get(name)
-            if (found) parts.push({ type: "agent", name: found.name })
+            // `@<agent>:<level>` keeps the level for the task call; the agent itself is looked up by name.
+            const ref = SubagentRef.parse(name)
+            const found = yield* agents.get(ref.name)
+            if (found) parts.push({ type: "agent", name: ref.level ? `${found.name}:${ref.level}` : found.name })
             return
           }
           const stat = info.value
@@ -379,7 +382,9 @@ const layer = Layer.effect(
       msgs: SessionV1.WithParts[]
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
-      const taskAgent = yield* agents.get(task.agent)
+      // `task.agent` may be `<agent>:<level>`: `base` is the agent, the full ref goes to the task tool.
+      const base = SubagentRef.parse(task.agent).name
+      const taskAgent = yield* agents.get(base)
       if (!taskAgent) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
@@ -396,8 +401,8 @@ const layer = Layer.effect(
         role: "assistant",
         parentID: lastUser.id,
         sessionID,
-        mode: task.agent,
-        agent: task.agent,
+        mode: base,
+        agent: base,
         variant: lastUser.model.variant,
         path: { cwd: ctx.directory, root: ctx.worktree },
         cost: 0,
@@ -440,7 +445,7 @@ const layer = Layer.effect(
       const taskAbort = new AbortController()
       const result = yield* taskTool
         .execute(taskArgs, {
-          agent: task.agent,
+          agent: base,
           messageID: assistantMessage.id,
           sessionID,
           abort: taskAbort.signal,
@@ -1133,8 +1138,15 @@ const layer = Layer.effect(
         }
 
         if (part.type === "agent") {
-          const perm = Permission.evaluate("task", part.name, ag.permission)
-          const hint = perm.action === "deny" ? " . Invoked by user; guaranteed to exist." : ""
+          const ref = SubagentRef.parse(part.name)
+          const perm = Permission.evaluate("task", ref.name, ag.permission)
+          const target = yield* agents.get(ref.name)
+          const levels = ref.level ? [] : SubagentRef.enabled(target?.reasoning)
+          const hint =
+            (perm.action === "deny" ? " . Invoked by user; guaranteed to exist." : "") +
+            (levels.length
+              ? ` Pass it as "${ref.name}:<level>", one of ${levels.join(", ")}; use the level the user named, else pick one.`
+              : "")
           return [
             { ...part, messageID: info.id, sessionID: input.sessionID },
             {
@@ -1843,7 +1855,9 @@ const layer = Layer.effect(
       cmd: Command.Info,
       input: { sessionID: SessionID; arguments: string; agent?: string },
     ) {
-      const agentName = cmd.agent ?? input.agent
+      // A command's `agent:` may carry a level (`<agent>:<level>`); lookups use the agent name.
+      const agentRef = cmd.agent ?? input.agent
+      const agentName = agentRef === undefined ? undefined : SubagentRef.parse(agentRef).name
       const rules = commandRules(cmd)
 
       const raw = input.arguments.match(argsRegex) ?? []
@@ -1996,13 +2010,16 @@ const layer = Layer.effect(
         yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
         throw error
       }
-      const agentName = cmd.agent ?? input.agent
+      // A command's `agent:` may carry a level (`<agent>:<level>`); lookups use the agent name.
+      const agentRef = cmd.agent ?? input.agent
+      const commandRef = agentRef === undefined ? undefined : SubagentRef.parse(agentRef)
+      const agentName = commandRef?.name
       const rules = commandRules(cmd)
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
-        if (cmd.agent) {
-          const cmdAgent = yield* agents.get(cmd.agent)
+        if (agentName && cmd.agent) {
+          const cmdAgent = yield* agents.get(agentName)
           if (cmdAgent?.model) return cmdAgent.model
         }
         if (input.model) return Provider.parseModel(input.model)
@@ -2042,11 +2059,20 @@ const layer = Layer.effect(
             : part,
         )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
+      // A direct (non-subtask) turn runs at the session's own variant, so a level there would be silently dropped.
+      if (commandRef?.level !== undefined && !isSubtask) {
+        const error = new NamedError.Unknown({
+          message: `Command "${cmd.name}": a reasoning level in agent "${agentRef}" needs subtask: true`,
+        })
+        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        throw error
+      }
       const parts = isSubtask
         ? [
             {
               type: "subtask" as const,
-              agent: agent.name,
+              // The full ref: the task tool validates and applies the level.
+              agent: commandRef?.level !== undefined ? `${agent.name}:${commandRef.level}` : agent.name,
               description: cmd.description ?? "",
               command: input.command,
               model: { providerID: taskModel.providerID, modelID: taskModel.modelID },

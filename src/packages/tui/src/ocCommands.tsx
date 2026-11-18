@@ -299,12 +299,14 @@ export function createOcCommands(input: {
         group: "Subagents",
         get desc() {
           return (
-            sync.data.agent.find((item) => item.name === sync.data.config.default_subagent)?.model?.modelID ?? "not set"
+            sync.data.agent.find((item) => item.name === sync.data.config.default_subagent?.split(":")[0])?.model
+              ?.modelID ?? "not set"
           )
         },
         slashName: "defaultSubagentModel",
         run: () => {
-          const defaultSubagent = sync.data.config.default_subagent
+          // default_subagent may be `<name>:<level>`; the model belongs to the entry
+          const defaultSubagent = sync.data.config.default_subagent?.split(":")[0]
           if (!defaultSubagent) {
             toast.show({ message: "No default sub-agent is configured", variant: "error" })
             return
@@ -333,11 +335,18 @@ export function createOcCommands(input: {
         run: () => {
           const options = sync.data.agent
             .filter((agent) => agent.mode !== "primary" && !agent.hidden)
-            .map((agent) => ({
-              value: agent.name,
-              title: agent.name,
-              description: agent.description,
-            }))
+            // An entry with reasoning is dispatched as `<name>:<level>`, one option per on level
+            .flatMap((agent) =>
+              agent.reasoning
+                ? Object.entries(agent.reasoning)
+                    .filter(([, state]) => state === "on")
+                    .map(([level]) => ({
+                      value: `${agent.name}:${level}`,
+                      title: `${agent.name}:${level}`,
+                      description: agent.description,
+                    }))
+                : [{ value: agent.name, title: agent.name, description: agent.description }],
+            )
           if (options.length === 0) {
             toast.show({ message: "No delegated agents are available", variant: "error" })
             return

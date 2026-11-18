@@ -2,7 +2,7 @@ import { TextAttributes } from "@opentui/core"
 import { stringifyKeyStroke } from "@opentui/keymap"
 import type { Agent } from "@opencode-ai/sdk/v2"
 import { DialogSelect, type DialogSelectOption, type DialogSelectRef } from "../ui/dialog-select"
-import { createResource, createMemo, createSignal, createEffect } from "solid-js"
+import { createResource, createMemo, createSignal, createEffect, For } from "solid-js"
 import { useDialog } from "../ui/dialog"
 import { useSDK, type ClaudeAccountOption } from "../context/sdk"
 import { useTheme } from "../context/theme"
@@ -13,7 +13,7 @@ import { useTuiConfig } from "../config"
 import { errorMessage } from "../util/error"
 import { persistAgentModel } from "../ocSettings"
 import { DialogModel } from "./dialog-model"
-import { DialogSubagentEfforts } from "./dialog-subagent-efforts"
+import { DialogSubagentLevels, DialogSubagentReasoning, initialReasoning } from "./dialog-subagent-reasoning"
 import { DialogPrompt } from "../ui/dialog-prompt"
 
 // Value of the "Add subagent" row, so row actions can ignore it
@@ -75,7 +75,7 @@ export function DialogSubagents(props: { highlight?: string }) {
   const [editableNames, { refetch: refetchEditable }] = createResource(() =>
     sdk.client.app.agent.sub
       .list({}, { throwOnError: true })
-      .then((result) => new Set(result.data ?? []))
+      .then((result) => new Set((result.data ?? []).map((item) => item.name)))
       .catch((error) => {
         toast.error(error)
         return new Set<string>()
@@ -100,6 +100,33 @@ export function DialogSubagents(props: { highlight?: string }) {
       provider: provider?.name ?? model.providerID,
       variants: info?.variants ? Object.keys(info.variants) : [],
     }
+  }
+
+  // Model's variants in display order, plus levels the entry lists that the model lacks.
+  function levelsOf(agent: Agent, variants: string[]) {
+    const levels = [...new Set([...variants, ...Object.keys(agent.reasoning ?? {})])]
+    return levels.sort((a, b) => effortRank(a, variants) - effortRank(b, variants))
+  }
+
+  // On levels, then manual ones dimmed, then the pinned Claude account
+  function reasoningFooter(agent: Agent) {
+    const states = Object.entries(agent.reasoning ?? {})
+    const account = agent.options?.claudeAccount
+    const parts = [
+      ...states.filter(([, state]) => state === "on").map(([level]) => ({ text: level, dim: false })),
+      ...states.filter(([, state]) => state === "manual").map(([level]) => ({ text: level, dim: true })),
+      ...(typeof account === "string" ? [{ text: account, dim: true }] : []),
+    ]
+    return (
+      <For each={parts}>
+        {(part, index) => (
+          <span style={{ fg: part.dim ? theme.textMuted : theme.text }}>
+            {index() ? ", " : ""}
+            {part.text}
+          </span>
+        )}
+      </For>
+    )
   }
 
   const options = createMemo<DialogSelectOption<string>[]>(() => {
@@ -130,7 +157,11 @@ export function DialogSubagents(props: { highlight?: string }) {
         category: group,
         subcategory: subgroup || undefined,
         subcategoryColor: theme.textMuted,
-        footer: agent.native ? model && [model.name, agent.variant].filter(Boolean).join(", ") : agent.variant,
+        footer: agent.native
+          ? model && [model.name, agent.variant].filter(Boolean).join(", ")
+          : agent.reasoning
+            ? reasoningFooter(agent)
+            : agent.variant,
       }
     })
   })
@@ -153,9 +184,7 @@ export function DialogSubagents(props: { highlight?: string }) {
 
   function startAdd() {
     dialog.replace(
-      () => (
-        <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => chooseEfforts(providerID, modelID)} />
-      ),
+      () => <DialogModel updateCurrent={false} onSelect={(providerID, modelID) => chooseLevels(providerID, modelID)} />,
       undefined,
       { back: () => reopen() },
     )
@@ -169,6 +198,21 @@ export function DialogSubagents(props: { highlight?: string }) {
           current={agent.model}
           updateCurrent={false}
           onSelect={(providerID, modelID) => chooseEffort(agent, providerID, modelID)}
+        />
+      ),
+      undefined,
+      { back: () => reopen(agent.name) },
+    )
+  }
+
+  function editReasoning(agent: Agent, model: NonNullable<Agent["model"]>) {
+    dialog.replace(
+      () => (
+        <DialogSubagentReasoning
+          name={agent.name}
+          model={`${model.providerID}/${model.modelID}`}
+          levels={levelsOf(agent, modelInfo(model).variants)}
+          reasoning={agent.reasoning ?? {}}
         />
       ),
       undefined,
@@ -202,17 +246,17 @@ export function DialogSubagents(props: { highlight?: string }) {
     )
   }
 
-  function chooseEfforts(providerID: string, modelID: string) {
+  function chooseLevels(providerID: string, modelID: string) {
     const model = modelInfo({ providerID, modelID })
     if (model.variants.length === 0) {
-      void chooseAccount(providerID, modelID, [undefined])
+      void chooseAccount(providerID, modelID, [])
       return
     }
     dialog.replace(
       () => (
-        <DialogSubagentEfforts
+        <DialogSubagentLevels
           model={model.name}
-          efforts={model.variants}
+          levels={[...model.variants].sort((a, b) => effortRank(a, model.variants) - effortRank(b, model.variants))}
           onConfirm={(selected) => void chooseAccount(providerID, modelID, selected)}
         />
       ),
@@ -222,7 +266,7 @@ export function DialogSubagents(props: { highlight?: string }) {
   }
 
   // Claude entries may prefer one pool account (`claudeAccount`); skipped with fewer than two accounts.
-  async function chooseAccount(providerID: string, modelID: string, efforts: Array<string | undefined>) {
+  async function chooseAccount(providerID: string, modelID: string, levels: string[]) {
     const accounts =
       providerID === "claude-code"
         ? await sdk.claudeAccount.state().catch((error) => {
@@ -235,11 +279,11 @@ export function DialogSubagents(props: { highlight?: string }) {
       return
     }
     if (accounts.length < 2) {
-      void continueAdd(providerID, modelID, efforts)
+      void continueAdd(providerID, modelID, levels)
       return
     }
     const back = modelInfo({ providerID, modelID }).variants.length
-      ? () => chooseEfforts(providerID, modelID)
+      ? () => chooseLevels(providerID, modelID)
       : () => reopen()
     dialog.replace(
       () => (
@@ -254,7 +298,7 @@ export function DialogSubagents(props: { highlight?: string }) {
             void continueAdd(
               providerID,
               modelID,
-              efforts,
+              levels,
               accounts.find((account) => account.id === option.value),
             )
           }
@@ -265,12 +309,7 @@ export function DialogSubagents(props: { highlight?: string }) {
     )
   }
 
-  async function continueAdd(
-    providerID: string,
-    modelID: string,
-    selectedEfforts: Array<string | undefined>,
-    account?: ClaudeAccountOption,
-  ) {
+  async function continueAdd(providerID: string, modelID: string, levels: string[], account?: ClaudeAccountOption) {
     const displayName = modelInfo({ providerID, modelID }).name
     // Account names may hold spaces or punctuation; agent names keep to one slug.
     const accountName = account?.label
@@ -278,37 +317,31 @@ export function DialogSubagents(props: { highlight?: string }) {
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
     const short = [shortModelName(modelID), accountName].filter(Boolean).join("-")
-    const effort = selectedEfforts.length === 1 ? selectedEfforts[0] : undefined
-    const defaultName = effort ? `general-${short}-${effort}` : `general-${short}`
     const label = [displayName, account && `prefers ${account.label}`].filter(Boolean).join(", ")
 
-    const baseName = (await DialogPrompt.show(dialog, "Name", { value: defaultName }))?.trim()
-    if (!baseName) {
+    const name = (await DialogPrompt.show(dialog, "Name", { value: `general-${short}` }))?.trim()
+    if (!name) {
       reopen()
       return
     }
 
-    const added: string[] = []
-    for (const effort of selectedEfforts) {
-      const entryName = selectedEfforts.length === 1 ? baseName : effort ? `${baseName}-${effort}` : baseName
-      try {
-        await sdk.client.app.agent.sub.add(
-          {
-            name: entryName,
-            model: `${providerID}/${modelID}`,
-            variant: effort,
-            description: effort ? `${label}, ${effort}.` : `${label}.`,
-            claudeAccount: account?.id,
-          },
-          { throwOnError: true },
-        )
-        added.push(entryName)
-        toast.show({ message: `Added ${entryName}`, variant: "success" })
-      } catch (error) {
-        toast.error(error)
-      }
+    try {
+      await sdk.client.app.agent.sub.add(
+        {
+          name,
+          model: `${providerID}/${modelID}`,
+          reasoning: levels.length ? initialReasoning(levels) : undefined,
+          description: `${label}.`,
+          claudeAccount: account?.id,
+        },
+        { throwOnError: true },
+      )
+      toast.show({ message: `Added ${name}`, variant: "success" })
+      reopen(name)
+    } catch (error) {
+      toast.error(error)
+      reopen()
     }
-    reopen(added[0])
   }
 
   async function remove(name: string) {
@@ -325,6 +358,11 @@ export function DialogSubagents(props: { highlight?: string }) {
     }
     void refetchAgents()
     void refetchEditable()
+  }
+
+  function enterHint(agent: Agent | undefined) {
+    if (agent?.native) return "change model"
+    return agent?.reasoning && agent.model && editableNames()?.has(agent.name) ? "reasoning" : "copy"
   }
 
   return (
@@ -349,6 +387,10 @@ export function DialogSubagents(props: { highlight?: string }) {
         const agent = findAgent(option.value)
         if (agent?.native) {
           changeModel(agent)
+          return
+        }
+        if (agent?.reasoning && agent.model && editableNames()?.has(agent.name)) {
+          editReasoning(agent, agent.model)
           return
         }
         void clipboard
@@ -380,11 +422,7 @@ export function DialogSubagents(props: { highlight?: string }) {
           onTrigger: (option) => void remove(option.value),
         },
       ]}
-      footerHints={
-        selectedValue() === ADD
-          ? []
-          : [{ title: findAgent(selectedValue())?.native ? "change model" : "copy", label: "enter" }]
-      }
+      footerHints={selectedValue() === ADD ? [] : [{ title: enterHint(findAgent(selectedValue())), label: "enter" }]}
     />
   )
 }

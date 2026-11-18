@@ -917,6 +917,126 @@ describe("tool.task", () => {
     { config: modelConfig },
   )
 
+  // `worker` has reasoning levels on the test model (variants: high enabled, low disabled by the provider).
+  const reasoningConfig = {
+    ...modelConfig,
+    agent: {
+      worker: {
+        mode: "subagent" as const,
+        model: "test/test-model",
+        reasoning: { high: "on", low: "manual", xhigh: "off" } as const,
+      },
+      "worker-v2": { mode: "subagent" as const, model: "test/test-model", reasoning: { high: "on" } as const },
+    },
+  }
+  const call = (
+    subagent_type: string,
+    onPrompt?: (input: SessionPrompt.TurnInput) => void,
+    extra: Record<string, unknown> = {},
+  ) =>
+    Effect.gen(function* () {
+      const { chat, assistant } = yield* seed()
+      const asked: unknown[] = []
+      const def = yield* (yield* TaskTool).init()
+      const exit = yield* Effect.exit(
+        def.execute(
+          { description: "inspect bug", prompt: "look", subagent_type, ...extra },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ onPrompt }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: (input) => Effect.sync(() => void asked.push(input)),
+          },
+        ),
+      )
+      return { exit, chat, asked }
+    })
+  const failure = (exit: Exit.Exit<unknown, unknown>) =>
+    Exit.isFailure(exit) ? String(Cause.squash(exit.cause)) : "succeeded"
+
+  it.instance(
+    "<agent>:<level> runs the agent at that variant; permission and session use the agent name",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        let seen: SessionPrompt.TurnInput | undefined
+        const { exit, asked } = yield* call("worker:high", (input) => (seen = input))
+        expect(Exit.isSuccess(exit)).toBe(true)
+        if (!Exit.isSuccess(exit)) return
+        expect(seen?.variant).toBe("high")
+        expect(seen?.agent).toBe("worker")
+        expect(exit.value.metadata).toMatchObject({ variant: "high", reasoning: "high" })
+        expect(asked[0]).toMatchObject({ patterns: ["worker"], metadata: { subagent_type: "worker:high" } })
+        const child = yield* sessions.get(exit.value.metadata.sessionId)
+        expect(child.agent).toBe("worker")
+        expect(child.title).toContain("@worker:high")
+      }),
+    { config: reasoningConfig },
+  )
+
+  it.instance(
+    "a missing, off, unpublished, or unknown level fails before any child session exists",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const cases: [string, string][] = [
+          ["worker", "worker needs a reasoning level: worker:high"],
+          ["worker:", "worker needs a reasoning level"],
+          ["worker:xhigh", 'reasoning "xhigh" is not enabled for worker. Enabled: high'],
+          ["worker:turbo", 'reasoning "turbo" is not enabled'],
+          // listed as manual, but the provider disabled the model's `low` variant
+          ["worker:low", 'reasoning "low" is not enabled'],
+          ["general:high", "general takes no reasoning level"],
+          ["worker-high", "Did you mean worker:high?"],
+          ["worker.v2-high", "Did you mean worker-v2:high?"],
+        ]
+        for (const [ref, message] of cases) {
+          const { exit, chat } = yield* call(ref)
+          expect(failure(exit), ref).toContain(message)
+          expect(yield* sessions.children(chat.id), ref).toHaveLength(0)
+        }
+      }),
+    { config: reasoningConfig },
+  )
+
+  it.instance(
+    "a model override and a level together are refused",
+    () =>
+      Effect.gen(function* () {
+        const { exit } = yield* call("worker:high", undefined, { model: "test/test-model#high" })
+        expect(failure(exit)).toContain("not both")
+      }),
+    { config: reasoningConfig },
+  )
+
+  it.instance(
+    "a manual level is dispatchable when named",
+    () =>
+      Effect.gen(function* () {
+        let seen: SessionPrompt.TurnInput | undefined
+        const { exit } = yield* call("free:max", (input) => (seen = input))
+        expect(Exit.isSuccess(exit)).toBe(true)
+        expect(seen?.variant).toBe("max")
+      }),
+    {
+      config: {
+        ...modelConfig,
+        // `vendor/model` publishes no variants, so only the entry's own list applies.
+        agent: {
+          free: {
+            mode: "subagent" as const,
+            model: "test/vendor/model",
+            reasoning: { low: "on", max: "manual" } as const,
+          },
+        },
+      },
+    },
+  )
+
   it.instance(
     "a denied task with an explicit model creates no child and keeps the agent as the permission subject",
     () =>

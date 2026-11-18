@@ -65,9 +65,17 @@ function seedSubagents() {
     // Never overwrite the user's real subagent file.
     if (!path.resolve(file).startsWith(path.resolve(exerciseGlobalRoot) + path.sep))
       throw new Error(`subagent file is outside the exercise root: ${file}`)
-    await Bun.write(file, '---\nagents:\n  httpapi-seeded:\n    model: "test/test-model"\n---\n')
-    return { file, names: () => SubagentFile.names(file) }
+    await Bun.write(
+      file,
+      '---\nagents:\n  httpapi-seeded:\n    model: "test/test-model"\n    reasoning: { low: on }\n---\n',
+    )
+    return { file, names: () => SubagentFile.names(file), reasoning: (name: string) => reasoningOf(file, name) }
   })
+}
+
+async function reasoningOf(file: string, name: string) {
+  const { default: matter } = await import("gray-matter")
+  return matter(await Bun.file(file).text()).data.agents[name]?.reasoning
 }
 
 const scenarios: Scenario[] = [
@@ -162,7 +170,10 @@ const scenarios: Scenario[] = [
     .at((ctx) => ({ path: "/agent/sub", headers: ctx.headers() }))
     .jsonEffect(200, (body, ctx) =>
       Effect.gen(function* () {
-        check(Array.isArray(body) && body.includes("httpapi-seeded"), "subagent list should name the seeded entry")
+        check(
+          Array.isArray(body) && body.some((item) => item.name === "httpapi-seeded" && item.file === ctx.state.file),
+          "subagent list should return the seeded entry with its file",
+        )
         yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
       }),
     ),
@@ -181,6 +192,26 @@ const scenarios: Scenario[] = [
         const names = yield* Effect.promise(() => ctx.state.names())
         check(names.includes("httpapi-added"), "subagent add should write the entry")
         check(names.includes("httpapi-seeded"), "subagent add should keep existing entries")
+        yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
+      }),
+    ),
+  http.protected
+    .post("/agent/sub", "app.agent.sub.add.update")
+    .mutating()
+    .seeded(seedSubagents)
+    .at((ctx) => ({
+      path: "/agent/sub",
+      headers: { ...ctx.headers(), "content-type": "application/json" },
+      body: { name: "httpapi-seeded", model: "test/test-model", reasoning: { high: "manual" } },
+    }))
+    .jsonEffect(200, (body, ctx) =>
+      Effect.gen(function* () {
+        check(body === true, "subagent update should return true")
+        const reasoning = yield* Effect.promise(() => ctx.state.reasoning("httpapi-seeded"))
+        check(
+          JSON.stringify(reasoning) === JSON.stringify({ low: "on", high: "manual" }),
+          "subagent update should merge the level into the existing entry",
+        )
         yield* Effect.promise(() => Bun.file(ctx.state.file).delete())
       }),
     ),

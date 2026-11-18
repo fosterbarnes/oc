@@ -91,36 +91,60 @@ describe("ConfigAgent.scan", () => {
     expect(diagnostics[0].message).toContain("only for mode: subagent")
   })
 
-  test("variants expand to stem-id and share one prompt", async () => {
+  test("reasoning map loads as one entry with level states", async () => {
     await using tmp = await tmpdir()
-    await Filesystem.write(path.join(tmp.path, "shared.txt"), "shared prompt")
     await writeAgent(
       tmp.path,
-      "agents/sub/sp-redteam-luna.md",
+      "agents/sub/general.md",
       `---
-model: openai/gpt-6-luna
-prompt: "{file:../../shared.txt}"
-variants:
-  - id: low
-    description: low effort
-  - id: high
-    description: high effort
-    variant: max
+agents:
+  worker:
+    model: openai/gpt-6-luna
+    reasoning: { low: on, medium: off, xhigh: manual }
+    description: luna
 ---
 `,
     )
     const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
-    expect(diagnostics.length).toBe(0)
-    expect(agents["sp-redteam-luna"]).toBeUndefined()
-    expect(agents["sp-redteam-luna-low"]).toMatchObject({
+    expect(diagnostics).toEqual([])
+    expect(agents["worker"]).toMatchObject({
       model: "openai/gpt-6-luna",
-      variant: "low",
-      description: "low effort",
+      reasoning: { low: "on", medium: "off", xhigh: "manual" },
       mode: "subagent",
     })
-    expect(agents["sp-redteam-luna-low"].prompt).toContain("shared prompt")
-    expect(agents["sp-redteam-luna-high"]).toMatchObject({ variant: "max", description: "high effort" })
-    expect(agents["sp-redteam-luna-high"].prompt).toBe(agents["sp-redteam-luna-low"].prompt)
+    expect(agents["worker"].options?.reasoning).toBeUndefined()
+  })
+
+  test.each([
+    [
+      "both reasoning and variant",
+      "model: a/b\n    variant: low\n    reasoning: { low: on }",
+      "has both reasoning and variant",
+    ],
+    ["reasoning without model", "reasoning: { low: on }", "has reasoning but no model"],
+    ["a bad level state", "model: a/b\n    reasoning: { low: yes }", ""],
+  ])("rejects the file for %s", async (_, body, message) => {
+    await using tmp = await tmpdir()
+    await writeAgent(tmp.path, "agents/sub/general.md", `---\nagents:\n  worker:\n    ${body}\n---\n`)
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(agents["worker"]).toBeUndefined()
+    expect(diagnostics.length).toBe(1)
+    expect(diagnostics[0].message).toContain(message)
+  })
+
+  test("rejects an agent name containing a colon", async () => {
+    await using tmp = await tmpdir()
+    await writeAgent(tmp.path, "agents/sub/general.md", `---\nagents:\n  "worker:high":\n    model: a/b\n---\n`)
+    const { diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(diagnostics[0].message).toContain('must not contain ":"')
+  })
+
+  test("variants lists are refused with a pointer to reasoning", async () => {
+    await using tmp = await tmpdir()
+    await writeAgent(tmp.path, "agents/sub/old.md", `---\nmodel: a/b\nvariants:\n  - id: low\n---\n`)
+    const { agents, diagnostics } = await ConfigAgent.scan(tmp.path)
+    expect(agents["old-low"]).toBeUndefined()
+    expect(diagnostics[0].message).toContain("reasoning")
   })
 
   test("agents map uses explicit names and omits an empty prompt", async () => {

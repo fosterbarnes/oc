@@ -67,11 +67,16 @@ function parseSubagentDescriptionCatalog(description: string | undefined): {
     started = true
     const name = match[1]!.trim().replace(/^`|`$/g, "")
     if (!name) continue
-    const agentDescription = match[2]!.trim()
-    agents.push({
-      name,
-      ...(agentDescription ? { description: agentDescription } : {}),
-    })
+    // `reasoning a|b. <blurb>`: Cursor picks names from this catalog, so each level becomes its own
+    // `<agent>:<level>` item; a bare name would never carry the level the task tool requires.
+    const [, levels, rest = ""] = /^(?:reasoning (\S+)\.\s*)?([\s\S]*)$/.exec(match[2]!.trim())!
+    const agentDescription = rest.trim()
+    for (const item of levels ? levels.split("|").map((level) => `${name}:${level}`) : [name]) {
+      agents.push({
+        name: item,
+        ...(agentDescription ? { description: agentDescription } : {}),
+      })
+    }
   }
   return { found: true, agents }
 }
@@ -153,6 +158,9 @@ export function resolveCursorSubagentType(subagentType: string, catalog?: HostSu
   if (!GENERIC_CURSOR_SUBAGENT_TYPES.has(subagentType) && available.has(subagentType)) {
     return subagentType
   }
+  // An explicit `<agent>:<level>` never falls back to a generic agent: the task tool reports a typo or an
+  // unadvertised level instead of silently running something else.
+  if (subagentType.includes(":")) return subagentType
 
   const candidates = cursorSubagentCandidates(subagentType)
   for (const candidate of candidates) {

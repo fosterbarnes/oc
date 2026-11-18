@@ -25,7 +25,7 @@ afterEach(async () => {
   await disposeAllInstances()
 })
 
-const generalFile = (entries: Record<string, { model: string; variant?: string; description: string }>) =>
+const generalFile = (entries: Record<string, { model: string; description: string }>) =>
   [
     "---",
     "mode: subagent",
@@ -33,14 +33,13 @@ const generalFile = (entries: Record<string, { model: string; variant?: string; 
     ...Object.entries(entries).flatMap(([name, entry]) => [
       `  ${name}:`,
       `    model: ${entry.model}`,
-      ...(entry.variant ? [`    variant: ${entry.variant}`] : []),
       `    description: ${entry.description}`,
     ]),
     "---",
     "",
   ].join("\n")
 
-it.instance("agent list reflects subagent file add and remove", () =>
+it.instance("agent list reflects subagent file upsert and remove", () =>
   Effect.gen(function* () {
     const test = yield* TestInstance
     const file = path.join(test.directory, ".opencode", "agents", "sub", "general.md")
@@ -52,12 +51,24 @@ it.instance("agent list reflects subagent file add and remove", () =>
     expect(yield* names).toContain("general-seed")
 
     yield* Effect.promise(() =>
-      SubagentFile.add({ name: "general-added", model: "cursor/added", description: 'Added: "model".' }, file),
+      SubagentFile.upsert({ name: "general-added", model: "cursor/added", description: 'Added: "model".' }, file),
     )
     expect(yield* names).toContain("general-added")
     expect(yield* Effect.promise(() => SubagentFile.names(file))).toEqual(["general-seed", "general-added"])
     const added = (yield* agents.list()).find((agent) => agent.name === "general-added")
     expect(added?.description).toBe('Added: "model".')
+
+    // Merging a level shows up in the loaded agent
+    yield* Effect.promise(() =>
+      SubagentFile.upsert(
+        { name: "general-added", model: "cursor/added", reasoning: { low: "on", high: "manual" } },
+        file,
+      ),
+    )
+    expect((yield* agents.list()).find((agent) => agent.name === "general-added")?.reasoning).toEqual({
+      low: "on",
+      high: "manual",
+    })
 
     yield* Effect.promise(() => SubagentFile.remove("general-added", file))
     expect(yield* names).not.toContain("general-added")

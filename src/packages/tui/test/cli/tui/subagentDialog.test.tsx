@@ -27,7 +27,8 @@ import { createTuiResolvedConfig } from "../../fixture/tui-runtime"
 import { createEventSource, createFetch, directory, json } from "../../fixture/tui-sdk"
 import { wait } from "../cmd/tui/sync-fixture"
 
-async function mount(root: string, variants: Record<string, object>) {
+// `withTuned` adds an editable entry with a reasoning map
+async function mount(root: string, variants: Record<string, object>, withTuned = false) {
   const state = path.join(root, "state")
   await mkdir(state, { recursive: true })
   await Bun.write(path.join(state, "kv.json"), "{}")
@@ -52,6 +53,7 @@ async function mount(root: string, variants: Record<string, object>) {
   }
   const configPatches: unknown[] = []
   const removed: string[] = []
+  const saved: unknown[] = []
   // Set by tests once the server has reloaded agents after a config write
   const server = { reloaded: false }
   const calls = createFetch((url) => {
@@ -68,13 +70,33 @@ async function mount(root: string, variants: Record<string, object>) {
         },
         { name: "editable", mode: "subagent", native: false },
         { name: "foreign", mode: "subagent", native: false },
+        ...(withTuned
+          ? [
+              {
+                name: "tuned",
+                mode: "subagent",
+                native: false,
+                model: { providerID: "test", modelID: "sample" },
+                reasoning: { low: "on", high: "manual", xhigh: "off" },
+                options: { claudeAccount: "~/.claude2" },
+              },
+            ]
+          : []),
       ])
-    if (url.pathname === "/agent/sub") return json(["editable"])
+    if (url.pathname === "/agent/sub")
+      return json([
+        { name: "editable", file: "/cfg/agents/sub/general.md" },
+        ...(withTuned ? [{ name: "tuned", file: "/cfg/agents/sub/other.md" }] : []),
+      ])
     if (url.pathname === "/global/config") return json({})
   })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if (input instanceof Request && input.method === "DELETE") {
       removed.push(decodeURIComponent(new URL(input.url).pathname.split("/").at(-1)!))
+      return json(true)
+    }
+    if (input instanceof Request && input.method === "POST" && new URL(input.url).pathname === "/agent/sub") {
+      saved.push(await input.clone().json())
       return json(true)
     }
     if (input instanceof Request && new URL(input.url).pathname === "/global/config")
@@ -138,51 +160,95 @@ async function mount(root: string, variants: Record<string, object>) {
   dialog.replace(() => <DialogSubagents />)
   await wait(() => app.renderer.currentFocusedEditor instanceof InputRenderable)
   await app.waitForVisualIdle()
-  return { app, dialog, configPatches, events, server, removed }
+  return { app, dialog, configPatches, events, server, removed, saved }
 }
 
-test.each([false, true])(
-  "model and effort selections hand off to the name prompt (default also selected: %s)",
-  async (includeDefault) => {
-    await using tmp = await tmpdir()
-    const { app, dialog } = await mount(tmp.path, { high: {} })
-    try {
-      app.mockInput.pressEnter()
-      await app.waitForVisualIdle()
-      app.mockInput.pressEnter()
-      await app.waitForVisualIdle()
-      expect(dialog.stack.length).toBe(1)
-      // Select high, then move past No effort to the confirmation row.
-      app.mockInput.pressEnter()
-      app.mockInput.pressArrow("down")
-      if (includeDefault) {
-        app.mockInput.pressEnter()
-        await app.waitForVisualIdle()
-      }
-      app.mockInput.pressArrow("down")
-      app.mockInput.pressEnter()
-      await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
-      await app.waitForVisualIdle()
-      expect(dialog.stack.length).toBe(1)
-      const editor = app.renderer.currentFocusedEditor
-      expect(editor instanceof TextareaRenderable && editor.plainText).toBe(
-        includeDefault ? "general-sample" : "general-sample-high",
-      )
-    } finally {
-      app.renderer.destroy()
-    }
-  },
-)
+test("model and level selections create one entry named without a level", async () => {
+  await using tmp = await tmpdir()
+  const { app, dialog, saved } = await mount(tmp.path, { low: {}, high: {}, xhigh: {} })
+  try {
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    expect(dialog.stack.length).toBe(1)
+    // Select low and xhigh, then move to the confirmation row.
+    app.mockInput.pressEnter()
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressEnter()
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressEnter()
+    await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
+    await app.waitForVisualIdle()
+    expect(dialog.stack.length).toBe(1)
+    const editor = app.renderer.currentFocusedEditor
+    expect(editor instanceof TextareaRenderable && editor.plainText).toBe("general-sample")
+    app.mockInput.pressEnter()
+    await wait(() => saved.length > 0)
+    expect(saved).toEqual([
+      {
+        name: "general-sample",
+        model: "test/sample",
+        reasoning: { low: "on", xhigh: "manual" },
+        description: "Sample.",
+      },
+    ])
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("a row shows on levels, manual levels and the pinned account", async () => {
+  await using tmp = await tmpdir()
+  const { app } = await mount(tmp.path, { low: {}, high: {}, xhigh: {} }, true)
+  try {
+    const frame = app.captureCharFrame()
+    expect(frame).toContain("low, high, ~/.claude2")
+    expect(frame).not.toContain("xhigh")
+  } finally {
+    app.renderer.destroy()
+  }
+})
+
+test("Enter on an editable entry with reasoning cycles a level and saves it without claudeAccount", async () => {
+  await using tmp = await tmpdir()
+  const { app, saved } = await mount(tmp.path, { low: {}, high: {}, xhigh: {} }, true)
+  try {
+    const editor = app.renderer.currentFocusedEditor
+    if (!(editor instanceof InputRenderable)) throw new Error("expected picker")
+    editor.value = "tuned"
+    await app.waitForVisualIdle()
+    app.mockInput.pressEnter()
+    await app.waitForVisualIdle()
+    expect(app.captureCharFrame()).toContain("Reasoning for tuned")
+    // Levels follow the model's variant order: low (on) -> manual
+    app.mockInput.pressEnter()
+    await wait(() => saved.length === 1)
+    expect(saved).toEqual([{ name: "tuned", model: "test/sample", reasoning: { low: "manual" } }])
+    // xhigh off -> on
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressArrow("down")
+    app.mockInput.pressEnter()
+    await wait(() => saved.length === 2)
+    expect(saved[1]).toEqual({ name: "tuned", model: "test/sample", reasoning: { xhigh: "on" } })
+  } finally {
+    app.renderer.destroy()
+  }
+})
 
 test("model without efforts opens the name prompt directly", async () => {
   await using tmp = await tmpdir()
-  const { app, dialog } = await mount(tmp.path, {})
+  const { app, dialog, saved } = await mount(tmp.path, {})
   try {
     app.mockInput.pressEnter()
     await app.waitForVisualIdle()
     app.mockInput.pressEnter()
     await wait(() => app.renderer.currentFocusedEditor instanceof TextareaRenderable)
     expect(dialog.stack.length).toBe(1)
+    app.mockInput.pressEnter()
+    await wait(() => saved.length > 0)
+    expect(saved).toEqual([{ name: "general-sample", model: "test/sample", description: "Sample." }])
   } finally {
     app.renderer.destroy()
   }

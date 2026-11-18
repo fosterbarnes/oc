@@ -54,6 +54,8 @@ export const Info = Schema.Struct({
     }),
   ),
   variant: Schema.optional(Schema.String),
+  // Subagent reasoning levels: level -> on | off | manual. Callers dispatch `<name>:<level>`.
+  reasoning: Schema.optional(Schema.Record(Schema.String, Schema.Literals(["on", "off", "manual"]))),
   prompt: Schema.optional(Schema.String),
   options: Schema.Record(Schema.String, Schema.Unknown),
   steps: Schema.optional(Schema.Finite),
@@ -330,6 +332,7 @@ const layer = Layer.effect(
             }
           if (value.model) item.model = Provider.parseModel(value.model)
           item.variant = value.variant ?? item.variant
+          item.reasoning = value.reasoning ?? item.reasoning
           item.prompt = value.prompt ?? item.prompt
           item.description = value.description ?? item.description
           item.temperature = value.temperature ?? item.temperature

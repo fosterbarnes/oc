@@ -8,6 +8,7 @@ import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
 import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
+import { SubagentRef } from "../agent/subagentRef"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
 import { Effect, Exit, Schema, Scope } from "effect"
@@ -215,10 +216,17 @@ export const TaskTool = Tool.define(
       if (!subagentType) {
         return yield* Effect.fail(new Error("Task requires subagent_type or configured default_subagent"))
       }
+      // `<entry>:<level>`: the entry is the agent's identity (permissions, resume); the level is this call's variant.
+      const ref = SubagentRef.parse(subagentType)
 
-      const next = yield* agent.get(subagentType)
+      const next = yield* agent.get(ref.name)
       if (!next) {
-        return yield* Effect.fail(new Error(`Unknown agent type: ${subagentType} is not a valid agent type`))
+        const suggestion = SubagentRef.suggest(subagentType, yield* agent.list())
+        return yield* Effect.fail(
+          new Error(
+            `Unknown agent type: ${subagentType} is not a valid agent type${suggestion ? `. Did you mean ${suggestion}?` : ""}`,
+          ),
+        )
       }
       if (!params.subagent_type && next.mode === "primary") {
         return yield* Effect.fail(new Error(`Configured default_subagent "${subagentType}" is a primary agent`))
@@ -229,6 +237,11 @@ export const TaskTool = Tool.define(
       if (params.model && !override) {
         return yield* Effect.fail(
           new Error(`Invalid model "${params.model}": use provider/model or provider/model#variant`),
+        )
+      }
+      if (override && ref.level !== undefined) {
+        return yield* Effect.fail(
+          new Error(`Pass either a model override or a reasoning level (${subagentType}), not both`),
         )
       }
       if (override) {
@@ -242,11 +255,20 @@ export const TaskTool = Tool.define(
           )
         }
       }
+      // Checked before the child session exists, so a bad level never leaves an empty child behind.
+      // A model that publishes no variants cannot be checked here; the entry's own list still applies.
+      const published =
+        ref.level && next.model
+          ? Object.keys((yield* provider.getModel(next.model.providerID, next.model.modelID)).variants ?? {})
+          : []
+      const modelVariants = published.length ? published : undefined
+      const level = override ? undefined : SubagentRef.levelFor(next, ref.level, modelVariants)
+      if (level instanceof Error) return yield* Effect.fail(level)
 
       if (!ctx.extra?.bypassAgentCheck) {
         yield* ctx.ask({
           permission: id,
-          patterns: [subagentType],
+          patterns: [next.name],
           always: ["*"],
           metadata: {
             description: params.description,
@@ -283,7 +305,7 @@ export const TaskTool = Tool.define(
         session ??
         (yield* sessions.create({
           parentID: ctx.sessionID,
-          title: params.description + ` (@${next.name} subagent)`,
+          title: params.description + ` (@${level ? `${next.name}:${level}` : next.name} subagent)`,
           agent: next.name,
           permission: [
             ...childPermission,
@@ -306,12 +328,13 @@ export const TaskTool = Tool.define(
 
       // An explicit model takes no parent effort: its variant is only the one named in the call.
       const model = override?.model ?? next.model ?? { modelID: msg.info.modelID, providerID: msg.info.providerID }
-      const turnVariant = override ? override.variant : next.model ? undefined : variant
+      const turnVariant = override ? override.variant : (level ?? (next.model ? undefined : variant))
       const metadata = {
         parentSessionId: ctx.sessionID,
         sessionId: nextSession.id,
         model,
         variant: turnVariant,
+        ...(level ? { reasoning: level } : {}),
         ...(runInBackground ? { background: true } : {}),
       }
 

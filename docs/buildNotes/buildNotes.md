@@ -131,6 +131,51 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~23:27) - v0.2.384 shartinMilkshake - subagent reasoning cutover on Mac and goonstation; old-name hint fix - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed. Plan `~/.config/opencode/plans/2026-11-17-subagentReasoning.md` steps 7-10 (cutover) after both machines ran 0.2.384.
+- Version: 0.2.384 shartinMilkshake
+- Fixed `opencode/src/agent/subagentRef.ts` `suggest`: compares stems with `.` and `-` as one separator, so `general-opus.5.5-high` suggests `general-opus-5.5:high` (live probe showed no hint). Test case added in `test/tool/task.test.ts`. Needs a rebuild to reach the installed binary.
+- Personal config (not in repo): `agents/sub/general.md` rewritten to 10 entries with `reasoning` maps (xhigh manual), validated with `ConfigAgent.scan` before replacing (old copy `/tmp/ocDraft/general.md.old`); `scripts/syncFreeSubs.ps1` rewritten (one entry per model, keeps level states, new xhigh/max start manual like /viewSub, re-reads before the swap) and run on both machines (free.md 48 → 12 entries); skills `foster/subagents`, `foster/second-opinion`, `oc/add-subagent`, `~/.claude/skills/oc-subagent` and commands `addSub`, `rmSub`, `free`, `syncFree` moved to `<entry>:<level>`. goonstation: synced files arrived; its stale `foster/subagents` (Muse/Grok/Composer) replaced with the Mac version (user approved), `oc-subagent` edited in place (Windows paths kept).
+- Verification: loader scan of live `~/.config/opencode` (Mac) and goonstation's agent files: no diagnostics. Live proxy dispatch: `general-haiku-5.5` → "needs a reasoning level: …:low, …:medium, …:high"; `general-haiku-5.5:low` → completed; `general-opus.5.5-high` → unknown (hint fixed after). syncFreeSubs: a level set off survived a rerun (`no change`). `bun test test/tool/task.test.ts` 49 pass; typecheck clean. Reference sweep: no hits on either machine.
+- ERROR: first `suggest` only tried `stem` and `stem` with all dots replaced, missing a partly dotted name.
+
+### User
+Subagents
+- Your subagent list is now one entry per model with reasoning levels, on both machines; call them as `general-haiku-5.5:medium`.
+- Free models are one entry each, and the daily free-model sync keeps the levels you turn on or off.
+- An old per-level name like `general-opus.5.5-high` now suggests the new form once oc is rebuilt.
+
+---
+
+## 2026-11-17 (~23:17) - v0.2.384 shartinMilkshake - subagent reasoning levels: one entry per model, `<agent>:<level>` dispatch - Claude Opus 5.5, low; Spit, Think, Second opinion, Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Spit → Think → Second opinion (x2) → Imp; completed (code + docs). Plan `~/.config/opencode/plans/2026-11-17-subagentReasoning.md` rev 5; steps 6-10 (install, config cutover) are the user's.
+- Version: 0.2.384 shartinMilkshake
+- Added `opencode/src/agent/subagentRef.ts`: `parse` (`<entry>:<level>`), `listed` (on), `enabled` (on+manual), `levelFor` (variant or Error with valid refs), `suggest` (old `<stem>-<level>` → `<stem>:<level>`, also `.`→`-`), `FORMAT_HINT` (generic example, no personal names).
+- Added `reasoning: Record<level, on|off|manual>` to `core/src/v1/config/agent.ts` (schema + KNOWN_KEYS) and `Agent.Info` (`agent/agent.ts`).
+- Changed `config/agent.ts`: removed the fork's `variants:` list form (now a diagnostic); diagnostics for `reasoning`+`variant`, `reasoning` without `model`, `:` in a name. A diagnostic rejects the whole file (lastGood keeps serving).
+- Changed `tool/task.ts`: parses the ref; agent name for lookup, permission ask, session.agent, resume check; validates the level against the entry and the model's published variants before ask/child creation; `model` override + level is an error; `turnVariant = override ? override.variant : level ?? …`; metadata `reasoning`; child title `@name:level`.
+- Changed `tool/registry.ts` describeTask: `- name: reasoning a|b. blurb`, only on levels; entries with no on level hidden; one format line when any entry has levels.
+- Changed `session/prompt.ts`: `@name:level` mentions keep the level and the hint lists levels for bare names; command `agent:` parsed at commandTemplate (1886 shell permission) and command (2014) lookups; level with `subtask: false` errors; handleSubtask uses base for agent/mode/ctx.agent and the full ref as subagent_type.
+- Changed `provider/claude-code/proxyToolDefs.ts` (keep `reasoning …` prefix whole when trimming, format line, subagent_type description) and `prompts.ts:37`; `provider/cursor/protocol/subagents.ts` expands catalog items per level and never falls back to `general` for a `:` ref.
+- Delegated to general-sonnet-5.5-high: `agent/subagentFile.ts` `add`→`upsert` (merge one-line flow map, omitted claudeAccount keeps the pin), `owner`/`list` scanning `{agent,agents}/**/*.md` (I added the configured `subagentFile` to the scan to avoid a regression), `remove` via owner; httpapi groups/handlers (POST upsert with `reasoning`, list `{name,file}`); sdk/js regenerated; TUI `dialog-subagents.tsx` (footer, Enter → reasoning dialog), `dialog-subagent-efforts.tsx` → `dialog-subagent-reasoning.tsx`, `ocCommands.tsx` (`/defaultSubagent` name:level options, `/defaultSubagentModel` base name).
+- Docs: FORK.md row "Subagent reasoning levels"; wiki `Agents-and-Skills.md` (Reasoning levels section, /viewSub, default_subagent row) — wiki not pushed.
+- Verification: `bun run typecheck` clean in opencode, core, tui. `bun test` in opencode: agent, tool/task (49), tool/registry (20), config/agentMarkdown (18), cursor/subagentCatalog (2), session/prompt level tests, subagentFile (14) all pass; broad run of agent/claude-code/tool/session-prompt/config/cursor: 1811 pass, 5 fail, all 5 listed as known Mac failures in `docs/dev/testing.md`. tui `subagentDialog` 7 pass. `script/httpapi-exercise.ts --mode effect`: pass=230 fail=0. No live dispatch run (needs install).
+- ERROR: Sonnet's first `list()` scanned only the global config dir, dropping a `subagentFile` outside it; fixed by passing the configured file into `editable`.
+
+### User
+Subagents
+- A subagent entry can now offer several reasoning levels instead of one entry per level, and agents call it as `name:level` (for example `reviewer:high`).
+- Each level is on (listed to agents), manual (works only when named), or off, set in the agent file or by pressing Enter on the entry in `/viewSub`.
+- Adding a subagent in `/viewSub` now creates one entry with the chosen levels; xhigh and max start as manual.
+- Calling an entry without a level, or with a level that is off, fails with the list of valid calls; old per-level names suggest the new form.
+- The old `variants:` list in agent files is no longer supported.
+
+---
+
 ## 2026-11-17 (~22:20) - v0.2.383 guwopQld - rename_file tool so /spit can rename plans - Claude Opus 5.5, low; Spit, Second opinion, Think, Imp
 
 ### Agent

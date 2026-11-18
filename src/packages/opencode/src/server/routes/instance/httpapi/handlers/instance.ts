@@ -128,7 +128,13 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     })
 
     const addAgentSub = Effect.fn("InstanceHttpApi.agentSub")(function* (ctx: {
-      payload: { name: string; model: string; variant?: string; description?: string; claudeAccount?: string }
+      payload: {
+        name: string
+        model: string
+        reasoning?: Partial<Record<string, "on" | "off" | "manual">>
+        description?: string
+        claudeAccount?: string
+      }
     }) {
       const cfg = yield* config.get()
       const file = cfg.subagentFile ?? SubagentFile.defaultFile()
@@ -143,7 +149,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
             )
       if (claudeAccount !== undefined && entry === undefined)
         return yield* Effect.die(new Error(`Claude account is not in claude-code accounts: ${claudeAccount}`))
-      yield* Effect.promise(() => SubagentFile.add({ ...input, claudeAccount: entry }, file))
+      yield* Effect.promise(() => SubagentFile.upsert({ ...input, claudeAccount: entry }, file))
       return true
     })
 
@@ -180,7 +186,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       .handle("agentSubList", () =>
         Effect.gen(function* () {
           const cfg = yield* config.get()
-          return yield* Effect.promise(() => SubagentFile.names(cfg.subagentFile ?? SubagentFile.defaultFile()))
+          return yield* Effect.promise(() => SubagentFile.list(undefined, cfg.subagentFile))
         }),
       )
       .handle("agentSub", addAgentSub)

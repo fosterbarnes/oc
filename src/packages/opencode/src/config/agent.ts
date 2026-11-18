@@ -64,13 +64,13 @@ async function resolvePromptFiles(text: string, mdPath: string) {
   return out
 }
 
-const FAMILY_KEYS = new Set(["variants", "agents"])
+const FAMILY_KEYS = new Set(["agents"])
 
 /**
- * One markdown file is either a single agent, a `variants` list
- * (`<stem>-<id>`), or an `agents` map (explicit names). Shared frontmatter
- * is copied onto each child. `{file:}` prompts resolve once per distinct
- * reference. An empty prompt is omitted so native agents keep their prompt.
+ * One markdown file is either a single agent or an `agents` map (explicit
+ * names). Shared frontmatter is copied onto each child. `{file:}` prompts
+ * resolve once per distinct reference. An empty prompt is omitted so native
+ * agents keep their prompt.
  */
 async function expandAgentFile(
   data: Record<string, unknown>,
@@ -78,6 +78,12 @@ async function expandAgentFile(
   name: string,
   mdPath: string,
 ): Promise<Record<string, Record<string, unknown>>> {
+  if (Object.hasOwn(data, "variants")) {
+    throw new InvalidError({
+      path: mdPath,
+      message: `${mdPath}: \`variants:\` lists are no longer supported; use one entry with \`reasoning: { <level>: on }\``,
+    })
+  }
   const shared: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(data)) {
     if (!FAMILY_KEYS.has(key)) shared[key] = value
@@ -91,19 +97,25 @@ async function expandAgentFile(
       }
       children[agentName] = { ...shared, ...(overrides as Record<string, unknown>) }
     }
-  } else if (Array.isArray(data.variants)) {
-    for (const entry of data.variants) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        throw new InvalidError({ path: mdPath, message: `${mdPath}: each variant must be an object` })
-      }
-      const variant = entry as Record<string, unknown>
-      const id = typeof variant.id === "string" ? variant.id.trim() : ""
-      if (!id) throw new InvalidError({ path: mdPath, message: `${mdPath}: variant missing id` })
-      const { id: _id, ...overrides } = variant
-      children[`${name}-${id}`] = { ...shared, variant: id, ...overrides }
-    }
   } else {
     children[name] = { ...shared }
+  }
+
+  // `<entry>:<level>` is the dispatch syntax, so a level-carrying entry must be unambiguous.
+  for (const [agentName, config] of Object.entries(children)) {
+    if (agentName.includes(":")) {
+      throw new InvalidError({ path: mdPath, message: `${mdPath}: agent "${agentName}" must not contain ":"` })
+    }
+    if (config.reasoning === undefined) continue
+    if (config.variant !== undefined) {
+      throw new InvalidError({
+        path: mdPath,
+        message: `${mdPath}: agent "${agentName}" has both reasoning and variant; keep only reasoning`,
+      })
+    }
+    if (typeof config.model !== "string" || !config.model) {
+      throw new InvalidError({ path: mdPath, message: `${mdPath}: agent "${agentName}" has reasoning but no model` })
+    }
   }
 
   const cache = new Map<string, string>()
@@ -119,9 +131,9 @@ async function expandAgentFile(
   const trimmedBody = body.trim()
 
   for (const config of Object.values(children)) {
-    delete config.variants
     delete config.agents
-    const own = typeof config.prompt === "string" && config.prompt !== shared.prompt ? await resolve(config.prompt) : sharedPrompt
+    const own =
+      typeof config.prompt === "string" && config.prompt !== shared.prompt ? await resolve(config.prompt) : sharedPrompt
     const prompt = [own.trim(), trimmedBody].filter(Boolean).join("\n\n")
     if (prompt) config.prompt = prompt
     else delete config.prompt
@@ -222,7 +234,8 @@ async function scanFile(dir: string, item: string) {
 
   if (underSub) {
     const wrong = Object.entries(entries).filter(([, config]) => config.mode && config.mode !== "subagent")
-    if (wrong.length) return { agents, diagnostics: [{ path: item, message: `${item}: agents/sub is only for mode: subagent` }] }
+    if (wrong.length)
+      return { agents, diagnostics: [{ path: item, message: `${item}: agents/sub is only for mode: subagent` }] }
     for (const config of Object.values(entries)) config.mode = "subagent"
   }
 

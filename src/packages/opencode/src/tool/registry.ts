@@ -86,6 +86,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { MCP } from "@/mcp"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { McpCatalog } from "@/mcp/catalog"
+import { SubagentRef } from "@/agent/subagentRef"
 
 export function webSearchEnabled(
   providerID: ProviderV2.ID,
@@ -398,14 +399,22 @@ const layer = Layer.effect(
       const filtered = items.filter(
         (item) => Permission.evaluate("task", item.name, agent.permission, permission).action !== "deny",
       )
-      const list = filtered.toSorted((a, b) => a.name.localeCompare(b.name))
+      // An entry whose levels are all off or manual stays dispatchable by name but is not advertised.
+      const list = filtered
+        .filter((item) => !item.reasoning || SubagentRef.listed(item.reasoning).length > 0)
+        .toSorted((a, b) => a.name.localeCompare(b.name))
       const description = list
-        .map(
-          (item) =>
-            `- ${item.name}: ${item.description ?? "This subagent should only be called manually by the user."}`,
-        )
+        .map((item) => {
+          const blurb = item.description ?? "This subagent should only be called manually by the user."
+          const levels = SubagentRef.listed(item.reasoning)
+          return `- ${item.name}: ${levels.length ? `reasoning ${levels.join("|")}. ` : ""}${blurb}`
+        })
         .join("\n")
-      return ["Available agent types and the tools they have access to:", description].join("\n")
+      return [
+        "Available agent types and the tools they have access to:",
+        ...(list.some((item) => item.reasoning) ? [SubagentRef.FORMAT_HINT] : []),
+        description,
+      ].join("\n")
     })
 
     const describeCodeMode = Effect.fn("ToolRegistry.describeCodeMode")(function* (input: {

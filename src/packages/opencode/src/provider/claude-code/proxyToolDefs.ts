@@ -3,6 +3,7 @@
  * model toward them, and the `task_batch` fan-out helpers.
  */
 import type { ProxyToolResult } from "./proxyMcp.js"
+import { SubagentRef } from "@/agent/subagentRef"
 
 export interface ProxyToolDef {
   /** Raw name as seen by Claude once proxied: the MCP exposed tool name. */
@@ -165,17 +166,23 @@ export function extractAgentTypeList(liveDescription: string | undefined): strin
   const start = live.indexOf(AGENT_TYPES_HEADING)
   if (start === -1) return undefined
   const entries: string[] = []
+  let hasLevels = false
   for (const raw of live.slice(start).split("\n")) {
     const match = /^-\s*([^:]+):\s*(.+)$/.exec(raw.trim())
     if (!match) continue
     const name = match[1].trim()
-    const blurb = match[2].trim()
-    entries.push(
-      `- ${name}: ${blurb.length > AGENT_BLURB_LIMIT ? `${blurb.slice(0, AGENT_BLURB_LIMIT).trimEnd()}...` : blurb}`,
-    )
+    // The `reasoning a|b.` prefix is kept whole; only the description after it is trimmed.
+    const [, levels = "", rest] = /^(reasoning \S+\.\s*)?([\s\S]*)$/.exec(match[2].trim())!
+    const blurb = rest.length > AGENT_BLURB_LIMIT ? `${rest.slice(0, AGENT_BLURB_LIMIT).trimEnd()}...` : rest
+    if (levels) hasLevels = true
+    entries.push(`- ${name}: ${levels}${blurb}`)
   }
   if (entries.length === 0) return undefined
-  return `Valid subagent_type values, from opencode's live registry - anything else fails:\n${entries.join("\n")}`
+  return [
+    "Valid subagent_type values, from opencode's live registry - anything else fails:",
+    ...(hasLevels ? [SubagentRef.FORMAT_HINT] : []),
+    ...entries,
+  ].join("\n")
 }
 
 /**
@@ -240,7 +247,8 @@ export const TASK_INPUT_PROPERTIES = {
   },
   subagent_type: {
     type: "string",
-    description: "The type of specialized agent to use for this task",
+    description:
+      'The type of specialized agent to use for this task. For an agent that lists reasoning levels, pass "<agent>:<level>".',
   },
   task_id: {
     type: "string",

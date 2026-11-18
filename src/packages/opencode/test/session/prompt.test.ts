@@ -3331,6 +3331,46 @@ it.instance("an unknown command is rejected before shell effects", () =>
 )
 
 noLLMServer.instance(
+  "@<agent>:<level> resolves to an agent part that keeps the level",
+  () =>
+    Effect.gen(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const parts = yield* prompt.resolvePromptParts("Ask @general:high and @general")
+      expect(parts.filter((part) => part.type === "agent").map((part) => part.name)).toEqual([
+        "general:high",
+        "general",
+      ])
+    }),
+  30_000,
+)
+
+it.instance("a command level needs subtask: true, and the command agent is looked up by name", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: {
+        direct: { template: "Direct body", agent: "build:high", subtask: false },
+        missing: { template: "Missing body", agent: "nobody:high", subtask: true },
+      },
+    }))
+    const { prompt, chat, sessions } = yield* boot()
+    const direct = yield* prompt.command({ sessionID: chat.id, command: "direct", arguments: "" }).pipe(Effect.exit)
+    if (Exit.isSuccess(direct)) throw new Error("Expected a level on a direct command to be rejected")
+    const message = (exit: Exit.Exit<unknown, unknown>) => {
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      return NamedError.Unknown.isInstance(error) ? error.data.message : String(error)
+    }
+    expect(message(direct)).toContain("needs subtask: true")
+    // The agent is looked up by name, so the error names the ref the user wrote.
+    const missing = yield* prompt.command({ sessionID: chat.id, command: "missing", arguments: "" }).pipe(Effect.exit)
+    if (Exit.isSuccess(missing)) throw new Error("Expected an unknown command agent to be rejected")
+    expect(message(missing)).toContain('Agent not found: "nobody"')
+    expect(yield* sessions.messages({ sessionID: chat.id })).toHaveLength(0)
+    expect(yield* llm.calls).toBe(0)
+  }),
+)
+
+noLLMServer.instance(
   "unknown agent throws typed error",
   () =>
     Effect.gen(function* () {

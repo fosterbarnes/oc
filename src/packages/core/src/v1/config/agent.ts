@@ -15,6 +15,10 @@ const AgentSchema = Schema.StructWithRest(
     variant: Schema.optional(Schema.String).annotate({
       description: "Default model variant for this agent (applies only when using the agent's configured model).",
     }),
+    reasoning: Schema.optional(Schema.Record(Schema.String, Schema.Literals(["on", "off", "manual"]))).annotate({
+      description:
+        "Subagent reasoning levels (model variants) and their state: on (listed to agents), manual (dispatchable when named, not listed), off. Callers pass `<agent>:<level>`.",
+    }),
     temperature: Schema.optional(Schema.Finite),
     top_p: Schema.optional(Schema.Finite),
     prompt: Schema.optional(Schema.String),
@@ -52,6 +56,7 @@ const KNOWN_KEYS = new Set([
   "name",
   "model",
   "variant",
+  "reasoning",
   "prompt",
   "description",
   "temperature",

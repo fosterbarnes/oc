@@ -99,6 +99,28 @@ const withEmptyCodeMode = testEffect(
     ],
   ]),
 )
+const withReasoningAgents = testEffect(
+  LayerNode.compile(root, [
+    [
+      Config.node,
+      TestConfig.layer({
+        get: () =>
+          Effect.succeed({
+            agent: {
+              worker: {
+                mode: "subagent",
+                model: "test/model",
+                description: "Worker blurb",
+                reasoning: { low: "on", medium: "off", high: "on", xhigh: "manual" },
+              },
+              "hidden-worker": { mode: "subagent", model: "test/model", reasoning: { high: "manual" } },
+            },
+          }),
+      }),
+    ],
+    [RuntimeFlags.node, RuntimeFlags.layer()],
+  ]),
+)
 const withBrokenPlugin = testEffect(LayerNode.compile(root, [...replacements, [Plugin.node, brokenPluginLayer]]))
 
 afterEach(async () => {
@@ -241,6 +263,24 @@ describe("tool.registry", () => {
       expect(off).toContain("- general:")
       const ruleset = Permission.merge(build.permission, disabledSubagentRules({ disabledSubagents: ["*"] }))
       expect(Permission.disabled(["task"], ruleset).has("task")).toBe(true)
+    }),
+  )
+
+  withReasoningAgents.instance("task description lists only on levels and hides entries with none on", () =>
+    Effect.gen(function* () {
+      const registry = yield* ToolRegistry.Service
+      const build = yield* (yield* Agent.Service).get("build")
+      if (!build) throw new Error("build agent not found")
+      const tools = yield* registry.tools({
+        providerID: ProviderV2.ID.opencode,
+        modelID: ModelV2.ID.make("test"),
+        agent: build,
+      })
+      const description = tools.find((tool) => tool.id === "task")?.description ?? ""
+      expect(description).toContain("- worker: reasoning low|high. Worker blurb")
+      expect(description).toContain('"<agent>:<level>"')
+      expect(description).not.toContain("- hidden-worker:")
+      expect(description).not.toContain("xhigh")
     }),
   )
 

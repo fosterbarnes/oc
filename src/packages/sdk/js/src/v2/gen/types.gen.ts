@@ -1760,6 +1760,9 @@ export type PermissionConfig =
 export type AgentConfig = {
   model?: string
   variant?: string
+  reasoning?: {
+    [key: string]: "on" | "off" | "manual"
+  }
   temperature?: number
   top_p?: number
   prompt?: string
@@ -1785,6 +1788,9 @@ export type AgentConfig = {
   [key: string]:
     | unknown
     | string
+    | {
+        [key: string]: "on" | "off" | "manual"
+      }
     | number
     | {
         [key: string]: boolean
@@ -2565,6 +2571,9 @@ export type Agent = {
     providerID: string
   }
   variant?: string
+  reasoning?: {
+    [key: string]: "on" | "off" | "manual"
+  }
   prompt?: string
   options: {
     [key: string]: unknown
@@ -9674,7 +9683,10 @@ export type AppAgentSubListResponses = {
   /**
    * Success
    */
-  200: Array<string>
+  200: Array<{
+    name: string
+    file: string
+  }>
 }
 
 export type AppAgentSubListResponse = AppAgentSubListResponses[keyof AppAgentSubListResponses]
@@ -9683,7 +9695,9 @@ export type AppAgentSubAddData = {
   body?: {
     name: string
     model: string
-    variant?: string
+    reasoning?: {
+      [key: string]: "on" | "off" | "manual"
+    }
     description?: string
     claudeAccount?: string
   }
@@ -9706,7 +9720,7 @@ export type AppAgentSubAddError = AppAgentSubAddErrors[keyof AppAgentSubAddError
 
 export type AppAgentSubAddResponses = {
   /**
-   * Subagent added
+   * Subagent saved
    */
   200: boolean
 }
