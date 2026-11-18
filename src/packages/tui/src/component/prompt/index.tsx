@@ -65,6 +65,7 @@ import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
 import { DialogAlert } from "../../ui/dialog-alert"
 import { PromptNotice, TOAST_DISPLAY_KEY, useToast } from "../../ui/toast"
 import { useReviveChain } from "../../reviveChain"
+import { takeNextSessionAccount } from "../../claudeCommands"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
 import { DialogSkill } from "../dialog-skill"
@@ -1599,6 +1600,9 @@ export function Prompt(props: PromptProps) {
       sessionID = res.data.id
       await local.model.attachSessionOverride(sessionID)
       await local.agent.attachSession(sessionID)
+      // Pinned before the first turn starts; on failure the session runs on the global account.
+      const account = takeNextSessionAccount()
+      if (account) await sdk.claudeAccount.set(account, sessionID).catch(toast.error)
     }
 
     const { inputText, nonTextParts, editorParts, commands } = outgoingParts()

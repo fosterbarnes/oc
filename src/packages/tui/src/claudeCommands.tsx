@@ -12,6 +12,15 @@ import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { Locale } from "./util/locale"
 
+// Home pick for the next session the Home prompt creates; pinned on create, then cleared.
+const [nextSessionAccount, setNextSessionAccount] = createSignal<{ id: string; label: string }>()
+
+export function takeNextSessionAccount() {
+  const next = nextSessionAccount()
+  setNextSessionAccount(undefined)
+  return next?.id
+}
+
 // Claude account manager, switching, and auto-resume palette entries, spread after the warm-up entries.
 export function createClaudeAccountCommands() {
   const sdk = useSDK()
@@ -69,14 +78,53 @@ export function createClaudeAccountCommands() {
     },
   }
 
+  // Home has no session yet: the pick waits in `nextSessionAccount` for the prompt's session.create.
+  const chooseNextSessionAccount = async () => {
+    const accounts = await sdk.claudeAccount.state().catch((error) => {
+      toast.error(error)
+      return undefined
+    })
+    if (!accounts) return
+    const choose = (next: { id: string; label: string } | undefined) => {
+      dialog.clear()
+      if (next?.id === nextSessionAccount()?.id) return
+      setNextSessionAccount(next)
+      toast.show({ message: `Next session Claude account: ${next?.label ?? "global"}`, variant: "info" })
+    }
+    dialog.replace(() => (
+      <DialogSelect
+        title="Claude account for the next session"
+        current={nextSessionAccount()?.id ?? "global"}
+        options={[
+          {
+            title: "Use global account",
+            description: accounts.find((account) => account.current)?.label,
+            value: "global",
+            onSelect: () => choose(undefined),
+          },
+          ...accounts.map((account) => ({
+            title: account.label,
+            description: accountDescription(account),
+            value: account.id,
+            onSelect: () => choose({ id: account.id, label: account.label }),
+          })),
+        ]}
+      />
+    ))
+  }
+
   const switchSessionAccount = {
     name: "claude.sessionAccount",
     title: "Switch Claude account (this session)",
-    desc: "Pin a Claude account to this session only",
+    get desc() {
+      if (route.data.type === "home") return nextSessionAccount()?.label ?? "global"
+      return "Pin a Claude account to this session only"
+    },
     slashName: "claude-session-account",
     category: "oc",
     group: "Claude",
     run: async () => {
+      if (route.data.type === "home") return chooseNextSessionAccount()
       if (route.data.type !== "session") return
       const sessionID = route.data.sessionID
       const accounts = await sdk.claudeAccount.state(sessionID).catch((error) => {
@@ -388,15 +436,15 @@ export function createClaudeAccountCommands() {
     },
   }
 
-  // Reactive: account entries appear only with 2+ configured accounts, the session one only in a session,
-  // the rollover one only with an `apiAccount`.
+  // Reactive: account entries appear only with 2+ configured accounts, the session one only in a session
+  // or on Home (for the next session), the rollover one only with an `apiAccount`.
   return () => {
     const options = sync.data.config.provider?.["claude-code"]?.options
     const multi = ((options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
     return [
       manageAccounts,
       ...(multi ? [switchAccount] : []),
-      ...(multi && route.data.type === "session" ? [switchSessionAccount] : []),
+      ...(multi && (route.data.type === "session" || route.data.type === "home") ? [switchSessionAccount] : []),
       ...(multi ? [failover] : []),
       ...(options?.apiAccount ? [apiRollover] : []),
       autoResume,

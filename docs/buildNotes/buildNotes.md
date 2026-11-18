@@ -131,6 +131,26 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~03:44) - v0.2.386 potentialBidnis - Claude session account pick on Home - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed
+- Version: 0.2.386 potentialBidnis
+- Added module-level `nextSessionAccount` signal + exported `takeNextSessionAccount()` in `tui/src/claudeCommands.tsx`; `switchSessionAccount` now also shows on Home (`chooseNextSessionAccount`: dialog "Claude account for the next session"), `desc` getter shows the pick or `global` on Home.
+- Added in `tui/src/component/prompt/index.tsx` after `local.agent.attachSession`: `takeNextSessionAccount()` then awaited `sdk.claudeAccount.set(id, sessionID)` (failure toasts, session runs on global). No server/SDK change: `pinSessionAccount` only checks pool membership and `sessionPin` is read at turn start.
+- Fixed (pass): re-picking the same Home account no longer toasts, matching the in-session dialog's no-op.
+- Kept: pick is per TUI process, memory only, consumed by the next prompt-created session; `bootstrapSession` (New oc session folder picker) does not consume it.
+- Updated wiki `oc.wiki/Claude-Code.md` (Switch Claude account sentence).
+- Verification: tui `tsgo --noEmit` clean. Throwaway pane probe (OC_TUI_PANE=1, 2 `accounts`, `warmupAuth` so the pool file persists): Home palette desc `global` -> pick claude2 -> desc `claude2`; first prompt turn ran on claude2 (its "not logged in" error) and `account-pool.json` `sessionAccounts` held the new session -> claude2; after `/new`, desc back to `global` and a second session got no pin. 1 pass; probe deleted.
+- Plan: `~/.config/opencode/plans/2026-11-18-home-session-claude-account.md`.
+
+### User
+Claude accounts
+- On the Home screen, "Switch Claude account (this session)" in the oc palette now picks the Claude account for the next chat you start from the prompt.
+- The palette entry shows the picked account on Home; the pick applies once and then resets to the global account.
+
+---
+
 ## 2026-11-18 (~02:13) - v0.2.385 palkiaSpeedrun - fix Mac test failures at the root; drop known-failures list - Claude Opus 5.5, low; Imp
 
 ### Agent
