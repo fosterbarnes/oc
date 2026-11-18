@@ -2,11 +2,12 @@ import { test, expect, describe, afterEach, beforeEach, spyOn } from "bun:test"
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { httpClient } from "@opencode-ai/core/effect/app-node-platform"
-import { Cause, Effect, Exit, Layer, Logger, Option } from "effect"
+import { Cause, Effect, Exit, Fiber, Layer, Logger, Option } from "effect"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { Config } from "@/config/config"
 import { Command } from "@/command"
+import { MCP } from "@/mcp"
 import { ConfigManaged } from "@/config/managed"
 import { ConfigParse } from "../../src/config/parse"
 import { ConfigVariable } from "../../src/config/variable"
@@ -1247,6 +1248,79 @@ testEffect(LayerNode.compile(LayerNode.group([Command.node, FSUtil.node]), [[Con
       yield* FSUtil.use.writeWithDirs(path.join(test.directory, ".opencode", "command", "x.md"), "New command")
       expect((yield* commands.list()).find((command) => command.name === "x")?.template).toBe("New command")
     }),
+)
+
+// MCP stub whose prompts() resolves only when the test opens the gate, like a remote server still connecting.
+function gatedMcp(prompts: ReturnType<MCP.Interface["prompts"]>) {
+  const unexpected = () => Effect.die("unexpected MCP call in command tests")
+  return Layer.succeed(
+    MCP.Service,
+    MCP.Service.of({
+      status: () => Effect.succeed({}),
+      clients: () => Effect.succeed({}),
+      instructions: () => Effect.succeed([]),
+      tools: () => Effect.succeed({}),
+      prompts: () => prompts,
+      resources: () => Effect.succeed({}),
+      resourceTemplates: () => Effect.succeed({}),
+      add: unexpected,
+      connect: () => Effect.void,
+      disconnect: () => Effect.void,
+      getPrompt: () => Effect.succeed(undefined),
+      readResource: () => Effect.succeed(undefined),
+      startAuth: unexpected,
+      authenticate: unexpected,
+      finishAuth: unexpected,
+      removeAuth: () => Effect.void,
+      supportsOAuth: () => Effect.succeed(false),
+      hasStoredTokens: () => Effect.succeed(false),
+      getAuthStatus: () => Effect.succeed("not_authenticated" as const),
+    }),
+  )
+}
+
+const mcpGate = Promise.withResolvers<void>()
+testEffect(
+  LayerNode.compile(LayerNode.group([Command.node, FSUtil.node]), [
+    [Config.node, layer],
+    [
+      MCP.node,
+      gatedMcp(
+        Effect.promise(() => mcpGate.promise).pipe(
+          Effect.as({ "srv:hello": { name: "hello", description: "MCP prompt", client: "srv" } }),
+        ),
+      ),
+    ],
+  ]),
+).instance("lists commands without waiting for MCP prompts, which join once loaded", () =>
+  Effect.gen(function* () {
+    const commands = yield* Command.Service
+    // MCP is still "connecting": the list must come back anyway, without MCP prompts.
+    const early = yield* commands.list().pipe(Effect.timeout("2 seconds"))
+    expect(early.some((command) => command.name === Command.Default.INIT)).toBe(true)
+    expect(early.some((command) => command.source === "mcp")).toBe(false)
+
+    // An MCP prompt typed before the load finishes waits for it.
+    const pending = yield* commands.get("srv:hello").pipe(Effect.forkChild)
+    mcpGate.resolve()
+    expect((yield* Fiber.join(pending))?.source).toBe("mcp")
+    expect((yield* commands.list()).some((command) => command.name === "srv:hello")).toBe(true)
+  }),
+)
+
+testEffect(
+  LayerNode.compile(LayerNode.group([Command.node, FSUtil.node]), [
+    [Config.node, layer],
+    [MCP.node, gatedMcp(Effect.die("MCP exploded"))],
+  ]),
+).instance("keeps the command list working when MCP prompts fail to load", () =>
+  Effect.gen(function* () {
+    const commands = yield* Command.Service
+    expect(yield* commands.get("srv:hello")).toBeUndefined()
+    const list = yield* commands.list()
+    expect(list.some((command) => command.name === Command.Default.INIT)).toBe(true)
+    expect(list.some((command) => command.source === "mcp")).toBe(false)
+  }),
 )
 
 it.instance("updates config and writes to file", () =>

@@ -5,7 +5,7 @@ import path from "path"
 import { InstanceState } from "@/effect/instance-state"
 import { EffectBridge } from "@/effect/bridge"
 import type { InstanceContext } from "@/project/instance-context"
-import { Effect, Layer, Context, Schema } from "effect"
+import { Cause, Effect, Fiber, Layer, Context, Schema } from "effect"
 import { Config } from "@/config/config"
 import { ConfigCommand } from "@/config/command"
 import { Fingerprint } from "@/util/fingerprint"
@@ -19,7 +19,10 @@ import PROMPT_HANDOFF from "./template/prompt.txt"
 import { LegacyEvent } from "@opencode-ai/schema/legacy-event"
 
 type State = {
+  // Built-in commands, command files, and skills.
   commands: Record<string, Info>
+  // MCP prompts load in the background so a slow MCP connect never holds up the list; undefined until loaded.
+  mcp: { commands?: Record<string, Info>; fiber: Fiber.Fiber<Record<string, Info>> }
   // Signature of command and skill files at load time; a mismatch on read triggers a rebuild.
   fingerprint: string
 }
@@ -162,37 +165,6 @@ const layer = Layer.effect(
         }
       }
 
-      for (const [name, prompt] of Object.entries(yield* mcp.prompts())) {
-        commands[name] = {
-          name,
-          source: "mcp",
-          whenBlank: "ask",
-          suggest: false,
-          description: prompt.description,
-          get template() {
-            return bridge.promise(
-              mcp
-                .getPrompt(
-                  prompt.client,
-                  prompt.name,
-                  prompt.arguments
-                    ? Object.fromEntries(prompt.arguments.map((argument, i) => [argument.name, `$${i + 1}`]))
-                    : {},
-                )
-                .pipe(
-                  Effect.map(
-                    (template) =>
-                      template?.messages
-                        .map((message) => (message.content.type === "text" ? message.content.text : ""))
-                        .join("\n") || "",
-                  ),
-                ),
-            )
-          },
-          hints: prompt.arguments?.map((_, i) => `$${i + 1}`) ?? [],
-        }
-      }
-
       for (const item of yield* skill.all()) {
         if (commands[item.name]) continue
         const dir = item.location === "<built-in>" ? undefined : path.dirname(item.location)
@@ -216,8 +188,57 @@ const layer = Layer.effect(
         }
       }
 
+      // Not awaited: the list must not wait for every MCP server to connect (up to 30 s each). Forked in this
+      // state's scope, so a rebuild or instance disposal interrupts it.
+      const mcpHolder = {} as State["mcp"]
+      mcpHolder.fiber = yield* Effect.gen(function* () {
+        const result: Record<string, Info> = {}
+        for (const [name, prompt] of Object.entries(yield* mcp.prompts())) {
+          result[name] = {
+            name,
+            source: "mcp",
+            whenBlank: "ask",
+            suggest: false,
+            description: prompt.description,
+            get template() {
+              return bridge.promise(
+                mcp
+                  .getPrompt(
+                    prompt.client,
+                    prompt.name,
+                    prompt.arguments
+                      ? Object.fromEntries(prompt.arguments.map((argument, i) => [argument.name, `$${i + 1}`]))
+                      : {},
+                  )
+                  .pipe(
+                    Effect.map(
+                      (template) =>
+                        template?.messages
+                          .map((message) => (message.content.type === "text" ? message.content.text : ""))
+                          .join("\n") || "",
+                    ),
+                  ),
+              )
+            },
+            hints: prompt.arguments?.map((_, i) => `$${i + 1}`) ?? [],
+          }
+        }
+        mcpHolder.commands = result
+        return result
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.failCause(cause)
+            : Effect.logWarning("failed to load MCP prompt commands", { cause: Cause.pretty(cause) }).pipe(
+                Effect.andThen(Effect.sync(() => (mcpHolder.commands = {}))),
+              ),
+        ),
+        Effect.forkScoped,
+      )
+
       return {
         commands,
+        mcp: mcpHolder,
         fingerprint,
       }
     })
@@ -229,12 +250,14 @@ const layer = Layer.effect(
 
     const get = Effect.fn("Command.get")(function* (name: string) {
       const s = yield* current()
-      return s.commands[name]
+      if (s.commands[name]) return s.commands[name]
+      // An MCP prompt typed right after launch waits for the background load.
+      return (s.mcp.commands ?? (yield* Fiber.join(s.mcp.fiber)))[name]
     })
 
     const list = Effect.fn("Command.list")(function* () {
       const s = yield* current()
-      return Object.values(s.commands)
+      return [...Object.values(s.commands), ...Object.values(s.mcp.commands ?? {})]
     })
 
     return Service.of({ get, list })

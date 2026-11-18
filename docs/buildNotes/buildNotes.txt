@@ -1,22 +1,6 @@
-v0.2.376 parentalJimmie [fix > permission hangs and shell holes]
+v0.2.377 wutangRapped [fix > slash menu waits on MCP]
 
-permissions:
-A permission prompt now always shows in oc right away; a plugin can no longer hold it back or silently approve or deny it. opencode-notify's desktop popup still works as a second way to answer the same prompt, and plugins now answer the open prompt through oc's API (see the wiki Configuration page).
+slash menu:
+Your commands and skills now show up in the / menu right after oc starts instead of waiting for every MCP server to connect, which could take seconds (up to 30 s if a server stalls). MCP prompts like /context7:... still appear a second or so later, the next time you open the menu, and typing one right after launch still works. If loading the command list fails during startup, the menu keeps what it had instead of going empty.
 
-Shell rules can no longer be bypassed by redirecting a group, loop, or pipeline into a file, by PowerShell .NET method calls, or by shell syntax oc cannot parse.
-
-Claude Code:
-Commands that allow editing everywhere except a few folders (like /imp blocking mockups) now let Claude use its own Edit and Write tools, and Claude Code itself refuses edits in the blocked folders. When a command does route edits through oc, Claude is told the exact tool names to load, so it stops hunting for an edit tool or editing through scripts.
-
-Messages you send while Claude waits on an oc tool (like a question) now reach Claude with that tool's result instead of becoming an extra turn afterwards. Running oc from inside a Claude Code session no longer makes every Claude run send an extra background request or carry that session's identity.
-
-revive:
-On a Mac, /revive no longer loses the window when it sat on a display left of or above the main one. If the new window still fails to open, oc leaves the other old tabs open and revive.log says so, with a command to reopen by hand. With the wezterm.lua snippet from the wiki, a revived window comes back at its exact size and spot, so Rectangle snaps survive. Tabs that fail to reopen are now listed in revive.log instead of disappearing silently.
-
-sidebar scripts:
-Running a script in a WezTerm pane no longer types the command into the new shell, so the shell's startup can't garble it. Placing a script without running it still types it into the pane. On macOS, an app that a run script starts directly opens behind the terminal in any terminal, not because of oc; running open -a <app> after it starts brings it forward (documented in docs/dev/macos.md).
-
-tests:
-The Claude provider tests that always failed on macOS now pass, as do all TUI pane tests, and test runs on macOS can no longer pop up "Keychain Not Found" or touch your real Keychain.
-
-Under the hood: Permission.ask no longer calls the permission.ask plugin hook (upstream dropped it too; the type stays, marked deprecated); shell.ts checks whole statements for non-command redirects, PowerShell method calls, and parse errors; edit rules that are an allow plus path denies become Claude Edit(//path) denies in --disallowedTools; turnStream fences held steers with an mcp_status control request before resolving a proxy result; spawnEnv strips the host Claude desktop session env; revive passes --position=x,y, sets OC_REVIVE_WINDOW, and confirms a new wezterm-gui process, and the resident server no longer inherits the WezTerm socket; scriptRunner starts pwsh with -EncodedCommand through wezterm cli split-pane/spawn; test helpers get a macOS Keychain stub, TestLLMServer.errorEvery, and fixed pane navigation. Checks: permission, plugin, and ACP permission tests 98 pass; shell tool tests 82+5 pass; revive 19 pass 11 skip; core weztermWindow 2 pass; Claude provider tests 713 pass 0 fail; steering 16/16 three times; TUI pane tests 16/16; tui sidebarTools 75/75; typecheck clean in opencode, core, plugin, and tui; prePush checks pass. Not checked: a live /revive with these changes, a live WezTerm sidebar run, and a live opencode-notify prompt.
+Under the hood: Command.state no longer awaits mcp.prompts(); MCP prompt commands load in a fiber forked in the state's scope, list() returns what has loaded, and get() joins the fiber only for names that are not command files or skills. The TUI bootstrap sends command.list with the blocking requests instead of after them and keeps the current list on a failed response. Measured on real launches (debug run): the list arrived 2.1-4.0 s after start before, 0.59-0.67 s after. Checks: typecheck clean in opencode, tui, and core; config tests 123 pass, including two new ones that fail on the old code; config, MCP, tool registry, and session prompt suites 305 pass, 1 known failure (cancel interrupts loop queued behind shell); tui suite 789 pass, 2 fail (finds Git Bash from git's cmd folder only, util.sessionTab launcher entry script) in tests that do not touch the changed files, not confirmed as pre-existing.

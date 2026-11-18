@@ -131,6 +131,27 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~18:59) - v0.2.377 wutangRapped - Slash menu no longer waits on MCP servers after launch - Claude Opus 5.5, low; Debug + Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug then Implementation; completed, measured before and after on real launches
+- Version: 0.2.377
+- Fixed `Command.state` (`opencode/src/command/index.ts`): it no longer awaits `mcp.prompts()`, which waited for every MCP server to connect (30 s limit each). MCP prompt commands now load in a fiber forked in the state's scope (`Effect.forkScoped`, interrupted on rebuild or disposal) into `state.mcp.commands`; `list()` returns what is loaded, `get()` joins the fiber only when the name is not a file command or skill; a failed load logs and yields `{}`. MCP names are `server:prompt`, so no clash with files or skills.
+- Changed `runBootstrap` (`tui/src/context/sync.tsx`): `command.list` starts with the blocking requests instead of after them; a failed response keeps the current list instead of writing `[]`. Late MCP prompts arrive through the existing `refreshCommands()` on each `/` open (no new event).
+- Added tests in `opencode/test/config/config.test.ts` with a gated MCP stub: list returns while MCP is still connecting, an early `get("srv:hello")` waits and resolves, a dying MCP load leaves the list working. Both fail on the old code (timeout / die).
+- Measured (debug run, real launches, 2 WezTerm tabs): before, list filled 2.1-4.0 s after TUI start on a cold server, 83-95% of server time waiting on MCP; after, 0.59-0.67 s, server `GET /command` 70-267 ms cold, MCP prompts joined ~1.1-1.35 s later in the background. Never reproduced the reported 10-20 s; a stalled MCP connect is the only measured path that could reach it, and it is now off the list path.
+- Not fixed (measured): `app.agents` takes 1.6-1.7 s when 2 tabs cold-start together; each directory instance connects every MCP server separately.
+- Verification: typecheck opencode, tui, core; prettier clean; `config.test.ts` 123 pass; config + mcp + tool registry + session prompt suites 305 pass, 1 fail (`cancel interrupts loop queued behind shell`, known failure, also fails with the old command module); tui suite 789 pass, 2 fail (`finds Git Bash from git's cmd folder only`, `util.sessionTab > launcher adds the entry script only under bun`; neither imports changed files, not confirmed pre-existing). All DEBUG-TEMP instrumentation and probe logs removed (search clean).
+- ERROR: `prompt.test.ts` "cancel interrupts loop queued behind shell" passed once on a clean stash and failed 3/3 otherwise on this Mac; it is on the known-failures list, so treat as flaky, not as a regression.
+
+### User
+Slash menu
+- Your commands and skills now show up in the `/` menu right after oc starts instead of waiting for MCP servers to connect.
+- MCP prompts (like `/context7:...`) still appear, a second or so later, the next time you open the menu.
+- If loading the command list fails during startup, the menu keeps what it had instead of going empty.
+
+---
+
 ## 2026-11-17 (~18:24) - v0.2.376 parentalJimmie - Sidebar WezTerm runs start pwsh with the command instead of typing it - Claude Opus 5.5, low; Implementation
 
 ### Agent

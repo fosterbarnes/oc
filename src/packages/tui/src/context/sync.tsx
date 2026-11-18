@@ -802,6 +802,13 @@ export const {
         .catch(() => emptyConsoleState)
       const agentsPromise = sdk.client.app.agents({ workspace }, { throwOnError: true })
       const configPromise = sdk.client.config.get({ workspace }, { throwOnError: true })
+      // Sent with the blocking requests rather than after them, so the slash menu fills as early as possible.
+      // A failed request keeps the current list instead of blanking the menu.
+      const commandPromise = sdk.client.command.list({ workspace }).then((x) => {
+        if (x.data) setStore("command", reconcile(x.data))
+      })
+      // Awaited in the non-blocking batch below; this only keeps a failed blocking phase from leaving it unhandled.
+      commandPromise.catch(() => {})
       return await Promise.all([
         providersPromise,
         providerListPromise,
@@ -855,7 +862,7 @@ export const {
           void Promise.all([
             ...(args.continue ? [] : [sessionListPromise.then((sessions) => applySessionList(sessions))]),
             consoleStatePromise.then((consoleState) => setStore("console_state", reconcile(consoleState))),
-            sdk.client.command.list({ workspace }).then((x) => setStore("command", reconcile(x.data ?? []))),
+            commandPromise,
             sdk.client.lsp.status({ workspace }).then((x) => setStore("lsp", reconcile(x.data ?? []))),
             sdk.client.mcp.status({ workspace }).then((x) => setStore("mcp", reconcile(x.data ?? {}))),
             sdk.client.experimental.resource
