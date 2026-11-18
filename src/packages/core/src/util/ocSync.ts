@@ -15,7 +15,8 @@ import { which } from "./which"
 
 export const PORT = 4097
 export const FORMAT = 1
-export const ROUTE = { manifest: "/oc-sync/manifest", items: "/oc-sync/items" } as const
+// `warmup`: Claude warm-up runtime state for cross-machine run-once (opencode server/syncPeer.ts).
+export const ROUTE = { manifest: "/oc-sync/manifest", items: "/oc-sync/items", warmup: "/oc-sync/warmup" } as const
 
 export type Settings = { enabled: boolean; exclude: string[] }
 export type ManifestEntry = { id: string; hash: string; at: number; tags: OcItems.Tag[]; deleted?: true }
@@ -120,6 +121,8 @@ async function rescan(): Promise<Scan> {
   }
   for (const [id, previous] of Object.entries(state)) {
     if (next[id]) continue
+    // A key that became machine-only leaves the state without a tombstone, so no peer deletes its copy.
+    if (OcItems.machineOnly(id)) continue
     // Tombstones never expire (about 100 bytes each): a peer that was offline for months, or one
     // that excluded the item meanwhile, must not bring a deleted item back. An unreadable root or a
     // half-saved settings file keeps its items as they were.
@@ -173,6 +176,8 @@ export type Verdict = "skip" | "same" | "take" | "conflict"
 
 // Newest `at` wins; equal times tie-break on the hash so every machine picks the same side.
 export function decide(local: StateEntry | undefined, remote: ManifestEntry, exclude: readonly string[]): Verdict {
+  // An older peer may still offer a key this build keeps machine-only: ignore it instead of failing the apply.
+  if (OcItems.machineOnly(remote.id)) return "skip"
   if (OcItems.excluded(remote.id, [...remote.tags, ...(local?.tags ?? [])], exclude)) return "skip"
   if (local?.hash === remote.hash) return "same"
   if (!local) return remote.deleted ? "skip" : "take"
@@ -320,6 +325,8 @@ export function tailscaleBinary() {
 
 export type TailscaleStatus = {
   selfUser: number
+  /** This machine's tailnet host name (DNS label), or "" when Tailscale reports none. */
+  selfHost: string
   selfIps: string[]
   peers: { host: string; ips: string[]; online: boolean; user: number }[]
 }
@@ -330,7 +337,7 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
   const output = await run(binary, ["status", "--json"])
   const status = JSON.parse(output) as {
     BackendState?: string
-    Self?: { UserID?: number; TailscaleIPs?: string[] }
+    Self?: { UserID?: number; TailscaleIPs?: string[]; HostName?: string; DNSName?: string }
     Peer?: Record<
       string,
       { HostName?: string; DNSName?: string; TailscaleIPs?: string[]; Online?: boolean; UserID?: number }
@@ -339,6 +346,7 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
   if (status.BackendState !== "Running") throw new Error(`Tailscale is ${status.BackendState ?? "not running"}`)
   return {
     selfUser: status.Self?.UserID ?? -1,
+    selfHost: status.Self?.DNSName?.split(".")[0] || status.Self?.HostName || "",
     selfIps: status.Self?.TailscaleIPs ?? [],
     peers: Object.values(status.Peer ?? {}).map((peer) => ({
       host: peer.DNSName?.split(".")[0] || peer.HostName || "",

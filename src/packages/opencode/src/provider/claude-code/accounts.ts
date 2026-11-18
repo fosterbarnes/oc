@@ -3,6 +3,9 @@ import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 import { OcConfig } from "@/config/oc.js"
+import { emailOf } from "./warmup/identities"
+import { materializeAccountId } from "./warmup/identity"
+import { saveName } from "./warmup/synced"
 import { log } from "./logger.js"
 
 export const DEFAULT_ACCOUNT = "default"
@@ -517,19 +520,73 @@ export function accountName(id: string): string | undefined {
   return accountNames!.get(nameKey(id))
 }
 
-/** Set or clear (`undefined`/blank) the name of an `accounts` entry in oc.json. */
-export async function setAccountName(entry: string, name: string | undefined): Promise<void> {
+// Writes `claudeAccountNames` under the shared oc.json lock, from a fresh read.
+async function editNames(change: (names: Record<string, string>) => Record<string, string> | undefined) {
   if (!namesFile) return
-  const settings = await OcConfig.read()
+  await OcConfig.edit((settings) => {
+    const current = Object.fromEntries(
+      Object.entries(settings.claudeAccountNames ?? {}).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
+      ),
+    )
+    const next = change({ ...current })
+    if (!next || JSON.stringify(next) === JSON.stringify(current)) return undefined
+    return { claudeAccountNames: Object.keys(next).length ? next : undefined }
+  })
+  reloadAccountNames()
+}
+
+function withoutEntry(names: Record<string, string>, entry: string): Record<string, string> {
   const key = nameKey(poolAccountIds([entry])[0]!)
   // Drop any other spelling of the same dir, so one account never has two names.
-  const names = Object.fromEntries(
-    Object.entries(readNames()).filter(([other]) => nameKey(poolAccountIds([other])[0]!) !== key),
-  )
+  return Object.fromEntries(Object.entries(names).filter(([other]) => nameKey(poolAccountIds([other])[0]!) !== key))
+}
+
+/**
+ * Set or clear (`undefined`/blank) the name of an `accounts` entry. With the folder's email known,
+ * the name goes to synced `claudeAccounts` (every machine shows it); `claudeAccountNames` is this
+ * machine's folder-keyed copy, updated at once so labels change without waiting for a tick.
+ */
+export async function setAccountName(entry: string, name: string | undefined): Promise<void> {
+  if (!namesFile) return
+  const email = emailOf(materializeAccountId(poolAccountIds([entry])[0]!))
+  if (email) await saveName(email, name)
   const trimmed = name?.trim()
-  if (trimmed) names[entry] = trimmed
-  await OcConfig.write({ ...settings, claudeAccountNames: Object.keys(names).length ? names : undefined })
-  reloadAccountNames()
+  await editNames((names) => {
+    const next = withoutEntry(names, entry)
+    if (trimmed) next[entry] = trimmed
+    return next
+  })
+}
+
+/** Drops this machine's name for a removed folder; the synced name stays for other machines. */
+export async function forgetAccountName(entry: string): Promise<void> {
+  await editNames((names) => withoutEntry(names, entry))
+}
+
+/**
+ * Brings `claudeAccountNames` in line with synced names for `dirs` (materialized folders): a folder
+ * whose account has a synced name gets it, one whose synced account has no name (cleared) loses
+ * its local name, and folders of unknown or unsynced accounts keep theirs. Writes only on change.
+ */
+export async function projectAccountNames(dirs: string[], syncedName: (dir: string) => string | null | undefined) {
+  if (!namesFile) return
+  const wanted = dirs.flatMap((dir) => {
+    const name = syncedName(dir)
+    return name === undefined ? [] : [{ dir, name }]
+  })
+  if (wanted.every(({ dir, name }) => (accountName(poolAccountIds([dir])[0]!) ?? null) === name)) return
+  await editNames((names) => {
+    let next = names
+    for (const { dir, name } of wanted) {
+      const key = nameKey(poolAccountIds([dir])[0]!)
+      const entry = Object.keys(next).find((other) => nameKey(poolAccountIds([other])[0]!) === key) ?? dir
+      if ((next[entry] ?? null) === name) continue
+      next = withoutEntry(next, entry)
+      if (name !== null) next[entry] = name
+    }
+    return next
+  })
 }
 
 /** The account's name, else its shell launcher name: `~/.claude` is `claude1`, `~/.claudeN` is `claudeN`. */

@@ -131,6 +131,68 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~20:21) - v0.2.380 freebasedFractal - Claude accounts sync by email; warm-ups run on whichever machine is live - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (after /debug, /think, /second-opinion); completed; tests written by general-sonnet-5.5-high, TUI and core tests by general-haiku-5.5-high, review by general-gpt-6.1-sol-low
+- Version: 0.2.380
+- Cause (from /debug): slots that passed while the Mac slept were dropped (a tick gap over 60 s skipped every crossed slot, with no trace), and a revive during a slot lost it. Folder names map to different accounts per machine (Mac `~/.claude` = win10 `~/.claude2`), which is why names and schedules never synced.
+- Added `warmup/synced.ts`: oc.json `claudeAccounts` keyed by lowercased email (`name`, `warmup {enabled, schedule, updatedAt}`), synced as `oc:claudeAccounts`. `saveWarmup` keeps `updatedAt` on a pause or resume with the same times.
+- Added `warmup/identities.ts`: folder -> email from `auth status` (`inventory.ts` now parses `email`), persisted in `<data>/claude-code/identities.json`. `verifyAccountEmail` replaces `verifyAccountConnected`; a send needs the email to match.
+- Rewrote `warmup/store.ts` as the runtime-only `warmup-state.json` (claims keyed by occurrence instant, `lastAttempt.host`). Occurrence keys are now `String(at)` (`schedule.ts`). The legacy `warmup.json` is read once by the migration and never written.
+- Rewrote `warmup/index.ts` as `createScheduler`:
+  - A pending queue keeps slots until they fire, a peer claims them, or their deadline passes.
+  - Machines rank by host name (`rankFor`), and each lower rank waits `STANDBY_MS` longer. The deadline keeps the highest rank seen.
+  - After a sleep gap or start, the next normal tick catches up the latest slot from the last 5 h (not before `updatedAt`) and restarts the waits of standby slots.
+  - `stillScheduled` drops removed or paused times.
+  - Standby machines re-read peers before claiming, and a machine claims only when it sends.
+- Added `warmup/peers.ts` and a `GET /oc-sync/warmup` route in `server/syncPeer.ts`: emails signed in, claims from the last 24 h, latest outcomes. It answers 404 when sync is off or `oc:claudeAccounts` is excluded. Also added `warmupPeers` (self host from the new `TailscaleStatus.selfHost`) and `readyForAccountMigration` (the first cycle in which every online peer answered, or 15 min).
+- Added `warmup/migrate.ts`: `migrateLegacy` fills only missing fields of `claudeAccounts` from `claudeAccountNames` and the legacy store. `createHousekeeping` probes identities at start (re-probing every 5 min while none are known), migrates after the barrier, and projects synced names into `claudeAccountNames`.
+- Core:
+  - `claudeAccountNames` is now machine-only (`ocItems._MACHINE_OC_KEYS`, `machineOnly`).
+  - `ocSync.rescan` drops it from state without a tombstone, and `decide` skips it when a peer offers it.
+  - `OcItems.apply` holds `OC_CONFIG_LOCK` while it edits oc.json.
+- Added `OcConfig.edit` (locked, re-read, jsonc edit of the changed keys only, keeping comments). `update`, `reviveHost.saveReviveBuild` and the account name writes use it.
+- `accounts.ts`: `setAccountName` writes the synced name when the email is known. Added `forgetAccountName` (folder removal is local only) and `projectAccountNames`.
+- `handlers/global.ts`:
+  - The warm-up GET lists accounts by email and adds `here`; the PUT writes `claudeAccounts`.
+  - `makeWarmupLoop(pollMs, clock?, {peers?, ready?})` loads syncPeer lazily.
+  - Sign-out and remove forget the folder's identity.
+  - The API schema gained optional `here` and `lastAttempt.host`. The SDK was regenerated (`sdk/js/src/v2/gen/types.gen.ts`); the client generate step produced no change.
+- TUI `claudeWarmup.tsx`: the last attempt shows ` on <host>`, and a `Not signed in here: another machine sends it` row appears when `here === false`.
+- Docs: added a Claude accounts section to `docs/dev/syncPlan.md`. Plan: `~/.config/opencode/plans/2026-11-17-warmup-catchup.md`.
+- Removed all `DEBUG-TEMP` instrumentation (0 left), the probe folder, and `<data>/log/debug/warmup.log`.
+- Verification:
+  - Typecheck is clean in core, opencode and tui.
+  - Warm-up suites: 95/0 before the review fixes, plus 6 new regression tests (80/0 in `warmup.test.ts` + `warmupSync.test.ts`).
+  - `test/provider/claude-code/`, the listener, global and `test/config/` tests: 1094 pass, 1 fail. The failure is `test/config/tui.test.ts` keybind lookup, which also fails with these changes stashed.
+  - TUI warm-up 30/0, core ocItems/ocSync 14/0, pane warm-up test 1/0 (`OC_TUI_PANE=1`).
+  - Live probe on the Mac: identities resolved by email, self host `macbook`, win10 (0.2.376) returned no peer view, and the warm-up was `sent` and recorded with `host: macbook`.
+  - Not yet verified with two upgraded machines.
+- Closed both gaps the Sol review left open (minor):
+  - Cleared names: `saveName` blank keeps the account entry as the cleared marker, and `projectAccountNames` drops the local name when the synced account has no name. `migrateLegacy` only creates accounts with no entry (was field by field), so a stale local name never comes back.
+  - TUI oc.json writes: `tui/src/ocSettings.ts` `persistOcSync` now takes `OC_CONFIG_LOCK`, re-reads inside it, writes atomically, and is queued; `dialog-sync.tsx` shows its async errors. The unused, unlocked `OcConfig.write` was removed.
+  - Verification: typecheck clean in core, opencode and tui. Tests 149/0, TUI 30/0, core 14/0. A lock probe showed the TUI write waits for a held lock (held 0-815 ms, written at 1146 ms) and keeps comments. All 33 changed files copied to win10 with identical blob hashes.
+- MISTAKE: the macOS `tar` used for that copy wrote 33 AppleDouble `._*` files into win10's repo; they were removed (0 left). Use `COPYFILE_DISABLE=1 tar` or `git diff`/`scp` for cross-machine copies.
+- ERROR: the Sol review found six scheduler and migration gaps after the first pass: the barrier was released on a failed cycle, the startup probe was never retried, rank takeover shrank the deadline, a sleep during standby lost the slot, removed times could still fire, and the peer snapshot was stale at claim. All six are fixed and covered by tests. Not fixed (minor): a cleared shared name does not clear other machines' local copies, and an adopted peer claim can show the older outcome until the next sync.
+- ERROR: the TUI's own oc.json writes (`tui/src/ocSettings.ts`, sync fs writes) are not under `OC_CONFIG_LOCK`.
+- Live two-machine check (both on 0.2.380 after revive): `claudeAccounts` is identical on both. win10 re-projected its names (`~/.claude2` = Team1). Each machine's `/oc-sync/warmup` route answers the other. A temporary 20:54 slot on Pro synced to win10 in about 20 s; goonstation (rank 0) claimed and sent at 20:54:01, and the Mac sent nothing and recorded `sent` with `host: goonstation`. The original times are restored on both machines.
+- ERROR: after the first revive, both machines held the migration barrier for the full 15 min, because winserver and Home Assistant (online, same Tailscale user, no oc) failed every sync pull. Fixed in `syncPeer.ts`: only peers that run oc hold the barrier (`runsOc`); a timeout or refused connection (`unreachable`) does not. Checked against the real devices (winserver `TimeoutError`, Home Assistant `TypeError`), and copied to win10 with an identical blob hash.
+
+### User
+Claude accounts
+- Each Claude account's friendly name and warm-up schedule are now stored by account email and synced between your machines over tailnet sync. No sign-in data is synced.
+- The same account gets the same name on every machine, even when its folder is `~/.claude` on one and `~/.claude2` on another.
+- Your existing names and schedules move over automatically the first time the new build runs.
+- Removing an account folder on one machine no longer clears its name elsewhere.
+
+Warm-ups
+- Each scheduled warm-up is sent once by whichever machine is up and signed in to that account. When both are, goonstation goes first and the Mac steps in a minute later only if goonstation didn't send.
+- After the Mac wakes or oc restarts, a warm-up missed in the last 5 hours is sent then, unless another machine already sent it.
+- The warm-up dialog says which machine sent the last warm-up, and marks accounts that aren't signed in on this machine.
+
+---
+
 ## 2026-11-17 (~19:23) - v0.2.379 outcheaWhispering - Push auto-delete decided by oc, not the agent - Claude Opus 5.5, low; Implementation
 
 ### Agent

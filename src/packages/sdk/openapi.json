@@ -805,6 +805,9 @@
                           "accountID": {
                             "type": "string"
                           },
+                          "here": {
+                            "type": "boolean"
+                          },
                           "label": {
                             "type": "string"
                           },
@@ -907,6 +910,9 @@
                               "outcome": {
                                 "type": "string",
                                 "enum": ["sent", "rejected", "failed", "timeout", "missed"]
+                              },
+                              "host": {
+                                "type": "string"
                               }
                             },
                             "required": ["scheduledAt", "attemptedAt", "outcome"],
@@ -971,6 +977,9 @@
                   "properties": {
                     "accountID": {
                       "type": "string"
+                    },
+                    "here": {
+                      "type": "boolean"
                     },
                     "label": {
                       "type": "string"
@@ -1074,6 +1083,9 @@
                         "outcome": {
                           "type": "string",
                           "enum": ["sent", "rejected", "failed", "timeout", "missed"]
+                        },
+                        "host": {
+                          "type": "string"
                         }
                       },
                       "required": ["scheduledAt", "attemptedAt", "outcome"],

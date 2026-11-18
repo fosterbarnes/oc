@@ -10,7 +10,7 @@ import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { sourceTree } from "@opencode-ai/core/util/sourceTree"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
-import { executablePath, read, write } from "./oc"
+import { edit, executablePath, read } from "./oc"
 import {
   awaitLaunch,
   forceKill,
@@ -329,8 +329,7 @@ async function downloadSource(directory: string) {
 }
 
 async function saveReviveBuild(build: false | Revive.BuildConfig) {
-  const settings = await read()
-  await write({ ...settings, revive: { ...settings.revive, build } })
+  await edit((settings) => ({ revive: { ...settings.revive, build } }))
 }
 
 // Output streams into the revive window (or the hidden helper's console).

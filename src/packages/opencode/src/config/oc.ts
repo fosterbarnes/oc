@@ -1,6 +1,9 @@
 import fs from "fs/promises"
 import path from "path"
+import { applyEdits, modify } from "jsonc-parser"
 import { Global } from "@opencode-ai/core/global"
+import { Flock } from "@opencode-ai/core/util/flock"
+import { OcItems } from "@opencode-ai/core/util/ocItems"
 import { Startup } from "./startup"
 
 export const keys = [
@@ -27,10 +30,19 @@ export type Settings = Partial<Record<Key, Value>> & {
   revive?: { path?: string; launcher?: unknown; build?: unknown }
   intro?: { background?: "terminal" | "black" }
   // Claude account labels keyed by the `accounts` entry as written (`"~/.claude2": "Pro"`); accounts.ts.
+  // Machine-only: the server derives it from `claudeAccounts` (folders map to different accounts per machine).
   claudeAccountNames?: Record<string, string>
+  // Synced Claude account info keyed by lowercased email: friendly name and warm-up schedule. No
+  // credentials. provider/claude-code/warmup/synced.ts.
+  claudeAccounts?: Record<string, ClaudeAccountEntry>
   // Tailnet config sync for this machine (server/syncPeer.ts, core util/ocSync.ts). `exclude`: picker
   // tree keys (id prefixes, item ids, `tag:<name>`). Written by the TUI `/sync` dialog.
   sync?: { enabled?: boolean; exclude?: string[] }
+}
+
+export type ClaudeAccountEntry = {
+  name?: string
+  warmup?: { enabled: boolean; schedule: unknown; updatedAt?: number }
 }
 
 export function defaultServerPort() {
@@ -69,11 +81,9 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
     return Startup.update(
       parsed,
       async () => {
-        const settings = await read()
-        return write({
-          ...settings,
+        await edit((settings) => ({
           server: { ...settings.server, startOnWindowsUserStart: undefined, startAtLogin: parsed },
-        })
+        }))
       },
       startup,
     )
@@ -84,22 +94,41 @@ export async function update(key: Key, value: string, startup?: Parameters<typeo
   if (key === "claudeApiRollover" && parsed !== "ask" && parsed !== "always" && parsed !== "off") {
     throw new Error("claudeApiRollover must be ask, always or off")
   }
-  const settings = await read()
-  return write({ ...settings, [key]: parsed })
+  return edit(() => ({ [key]: parsed }))
 }
 
-export async function write<T extends object>(next: T) {
+// Locked read-modify-write: re-reads oc.json under the shared oc.json lock (sync applies hold it
+// too), lets `change` return the top-level keys to set (`undefined` removes one), and edits only
+// those keys in the text, so comments and other keys stay as they are. No change, no write.
+export async function edit(change: (current: Settings) => Partial<Settings> | undefined): Promise<Settings> {
   const file = filePath()
-  const temporary = `${file}.tmp-${process.pid}`
+  return Flock.withLock(OcItems.OC_CONFIG_LOCK, async () => {
+    const text = await fs.readFile(file, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return "{}\n"
+      throw error
+    })
+    const current = JSON.parse(text.replace(/^\s*\/\/.*$/gm, "") || "{}") as Settings
+    const patch = change(current)
+    if (!patch) return current
+    let next = text
+    for (const [key, value] of Object.entries(patch)) {
+      next = applyEdits(next, modify(next, [key], value, { formattingOptions: { insertSpaces: true, tabSize: 2 } }))
+    }
+    if (next !== text) await replace(file, next)
+    return { ...current, ...patch }
+  })
+}
+
+async function replace(file: string, content: string) {
+  const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
   await fs.mkdir(path.dirname(file), { recursive: true })
   try {
-    await fs.writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, "utf8")
+    await fs.writeFile(temporary, content, "utf8")
     await fs.rename(temporary, file)
   } catch (error) {
     await fs.rm(temporary, { force: true })
     throw error
   }
-  return next
 }
 
 export const PALETTE_NEW_SESSION_OC = "New session (oc)"

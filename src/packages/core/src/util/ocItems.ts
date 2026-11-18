@@ -7,6 +7,7 @@ import fs from "node:fs/promises"
 import path from "node:path"
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser"
 import { Global } from "../global"
+import { Flock } from "./flock"
 import { Hash } from "./hash"
 
 export const REDACTED = "<redacted>"
@@ -75,7 +76,26 @@ const _FILE_DIRS: [string, Category][] = [
 // opencode.jsonc maps split one level down so one agent or MCP server can be picked alone.
 const _SPLIT_KEYS = new Set(["agent", "command", "mcp", "provider"])
 // oc.json keys that describe this machine, not a preference. `sync` is per machine too.
-const _MACHINE_OC_KEYS = new Set(["executable", "ocDir", "homeDir", "server", "revive", "allowImport", "sync"])
+// `claudeAccountNames` is keyed by this machine's Claude config folders: the server derives it from the
+// synced, email-keyed `claudeAccounts` (provider/claude-code/warmup/synced.ts).
+const _MACHINE_OC_KEYS = new Set([
+  "executable",
+  "ocDir",
+  "homeDir",
+  "server",
+  "revive",
+  "allowImport",
+  "sync",
+  "claudeAccountNames",
+])
+
+// Every read-modify-write of oc.json (server settings writes and sync applies) holds this lock.
+export const OC_CONFIG_LOCK = "oc-config"
+
+/** True for an `oc:<key>` item id whose key never leaves this machine. */
+export function machineOnly(id: string) {
+  return id.startsWith("oc:") && _MACHINE_OC_KEYS.has(id.slice(3).split(".")[0]!)
+}
 // `.tmp-<pid>`: a write `apply` did not finish. `.bak`, `.bak-<stamp>`, `.orig`, `~`: backup copies.
 const _SKIP_NAME =
   /^(node_modules|\.git|\.DS_Store|auth\.json|\.env.*|.*\.(pem|key)|.*\.tmp-\d+|.*\.bak(-.*)?|.*\.orig|.*~)$/i
@@ -518,6 +538,14 @@ export function importBackupRoot() {
 export async function apply(
   items: readonly Item[],
   options: { remove?: readonly Item[]; backupRoot?: string; keep?: number } = {},
+) {
+  const touchesOc = [...items, ...(options.remove ?? [])].some((item) => item.kind === "key" && item.file === "oc")
+  return touchesOc ? Flock.withLock(OC_CONFIG_LOCK, () => applyUnlocked(items, options)) : applyUnlocked(items, options)
+}
+
+async function applyUnlocked(
+  items: readonly Item[],
+  options: { remove?: readonly Item[]; backupRoot?: string; keep?: number },
 ) {
   const remove = options.remove ?? []
   const writes = new Map<string, () => Promise<string | Buffer | undefined>>()

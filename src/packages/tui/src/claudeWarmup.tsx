@@ -362,7 +362,8 @@ export function formatLastAttempt(account: ClaudeWarmupAccount, timeZone: string
   if (!account.lastAttempt) return "No attempts yet"
   const outcome = account.lastAttempt.outcome
   const label = outcome in OUTCOME_LABEL ? OUTCOME_LABEL[outcome] : outcome
-  return `${formatZoned(account.lastAttempt.attemptedAt, timeZone)} ${label}`
+  const host = account.lastAttempt.host ? ` on ${account.lastAttempt.host}` : ""
+  return `${formatZoned(account.lastAttempt.attemptedAt, timeZone)} ${label}${host}`
 }
 
 export function readWarmupState(
@@ -503,6 +504,12 @@ export function accountOptions(input: {
       title: formatLastAttempt(input.account, input.timeZone),
       inert: true,
     },
+  )
+  // Old servers omit `here`, so only an explicit false gets the row.
+  if (input.account.here === false) {
+    rows.push({ value: "here", title: "Not signed in here: another machine sends it", inert: true })
+  }
+  rows.push(
     {
       value: "save",
       title: "Save",

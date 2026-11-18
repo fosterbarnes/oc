@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import fs from "node:fs/promises"
+import os from "node:os"
+import path from "node:path"
+import { Global } from "../../src/global"
 import { OcItems } from "../../src/util/ocItems"
 
 // Inline credentials must never leave the serving machine, and the importer must keep its own.
@@ -71,5 +75,49 @@ describe("exclude tree", () => {
   test("an item key does not cover a longer id with the same start", () => {
     expect(OcItems.excluded("tui:theme_mode", [], ["tui:theme"])).toBe(false)
     expect(OcItems.excluded("tui:theme", [], ["tui:theme"])).toBe(true)
+  })
+})
+
+// Config folder names differ per machine, so claudeAccountNames stays here; the email-keyed claudeAccounts syncs.
+describe("machine-only oc keys", () => {
+  test("machineOnly holds for claudeAccountNames and not for synced keys", () => {
+    expect(OcItems.machineOnly("oc:claudeAccountNames")).toBe(true)
+    expect(OcItems.machineOnly("oc:claudeAccounts")).toBe(false)
+    expect(OcItems.machineOnly("opencode:provider.x")).toBe(false)
+  })
+
+  describe("collect", () => {
+    let root = ""
+    let savedConfig = ""
+    let savedHome: string | undefined
+
+    beforeEach(async () => {
+      root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "oc-items-collect-")))
+      savedConfig = Global.Path.config
+      savedHome = process.env.OPENCODE_TEST_HOME
+      Global.Path.config = path.join(root, "config")
+      process.env.OPENCODE_TEST_HOME = root
+      await fs.mkdir(Global.Path.config, { recursive: true })
+      await fs.writeFile(
+        path.join(Global.Path.config, "oc.json"),
+        JSON.stringify({
+          claudeAccounts: { "a@example.invalid": { enabled: true } },
+          claudeAccountNames: { a: "Work" },
+        }),
+      )
+    })
+
+    afterEach(async () => {
+      Global.Path.config = savedConfig
+      if (savedHome === undefined) delete process.env.OPENCODE_TEST_HOME
+      else process.env.OPENCODE_TEST_HOME = savedHome
+      await fs.rm(root, { recursive: true, force: true })
+    })
+
+    test("produces claudeAccounts but not claudeAccountNames", async () => {
+      const ids = (await OcItems.collect()).items.map((item) => item.id)
+      expect(ids).toContain("oc:claudeAccounts")
+      expect(ids).not.toContain("oc:claudeAccountNames")
+    })
   })
 })

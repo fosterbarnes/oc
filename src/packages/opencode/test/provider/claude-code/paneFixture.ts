@@ -48,6 +48,12 @@ export const openPane = Effect.fnUntraced(function* (
       // palette stays empty. These format-valid fakes make `auth status
       // --json` truthfully report logged-in with no network and no PII, and
       // the pane test never sends a model request with them.
+      // `auth status` reports the account email only from `.claude.json` `oauthAccount`; warm-up
+      // schedules are keyed by it, so an email-less login would list no account.
+      await Bun.write(
+        path.join(dir, ".claude.json"),
+        JSON.stringify({ oauthAccount: { emailAddress: "pane@example.test", organizationName: "Pane Org" } }),
+      )
       await Bun.write(
         path.join(dir, ".credentials.json"),
         JSON.stringify({

@@ -2,8 +2,10 @@
  * Listener-owned warm-up scheduler lifecycle.
  *
  * Builds only warmupLoopLayer (with a mocked Config) inside an explicitly
- * managed scope: the loop ticks there, and closing the scope ends a pending
- * auth probe with no later model spawn. Handler-layer construction is
+ * managed scope: the loop ticks there on a fake clock, with a no-peer PeerSource and a ready
+ * migration gate (deps.peers / deps.ready, so no tailnet or sync is touched), a slot crossed
+ * between ticks fires once, a slot crossed before the loop started is caught up on its first
+ * tick, and closing the scope ends a pending auth probe with no later model spawn. Handler-layer construction is
  * deliberately never built here: scheduling lives only in warmupLoopLayer,
  * which server.ts merges into the real listener layer, so a behavioral
  * "construction schedules nothing" check would need a 16s+ wait to mean
@@ -19,12 +21,10 @@ import { Config } from "@/config/config"
 import { makeWarmupLoop } from "@/server/routes/instance/httpapi/handlers/global"
 import { _setCliRunner } from "@/provider/claude-code/warmup/cli"
 import { _resetInventoryForTests, _setInventoryProbe } from "@/provider/claude-code/warmup/inventory"
-import {
-  _setStoreFile,
-  readStore,
-  storeKeyForAccount,
-  setAccountSchedule,
-} from "@/provider/claude-code/warmup/store"
+import { _resetIdentities } from "@/provider/claude-code/warmup/identities"
+import type { PeerSource } from "@/provider/claude-code/warmup/peers"
+import { _setStoreFile, readStore } from "@/provider/claude-code/warmup/store"
+import { _setClaudeAccounts, type SyncedAccounts } from "@/provider/claude-code/warmup/synced"
 import { testEffect } from "../lib/effect"
 
 const cliPath = process.env.CLAUDE_CLI_PATH ?? Bun.which("claude")
@@ -40,8 +40,13 @@ function hhmm(ms: number): string {
 /** Fixed local noon anchor so minute slots never depend on wall clock. */
 const SCHEDULE_BASE_MS = new Date(2026, 6, 10, 12, 0, 0, 0).getTime()
 
+/** No tailnet: this machine alone, and the account migration gate is open. */
+const noPeers: PeerSource = { self: async () => "test-host", views: async () => [] }
+
 function warmupLoopLayer(currentMs: { value: number }, accounts: () => string[]) {
-  return Layer.effectDiscard(makeWarmupLoop(POLL_MS, { now: () => currentMs.value })).pipe(
+  return Layer.effectDiscard(
+    makeWarmupLoop(POLL_MS, { now: () => currentMs.value }, { peers: noPeers, ready: () => true }),
+  ).pipe(
     Layer.provide(
       Layer.mock(Config.Service)({
         invalidate: () => Effect.void,
@@ -76,10 +81,19 @@ function waitFor(label: string, ready: () => boolean) {
   })
 }
 
-function lastAttemptOf(accountID: string) {
-  const stored = readStore(storeFile)
-  return stored.status === "ok" ? stored.state.accounts[storeKeyForAccount(accountID)]?.lastAttempt : undefined
+function lastAttemptOf(email: string) {
+  return readStore(storeFile).accounts[email]?.lastAttempt
 }
+
+const scheduled = (...slots: Array<[email: string, slotAt: number]>): SyncedAccounts =>
+  Object.fromEntries(
+    slots.map(([email, slotAt]) => [
+      email,
+      { warmup: { enabled: true, schedule: { mode: "daily" as const, times: [hhmm(slotAt)] }, updatedAt: 0 } },
+    ]),
+  )
+
+const sentBody = JSON.stringify({ type: "result", is_error: false, result: "hi", session_id: "s" })
 
 const { effect } = testEffect(Layer.empty)
 
@@ -91,8 +105,10 @@ beforeEach(() => {
   _setCliRunner(null)
   _setInventoryProbe(null)
   dir = mkdtempSync(path.join(tmpdir(), "warmup-listener-"))
-  storeFile = path.join(dir, "warmup.json")
+  storeFile = path.join(dir, "warmup-state.json")
   _setStoreFile(storeFile)
+  _resetIdentities(null)
+  _setClaudeAccounts({})
 })
 
 afterEach(() => {
@@ -100,60 +116,133 @@ afterEach(() => {
   _setCliRunner(null)
   _setInventoryProbe(null)
   _setStoreFile(undefined)
+  _setClaudeAccounts(undefined)
+  _resetIdentities(undefined)
   rmSync(dir, { recursive: true, force: true })
 })
 
 describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
-  effect("scope start ticks, scope stop ends pending auth without model spawn", () =>
+  effect("a slot crossed between two ticks fires once, however many ticks follow", () =>
     Effect.gen(function* () {
       const slotAt = SCHEDULE_BASE_MS + 60_000
-      const accountID = path.join(dir, "claude-pending")
-      yield* Effect.promise(() =>
-        setAccountSchedule({
-          file: storeFile,
-          accountID,
-          enabled: true,
-          schedule: { mode: "daily", times: [hhmm(slotAt)] },
-        }),
-      )
-
-      _setInventoryProbe(async (_cli, id) => ({ id, status: "connected" }))
-
-      let authReady = false
-      let authSpawns = 0
-      let modelSpawns = 0
+      const email = "loop@example.test"
+      const accountID = path.join(dir, "claude-loop")
+      _setClaudeAccounts(scheduled([email, slotAt]))
+      _setInventoryProbe(async (_cli, id) => ({ id, status: "connected", email }))
+      const sentTo: string[] = []
       _setCliRunner(async (opts) => {
-        if (opts.args[0] === "auth") {
-          authSpawns += 1
-          authReady = true
-          await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve(), { once: true }))
-          return { code: null, stdout: "", stderr: "aborted", timedOut: false }
-        }
+        sentTo.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
+        return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
+      })
+
+      // Ticks land 20 ms after each poll boundary, so the slot sits strictly between two of them.
+      const currentMs = { value: SCHEDULE_BASE_MS - 45_000 + 20 }
+      yield* TestClock.setTime(currentMs.value)
+      const scope = yield* Scope.make()
+      yield* Layer.buildWithMemoMap(
+        warmupLoopLayer(currentMs, () => [accountID]),
+        Layer.makeMemoMapUnsafe(),
+        scope,
+      )
+      yield* Effect.yieldNow
+
+      yield* advanceTo(currentMs, slotAt - POLL_MS)
+      expect(sentTo).toEqual([])
+      yield* advanceTo(currentMs, slotAt + POLL_MS)
+      yield* waitFor("send", () => sentTo.length > 0)
+      yield* waitFor("outcome", () => !!lastAttemptOf(email))
+      expect(sentTo).toEqual([accountID])
+      expect(lastAttemptOf(email)).toMatchObject({ scheduledAt: slotAt, outcome: "sent", host: "test-host" })
+
+      yield* advanceTo(currentMs, slotAt + 20 * POLL_MS)
+      yield* Effect.promise(() => Bun.sleep(50))
+      expect(sentTo).toEqual([accountID])
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  effect("a slot crossed before the loop started is caught up on its first tick, not at start", () =>
+    Effect.gen(function* () {
+      const slotAt = SCHEDULE_BASE_MS
+      const email = "loop@example.test"
+      const accountID = path.join(dir, "claude-restart")
+      _setClaudeAccounts(scheduled([email, slotAt]))
+      _setInventoryProbe(async (_cli, id) => ({ id, status: "connected", email }))
+      const sentTo: string[] = []
+      _setCliRunner(async (opts) => {
+        sentTo.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
+        return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
+      })
+
+      const currentMs = { value: slotAt + 10 * 60_000 }
+      yield* TestClock.setTime(currentMs.value)
+      const scope = yield* Scope.make()
+      yield* Layer.buildWithMemoMap(
+        warmupLoopLayer(currentMs, () => [accountID]),
+        Layer.makeMemoMapUnsafe(),
+        scope,
+      )
+      yield* Effect.yieldNow
+      // Start only sets the watermark.
+      yield* Effect.promise(() => Bun.sleep(50))
+      expect(sentTo).toEqual([])
+
+      yield* advanceTo(currentMs, currentMs.value + POLL_MS)
+      yield* waitFor("catch-up send", () => sentTo.length > 0)
+      yield* waitFor("outcome", () => !!lastAttemptOf(email))
+      expect(sentTo).toEqual([accountID])
+      expect(lastAttemptOf(email)).toMatchObject({ scheduledAt: slotAt, outcome: "sent" })
+      yield* advanceTo(currentMs, currentMs.value + 10 * POLL_MS)
+      yield* Effect.promise(() => Bun.sleep(50))
+      expect(sentTo).toEqual([accountID])
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  effect("scope start ticks, scope stop ends a pending auth probe without a model spawn", () =>
+    Effect.gen(function* () {
+      const slotAt = SCHEDULE_BASE_MS + 60_000
+      const email = "pending@example.test"
+      const accountID = path.join(dir, "claude-pending")
+      _setClaudeAccounts(scheduled([email, slotAt]))
+
+      // The first probe (the loop's identity probe) answers; the send-time probe hangs until aborted.
+      let authSpawns = 0
+      let hung = false
+      _setInventoryProbe(async (_cli, id, signal) => {
+        authSpawns += 1
+        if (authSpawns === 1) return { id, status: "connected", email }
+        hung = true
+        await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }))
+        return { id, status: "unknown" }
+      })
+      let modelSpawns = 0
+      _setCliRunner(async () => {
         modelSpawns += 1
-        return {
-          code: 0,
-          stdout: JSON.stringify({ type: "result", is_error: false, result: "hi", session_id: "s" }),
-          stderr: "",
-          timedOut: false,
-        }
+        return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
       })
 
       const currentMs = { value: SCHEDULE_BASE_MS - 45_000 }
       yield* TestClock.setTime(currentMs.value)
 
       const scope = yield* Scope.make()
-      yield* Layer.buildWithMemoMap(warmupLoopLayer(currentMs, () => [accountID]), Layer.makeMemoMapUnsafe(), scope)
+      yield* Layer.buildWithMemoMap(
+        warmupLoopLayer(currentMs, () => [accountID]),
+        Layer.makeMemoMapUnsafe(),
+        scope,
+      )
       yield* Effect.yieldNow
 
       yield* advanceTo(currentMs, slotAt)
-      yield* waitFor("auth probe start", () => authReady)
-      expect(authSpawns).toBe(1)
+      yield* waitFor("send-time probe start", () => hung)
+      expect(authSpawns).toBe(2)
 
       yield* Scope.close(scope, Exit.void)
       // Grace period for a (wrongly) surviving loop to reach the model spawn.
       yield* Effect.promise(() => Bun.sleep(150))
-      expect(authSpawns).toBe(1)
+      expect(authSpawns).toBe(2)
       expect(modelSpawns).toBe(0)
+      expect(readStore(storeFile).accounts[email]?.claims ?? {}).toEqual({})
     }),
   )
 
@@ -163,42 +252,14 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
       const slotB = SCHEDULE_BASE_MS + 120_000
       const accountA = path.join(dir, "claude-a")
       const accountB = path.join(dir, "claude-b")
-      yield* Effect.promise(() =>
-        Promise.all([
-          setAccountSchedule({
-            file: storeFile,
-            accountID: accountA,
-            enabled: true,
-            schedule: { mode: "daily", times: [hhmm(slotA)] },
-          }),
-          setAccountSchedule({
-            file: storeFile,
-            accountID: accountB,
-            enabled: true,
-            schedule: { mode: "daily", times: [hhmm(slotB)] },
-          }),
-        ]),
-      )
+      const emails: Record<string, string> = { [accountA]: "a@example.test", [accountB]: "b@example.test" }
+      _setClaudeAccounts(scheduled(["a@example.test", slotA], ["b@example.test", slotB]))
 
       const sentTo: string[] = []
-      _setInventoryProbe(async (_cli, id) => ({ id, status: "connected" }))
+      _setInventoryProbe(async (_cli, id) => ({ id, status: "connected", email: emails[id] }))
       _setCliRunner(async (opts) => {
-        if (opts.args[0] === "auth") {
-          return {
-            code: 0,
-            stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }),
-            stderr: "",
-            timedOut: false,
-          }
-        }
-        const configDir = opts.env.CLAUDE_CONFIG_DIR ?? ""
-        sentTo.push(configDir)
-        return {
-          code: 0,
-          stdout: JSON.stringify({ type: "result", is_error: false, result: "hi", session_id: "s" }),
-          stderr: "",
-          timedOut: false,
-        }
+        sentTo.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
+        return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
       })
 
       let accounts: string[] = [accountA]
@@ -206,13 +267,17 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
       yield* TestClock.setTime(currentMs.value)
 
       const scope = yield* Scope.make()
-      yield* Layer.buildWithMemoMap(warmupLoopLayer(currentMs, () => accounts), Layer.makeMemoMapUnsafe(), scope)
+      yield* Layer.buildWithMemoMap(
+        warmupLoopLayer(currentMs, () => accounts),
+        Layer.makeMemoMapUnsafe(),
+        scope,
+      )
       yield* Effect.yieldNow
 
       yield* advanceTo(currentMs, slotA)
       yield* waitFor("account A send", () => sentTo.includes(accountA))
       // Outcome write ends the tick; only then is the loop back to sleeping.
-      yield* waitFor("account A outcome", () => !!lastAttemptOf(accountA))
+      yield* waitFor("account A outcome", () => !!lastAttemptOf("a@example.test"))
       expect(sentTo).toEqual([accountA])
 
       accounts = [accountB]
@@ -224,4 +289,3 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
     }),
   )
 })
-

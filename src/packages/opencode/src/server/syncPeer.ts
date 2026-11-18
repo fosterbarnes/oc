@@ -2,7 +2,10 @@
 // on this machine's Tailscale IPv4 (read-only manifest and items routes, same Tailscale account
 // only), pull newer items from every online same-account peer, and reload open projects once no
 // session is busy. Separate from the resident server's port. Logic: core `util/ocSync.ts`.
+import os from "node:os"
+import { OcItems } from "@opencode-ai/core/util/ocItems"
 import { OcSync } from "@opencode-ai/core/util/ocSync"
+import { localView, parsePeerView, type PeerSource, type PeerView } from "@/provider/claude-code/warmup/peers"
 import { GlobalBus } from "@/bus/global"
 import { AppRuntime } from "@/effect/app-runtime"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "./global-lifecycle"
@@ -16,6 +19,15 @@ const _BUSY_LIMIT = 2 * 60 * 60_000
 let server: ReturnType<typeof Bun.serve> | undefined
 let tailscale: { at: number; value: Promise<OcSync.TailscaleStatus> } | undefined
 let running = false
+// Set after this process's first sync cycle in which every online peer answered (offline peers are
+// not listed): the Claude account migration waits for it so it merges into what peers already have
+// instead of publishing a newer partial map. After _MIGRATION_WAIT it runs anyway (a peer stuck on
+// another sync format would otherwise block it forever).
+let firstCycleDone = false
+let cycleErrors = 0
+const runsOc = new Set<string>()
+const _MIGRATION_WAIT = 15 * 60_000
+const startedAt = Date.now()
 let reloadPending = false
 const busy = new Map<string, number>()
 const backoff = new Map<string, number>()
@@ -47,10 +59,14 @@ async function tick() {
       log("cycle", `sync: ${message}`)
       return save({ error: message })
     })
+    .then(() => {
+      if (cycleErrors === 0) firstCycleDone = true
+    })
     .finally(() => (running = false))
 }
 
 async function cycle() {
+  cycleErrors = 1
   const settings = OcSync.settings()
   if (!settings.enabled) {
     server?.stop(true)
@@ -60,16 +76,26 @@ async function cycle() {
   }
   const tail = await tailscaleStatus()
   listen(tail)
+  cycleErrors = 0
   for (const peer of OcSync.peersOf(tail)) {
-    if ((backoff.get(peer.ip) ?? 0) > Date.now()) continue
+    if ((backoff.get(peer.ip) ?? 0) > Date.now()) {
+      // A peer running oc that has not synced yet still holds the migration barrier.
+      if (!firstCycleDone && runsOc.has(peer.ip)) cycleErrors += 1
+      continue
+    }
     const result = await OcSync.pull(peer, settings).catch((error: unknown) => error as Error)
     if (result instanceof Error) {
+      // Only a peer that runs oc holds the barrier. A refused or timed-out connection is a device
+      // without oc (Home Assistant, a server); any other error came after oc answered.
+      if (!unreachable(result)) runsOc.add(peer.ip)
+      if (runsOc.has(peer.ip)) cycleErrors += 1
       backoff.set(peer.ip, Date.now() + _BACKOFF)
       if (known.has(peer.ip)) known.set(peer.ip, { ...known.get(peer.ip)!, error: result.message })
       log(peer.ip, `sync: ${peer.name}: ${result.message}`)
       continue
     }
     known.set(peer.ip, { ...peer, ok: Date.now() })
+    runsOc.add(peer.ip)
     logged.delete(peer.ip)
     if (result.applied.length === 0) continue
     console.log(`sync: applied ${result.applied.length} items from ${peer.name}`)
@@ -81,6 +107,15 @@ async function cycle() {
     await AppRuntime.runPromise(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
   }
   await save({ enabled: true, error: undefined, peers: [...known.values()] })
+}
+
+function unreachable(error: Error) {
+  return (
+    error.name === "TimeoutError" ||
+    error.name === "AbortError" ||
+    error instanceof TypeError ||
+    /unable to connect|connection refused|econnrefused|econnreset|socket|network/i.test(error.message)
+  )
 }
 
 function save(next: Partial<OcSync.Status>) {
@@ -121,6 +156,13 @@ async function respond(request: Request, self: ReturnType<typeof Bun.serve>) {
     if (request.headers.get("if-none-match") === tag) return new Response(null, { status: 304, headers: { etag: tag } })
     return Response.json(manifest, { headers: { etag: tag } })
   }
+  if (request.method === "GET" && url.pathname === OcSync.ROUTE.warmup) {
+    const view = warmupShared(OcSync.settings()) ? localView() : undefined
+    if (!view) return new Response("Not found", { status: 404 })
+    return view
+      .then((value) => Response.json(value))
+      .catch((error) => new Response(error instanceof Error ? error.message : String(error), { status: 500 }))
+  }
   if (request.method === "POST" && url.pathname === OcSync.ROUTE.items) {
     const body = (await request.json().catch(() => undefined)) as { ids?: unknown } | undefined
     if (!Array.isArray(body?.ids)) return new Response("Expected { ids: string[] }", { status: 400 })
@@ -150,3 +192,44 @@ function tailscaleStatus() {
 }
 
 export * as SyncPeer from "./syncPeer"
+
+// --- Claude warm-up (provider/claude-code/warmup) ---
+
+// Warm-up state is shared only while sync is on and synced Claude accounts are not excluded:
+// the same peers and the same condition that carry `oc:claudeAccounts` itself.
+function warmupShared(settings: OcSync.Settings) {
+  return settings.enabled && !OcItems.excluded("oc:claudeAccounts", [], settings.exclude)
+}
+
+/** True once the Claude account migration may run: sync off, or the first sync cycle finished. */
+export function readyForAccountMigration() {
+  return !OcSync.settings().enabled || firstCycleDone || Date.now() - startedAt > _MIGRATION_WAIT
+}
+
+const _WARMUP_TIMEOUT = 3_000
+
+// Peers for the warm-up scheduler. Works whether or not this process runs the sync loop (a native
+// server reads the same Tailscale status); peers backed off by the sync loop are skipped.
+export const warmupPeers: PeerSource = {
+  async self() {
+    const tail = await tailscaleStatus().catch(() => undefined)
+    return tail?.selfHost || os.hostname().split(".")[0]!.toLowerCase()
+  },
+  async views() {
+    if (!warmupShared(OcSync.settings())) return []
+    const tail = await tailscaleStatus().catch(() => undefined)
+    if (!tail) return []
+    const peers = OcSync.peersOf(tail).filter((peer) => (backoff.get(peer.ip) ?? 0) <= Date.now())
+    const views = await Promise.all(
+      peers.map(async (peer): Promise<PeerView | undefined> => {
+        const response = await fetch(`http://${peer.ip}:${OcSync.PORT}${OcSync.ROUTE.warmup}`, {
+          signal: AbortSignal.timeout(_WARMUP_TIMEOUT),
+        }).catch(() => undefined)
+        // 404: an older build or warm-up sharing off there; not a candidate.
+        if (!response?.ok) return undefined
+        return parsePeerView(peer.name, await response.json().catch(() => undefined))
+      }),
+    )
+    return views.filter((view): view is PeerView => !!view)
+  },
+}

@@ -153,10 +153,14 @@ const WarmupLastAttempt = Schema.Struct({
   scheduledAt: Schema.Finite,
   attemptedAt: Schema.Finite,
   outcome: Schema.Literals(["sent", "rejected", "failed", "timeout", "missed"]),
+  // Tailnet host that made the attempt (cross-machine warm-ups).
+  host: Schema.optional(Schema.String),
 })
 
+// `accountID` is the account email; `here`: signed in on this machine.
 const WarmupAccount = Schema.Struct({
   accountID: Schema.String,
+  here: Schema.optional(Schema.Boolean),
   label: Schema.String,
   enabled: Schema.Boolean,
   schedule: WarmupSchedule,

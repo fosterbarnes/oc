@@ -1,36 +1,38 @@
 import { isRecord } from "@/util/record"
-import { poolAccountLabel } from "../accounts.js"
 import { log } from "../logger.js"
 import { buildWarmupArgs, checkWarmupCli, cliRunner, warmupCwd, warmupEnv, type ChildTracker } from "./cli"
-import { accountLabel } from "./identity"
-import { listConnected, verifyAccountConnected } from "./inventory"
+import { dirOf, emailOf } from "./identities"
+import { listConnected, verifyAccountEmail } from "./inventory"
+import type { PeerSource, PeerView } from "./peers"
 import {
+  CATCHUP_MS,
   nextOccurrence,
   occurrencesInWindow,
-  isScheduleEmpty,
   serverTimeZone,
   serverUtcOffset,
-  type DueOccurrence,
   type WarmupSchedule,
 } from "./schedule"
 import {
-  claimDueOccurrences,
+  adoptPeer,
+  claimOccurrence,
   readStore,
   recordAttempt,
-  storeKeyForAccount,
-  type AccountRecord,
   type AttemptOutcome,
   type LastAttempt,
-  type StoreRead,
+  type RuntimeFile,
 } from "./store"
+import { emailKey, readClaudeAccounts, type SyncedAccount, type SyncedAccounts } from "./synced"
 
 export interface AccountView {
+  /** The account's email: synced account info is keyed by it. */
   accountID: string
   label: string
   enabled: boolean
   schedule: WarmupSchedule
   nextAt?: number
   lastAttempt?: LastAttempt
+  /** Signed in on this machine. */
+  here: boolean
 }
 export interface WarmupStateView {
   accounts: AccountView[]
@@ -42,23 +44,12 @@ export interface WarmupStateView {
 
 export const POLL_MS = 15_000
 export const FIRE_ALLOWANCE_MS = 60_000
+/** Each lower-ranked machine waits this much longer for a better-ranked one to claim a slot. */
+export const STANDBY_MS = 60_000
 export const SEND_TIMEOUT_MS = 30_000
 export const SEND_CONCURRENCY = 2
-
-// Send boundary re-check: pausing or removing an account cancels unstarted
-// work, and a request already sent cannot be recalled.
-export function isStillSendable(input: {
-  store: StoreRead
-  accountID: string
-  poolIds: string[]
-  connectedIds: string[]
-}): boolean {
-  if (input.store.status !== "ok") return false
-  if (!input.poolIds.includes(input.accountID)) return false
-  if (!input.connectedIds.includes(input.accountID)) return false
-  const record = input.store.state.accounts[storeKeyForAccount(input.accountID)]
-  return !!record && record.enabled && !isScheduleEmpty(record.schedule)
-}
+/** Self host name when no peer source is wired (sync off, tests). */
+export const LOCAL_HOST = "local"
 
 export interface SendResult {
   outcome: AttemptOutcome
@@ -157,181 +148,356 @@ export interface TickResult {
   skipped: number
 }
 
-export async function tickOnce(input: {
-  file: string | null
-  lockDir?: string
-  prevMs: number
+export interface TickInput {
   nowMs: number
   poolIds: string[]
   cliPath: string
   signal?: AbortSignal
-  tracker?: ChildTracker
-  /** Wall clock for send deadlines; defaults to `Date.now`. The listener passes its loop clock. */
-  clock?: () => number
-  /** Current membership reader from the listener; defaults to the tick's pool snapshot. */
+  /** Current membership reader; defaults to the tick's pool snapshot. */
   getPoolIds?: () => Promise<string[]> | string[]
-}): Promise<TickResult> {
-  const zero: TickResult = { fired: 0, missed: 0, skipped: 0 }
-  if (input.signal?.aborted) return zero
-  // A gap larger than the firing allowance means suspend or a stall:
-  // advance the watermark and skip all crossed slots, no catch-up burst.
-  // A clock move backward re-establishes the watermark.
-  if (input.nowMs <= input.prevMs || input.nowMs - input.prevMs > FIRE_ALLOWANCE_MS) return zero
-  const stored = readStore(input.file)
-  if (stored.status === "missing") return zero
-  if (stored.status !== "ok") {
-    log.warn("claude warm-up store unreadable; sends stopped", { error: stored.error })
-    return zero
+}
+
+export interface SchedulerOptions {
+  file: string | null
+  lockDir?: string
+  tracker?: ChildTracker
+  /** Wall clock for send deadlines; defaults to `Date.now`. */
+  clock?: () => number
+  /** Synced account reader; defaults to oc.json `claudeAccounts`. */
+  accounts?: () => SyncedAccounts
+  /** Live peers for cross-machine run-once; none means this machine runs alone. */
+  peers?: PeerSource
+}
+
+interface Pending {
+  email: string
+  at: number
+  /** When rank 0 may fire: the slot itself, or the moment a catch-up was detected. */
+  base: number
+  /** Highest rank seen: the deadline never shrinks when a better-ranked peer drops out. */
+  rank?: number
+}
+
+const ZERO: TickResult = { fired: 0, missed: 0, skipped: 0 }
+
+/** The occurrence is still enabled, still one of the account's times, and not before its last save. */
+function stillScheduled(account: SyncedAccount | undefined, at: number): boolean {
+  const warmup = account?.warmup
+  if (!warmup?.enabled || at < warmup.updatedAt) return false
+  return occurrencesInWindow(warmup.schedule, at - 1, at).some((occurrence) => occurrence.at === at)
+}
+
+/** Rank of `self` among the machines that have `email` signed in: 0 fires first. */
+export function rankFor(self: string, email: string, views: readonly PeerView[]): number {
+  const hosts = new Set([self, ...views.filter((view) => view.connected.includes(email)).map((view) => view.host)])
+  return [...hosts].sort().indexOf(self)
+}
+
+// The 15 s loop's scheduler. Crossed slots go into `pending` and stay there until they fire, a
+// peer claims them, or their deadline passes: a lower-ranked machine waits STANDBY_MS per rank
+// for a better-ranked one to claim. A gap larger than FIRE_ALLOWANCE_MS (sleep, stall) and the
+// first tick after start skip on-time firing; the next normal tick catches up the latest slot of
+// each account from the last CATCHUP_MS (not before its schedule was saved), unless a peer
+// already ran it. With nothing scheduled the tick is a stat of oc.json and no network or CLI.
+export function createScheduler(options: SchedulerOptions) {
+  let prev: number | undefined
+  let catchupFrom: number | undefined
+  const pending = new Map<string, Pending>()
+  const accounts = () => (options.accounts ?? readClaudeAccounts)()
+
+  function add(item: Pending) {
+    const key = `${item.email}|${item.at}`
+    const existing = pending.get(key)
+    // A catch-up after sleeping through a standby wait restarts the wait from the wake.
+    if (!existing || item.base > existing.base) pending.set(key, item)
   }
-  const enabledIds = input.poolIds.filter((id) => {
-    const record = stored.state.accounts[storeKeyForAccount(id)]
-    return !!record && record.enabled && !isScheduleEmpty(record.schedule)
-  })
-  if (!enabledIds.length) return zero
-  // Due work first: with no occurrences in this window there is nothing to
-  // probe or spawn for. The 15s loop stays a tiny file read; no periodic
-  // CLI discovery, version check, or auth probe happens all day for idle
-  // schedules.
-  const dueIds = enabledIds.filter((id) => {
-    const record = stored.state.accounts[storeKeyForAccount(id)]!
-    return occurrencesInWindow(record.schedule, input.prevMs, input.nowMs).length > 0
-  })
-  if (!dueIds.length) return zero
-  const cli = await checkWarmupCli(input.cliPath)
-  if (!cli.available) {
-    log.warn("claude warm-up CLI unavailable; sends skipped", { error: cli.error })
-    return { ...zero, skipped: dueIds.length }
+
+  /** Establishes the watermark; slots from the last CATCHUP_MS are caught up on the next tick. */
+  function start(nowMs: number) {
+    prev = nowMs
+    catchupFrom = nowMs - CATCHUP_MS
   }
-  const inventory = await listConnected({
-    cliPath: input.cliPath,
-    candidates: input.poolIds,
-    signal: input.signal,
-    tracker: input.tracker,
-  }).catch(() => ({ at: Date.now(), connectedIds: [] as string[] }))
-  if (input.signal?.aborted) return zero
-  const dueConnected = dueIds.filter((id) => inventory.connectedIds.includes(id))
-  const work: Array<{ accountID: string; occurrence: DueOccurrence }> = []
-  for (const id of dueConnected) {
-    if (input.signal?.aborted) break
-    const record = stored.state.accounts[storeKeyForAccount(id)]!
-    const occurrences = occurrencesInWindow(record.schedule, input.prevMs, input.nowMs)
-    if (!occurrences.length) continue
-    let claimed: DueOccurrence[]
-    try {
-      claimed = await claimDueOccurrences({ file: input.file, lockDir: input.lockDir, accountID: id, occurrences })
-    } catch (error) {
-      log.warn("claude warm-up claim failed; occurrence skipped", { accountID: id, error: String(error) })
-      continue
+
+  async function tick(input: TickInput): Promise<TickResult> {
+    if (input.signal?.aborted) return { ...ZERO }
+    const now = input.nowMs
+    if (prev === undefined) {
+      start(now)
+      return { ...ZERO }
     }
-    for (const occurrence of claimed) work.push({ accountID: id, occurrence })
-  }
-  const result: TickResult = { ...zero }
-  const wall = input.clock ?? Date.now
-  await eachLimit(work, SEND_CONCURRENCY, async ({ accountID, occurrence }) => {
-    if (input.signal?.aborted) {
-      result.skipped += 1
-      return
+    // A clock move backward re-establishes the watermark.
+    if (now <= prev) {
+      prev = now
+      return { ...ZERO }
     }
-    const attemptBase = { scheduledAt: occurrence.at, attemptedAt: wall() }
-    const record = (outcome: AttemptOutcome, attemptedAt = attemptBase.attemptedAt) =>
-      recordAttempt({
-        file: input.file,
-        lockDir: input.lockDir,
-        accountID,
-        attempt: { ...attemptBase, attemptedAt, outcome },
-      }).catch((error) => log.warn("claude warm-up outcome write failed", { accountID, error: String(error) }))
-    const late = () => wall() - occurrence.at > FIRE_ALLOWANCE_MS
-    if (late()) {
-      await record("missed")
-      result.missed += 1
-      return
+    const from = prev
+    prev = now
+    // Suspend or stall: fire nothing now; the next normal tick catches up once the machine has
+    // stayed awake for a poll (short maintenance wakes never send).
+    if (now - from > FIRE_ALLOWANCE_MS) {
+      catchupFrom = Math.min(catchupFrom ?? from, from)
+      return { ...ZERO }
     }
-    const connected = await verifyAccountConnected(input.cliPath, accountID, input.signal, input.tracker).catch(
-      () => false,
+    const synced = accounts()
+    const scheduled = Object.entries(synced).flatMap(([email, account]) =>
+      account.warmup?.enabled ? [{ email, warmup: account.warmup }] : [],
     )
-    if (input.signal?.aborted) {
-      result.skipped += 1
-      return
+    for (const { email, warmup } of scheduled) {
+      for (const occurrence of occurrencesInWindow(warmup.schedule, from, now)) {
+        if (occurrence.at >= warmup.updatedAt) add({ email, at: occurrence.at, base: occurrence.at })
+      }
     }
-    if (!connected) {
-      result.skipped += 1
-      return
+    if (catchupFrom !== undefined) {
+      // Slots still waiting when the machine slept restart their wait from the wake.
+      for (const item of pending.values()) {
+        if (item.at < now - CATCHUP_MS || item.base >= now) continue
+        item.base = now
+        item.rank = undefined
+      }
+      const since = Math.max(catchupFrom, now - CATCHUP_MS)
+      for (const { email, warmup } of scheduled) {
+        const missed = occurrencesInWindow(warmup.schedule, since, from)
+          .filter((occurrence) => occurrence.at >= warmup.updatedAt)
+          .at(-1)
+        if (missed) add({ email, at: missed.at, base: now })
+      }
+      catchupFrom = undefined
     }
-    const poolIds = (await Promise.resolve(input.getPoolIds?.()).catch(() => undefined)) ?? input.poolIds
-    if (!isStillSendable({ store: readStore(input.file), accountID, poolIds, connectedIds: [accountID] })) {
-      result.skipped += 1
-      return
+    if (!pending.size) return { ...ZERO }
+    return run(input, now, synced)
+  }
+
+  async function run(input: TickInput, now: number, synced: SyncedAccounts): Promise<TickResult> {
+    const result = { ...ZERO }
+    const local = readStore(options.file)
+    for (const [key, item] of pending) {
+      if (local.accounts[item.email]?.claims[String(item.at)] !== undefined) pending.delete(key)
     }
-    if (late()) {
-      await record("missed")
-      result.missed += 1
-      return
+    if (!pending.size) return result
+    const cli = await checkWarmupCli(input.cliPath)
+    if (!cli.available) {
+      log.warn("claude warm-up CLI unavailable; sends skipped", { error: cli.error })
+      result.skipped += pending.size
+      pending.clear()
+      return result
     }
-    const send = await sendWarmup({
+    const inventory = await listConnected({
       cliPath: input.cliPath,
-      accountID,
-      scheduledAt: occurrence.at,
+      candidates: input.poolIds,
       signal: input.signal,
-      tracker: input.tracker,
-    }).catch((): SendResult => ({ outcome: "failed", detail: "send threw" }))
-    // A shutdown that raced the send leaves no outcome noise behind.
-    if (input.signal?.aborted) {
-      result.skipped += 1
-      return
+      tracker: options.tracker,
+    }).catch(() => ({ connectedIds: [] as string[] }))
+    if (input.signal?.aborted) return { ...ZERO }
+    const [self, views] = options.peers
+      ? await Promise.all([options.peers.self(), options.peers.views()]).catch((): [string, PeerView[]] => [
+          LOCAL_HOST,
+          [],
+        ])
+      : [LOCAL_HOST, [] as PeerView[]]
+
+    const work: Array<{ item: Pending; dir: string; deadline: number; rank: number }> = []
+    for (const [key, item] of pending) {
+      const slot = String(item.at)
+      const claimedBy = views.filter((view) => view.claims[item.email]?.[slot] !== undefined)
+      if (claimedBy.length) {
+        pending.delete(key)
+        const last = claimedBy
+          .map((view) => view.last[item.email])
+          .filter((attempt): attempt is LastAttempt => !!attempt && attempt.scheduledAt === item.at)[0]
+        await adoptPeer({
+          file: options.file,
+          lockDir: options.lockDir,
+          email: item.email,
+          claims: { [slot]: claimedBy[0]!.claims[item.email]![slot]! },
+          lastAttempt: last,
+          now: (options.clock ?? Date.now)(),
+        }).catch((error) => log.warn("claude warm-up peer record failed", { error: String(error) }))
+        result.skipped += 1
+        continue
+      }
+      const dir = dirOf(item.email, inventory.connectedIds)
+      if (!stillScheduled(synced[item.email], item.at) || !dir) {
+        // Not runnable here (paused, time removed, or signed in only on another machine).
+        pending.delete(key)
+        continue
+      }
+      const rank = rankFor(self, item.email, views)
+      item.rank = Math.max(item.rank ?? 0, rank)
+      const due = item.base + rank * STANDBY_MS
+      const deadline = item.base + item.rank * STANDBY_MS + FIRE_ALLOWANCE_MS
+      if (now > deadline) {
+        pending.delete(key)
+        if (rank === 0) {
+          await record(item, "missed", now, self)
+          result.missed += 1
+        }
+        continue
+      }
+      if (now < due) continue
+      pending.delete(key)
+      work.push({ item, dir, deadline, rank })
     }
-    await record(send.outcome, wall())
-    // Delivery success is observable only; a new window requires reading
-    // Claude's real reset time, so say Prompt sent, never Window started.
-    if (send.outcome === "sent") log.info("claude warm-up prompt sent", { accountID })
-    result.fired += 1
-  })
-  return result
+
+    const wall = options.clock ?? Date.now
+    await eachLimit(work, SEND_CONCURRENCY, async ({ item, dir, deadline, rank }) => {
+      const late = () => wall() > deadline
+      if (input.signal?.aborted) {
+        result.skipped += 1
+        return
+      }
+      if (late()) {
+        await record(item, "missed", wall(), self)
+        result.missed += 1
+        return
+      }
+      const email = await verifyAccountEmail(input.cliPath, dir, input.signal, options.tracker).catch(() => undefined)
+      if (input.signal?.aborted) {
+        result.skipped += 1
+        return
+      }
+      // Send only to the scheduled account: a folder signed in to another one meanwhile never sends.
+      if (!email || emailKey(email) !== item.email) {
+        result.skipped += 1
+        return
+      }
+      const poolIds = (await Promise.resolve(input.getPoolIds?.()).catch(() => undefined)) ?? input.poolIds
+      if (!poolIds.includes(dir) || !stillScheduled(accounts()[item.email], item.at)) {
+        result.skipped += 1
+        return
+      }
+      if (late()) {
+        await record(item, "missed", wall(), self)
+        result.missed += 1
+        return
+      }
+      // A standby machine re-reads peers right before claiming: a better-ranked one may have
+      // claimed since this tick's snapshot.
+      if (rank > 0 && options.peers) {
+        const fresh = await options.peers.views().catch(() => [] as PeerView[])
+        if (fresh.some((view) => view.claims[item.email]?.[String(item.at)] !== undefined)) {
+          result.skipped += 1
+          return
+        }
+      }
+      const claimed = await claimOccurrence({
+        file: options.file,
+        lockDir: options.lockDir,
+        email: item.email,
+        at: item.at,
+        now: wall(),
+      }).catch((error) => {
+        log.warn("claude warm-up claim failed; occurrence skipped", { error: String(error) })
+        return false
+      })
+      if (!claimed) {
+        result.skipped += 1
+        return
+      }
+      const send = await sendWarmup({
+        cliPath: input.cliPath,
+        accountID: dir,
+        scheduledAt: item.at,
+        signal: input.signal,
+        tracker: options.tracker,
+      }).catch((): SendResult => ({ outcome: "failed", detail: "send threw" }))
+      // A shutdown that raced the send leaves no outcome noise behind.
+      if (input.signal?.aborted) {
+        result.skipped += 1
+        return
+      }
+      await record(item, send.outcome, wall(), self)
+      // Delivery success is observable only; a new window requires reading
+      // Claude's real reset time, so say Prompt sent, never Window started.
+      if (send.outcome === "sent") log.info("claude warm-up prompt sent", { host: self })
+      result.fired += 1
+    })
+    return result
+  }
+
+  function record(item: Pending, outcome: AttemptOutcome, attemptedAt: number, host: string) {
+    return recordAttempt({
+      file: options.file,
+      lockDir: options.lockDir,
+      email: item.email,
+      attempt: { scheduledAt: item.at, attemptedAt, outcome, ...(host !== LOCAL_HOST ? { host } : {}) },
+    }).catch((error) => log.warn("claude warm-up outcome write failed", { error: String(error) }))
+  }
+
+  return { start, tick, pendingCount: () => pending.size }
+}
+
+export type Scheduler = ReturnType<typeof createScheduler>
+
+/** What this machine tells peers: emails signed in here, recent claims, and latest outcomes. */
+export async function describeLocal(input: {
+  cliPath: string
+  poolIds: string[]
+  file: string | null
+  now?: number
+}): Promise<Omit<PeerView, "host">> {
+  const inventory = await listConnected({ cliPath: input.cliPath, candidates: input.poolIds }).catch(() => ({
+    connectedIds: [] as string[],
+  }))
+  const connected = [...new Set(inventory.connectedIds.flatMap((dir) => emailOf(dir) ?? []))]
+  const since = (input.now ?? Date.now()) - 24 * 60 * 60 * 1000
+  const store = readStore(input.file)
+  const claims: PeerView["claims"] = {}
+  const last: PeerView["last"] = {}
+  for (const [email, record] of Object.entries(store.accounts)) {
+    const recent = Object.entries(record.claims).filter(([slot]) => Number(slot) >= since)
+    if (recent.length) claims[email] = Object.fromEntries(recent)
+    if (record.lastAttempt) last[email] = record.lastAttempt
+  }
+  return { connected, claims, last }
 }
 
 export function accountView(input: {
-  accountID: string
-  record?: AccountRecord
+  email: string
+  account?: SyncedAccount
+  runtime?: RuntimeFile
+  here: boolean
   now: number
-  clashes?: boolean
 }): AccountView {
-  const schedule = input.record?.schedule ?? { mode: "daily", times: [] as string[] }
-  const enabled = input.record?.enabled ?? false
+  const warmup = input.account?.warmup
+  const schedule = warmup?.schedule ?? { mode: "daily", times: [] as string[] }
+  const enabled = warmup?.enabled ?? false
   const next = nextOccurrence(schedule, enabled, input.now)
+  const lastAttempt = input.runtime?.accounts[input.email]?.lastAttempt
   return {
-    accountID: input.accountID,
-    label: accountLabel(input.accountID, input.clashes ?? false),
+    accountID: input.email,
+    label: input.account?.name ?? input.email,
     enabled,
     schedule,
+    here: input.here,
     ...(next !== undefined ? { nextAt: next } : {}),
-    ...(input.record?.lastAttempt ? { lastAttempt: { ...input.record.lastAttempt } } : {}),
+    ...(lastAttempt ? { lastAttempt: { ...lastAttempt } } : {}),
   }
 }
 
+/** Accounts signed in here first (pool order), then synced accounts signed in elsewhere only. */
 export function stateView(input: {
-  poolIds: string[]
-  connectedIds: string[]
-  store: StoreRead
+  accounts: SyncedAccounts
+  connectedEmails: string[]
+  store: RuntimeFile
   available: boolean
   error?: string
   now?: number
 }): WarmupStateView {
   const now = input.now ?? Date.now()
-  const counts = new Map<string, number>()
-  for (const id of input.connectedIds) {
-    if (!input.poolIds.includes(id)) continue
-    counts.set(poolAccountLabel(id), (counts.get(poolAccountLabel(id)) ?? 0) + 1)
-  }
+  const here = [...new Set(input.connectedEmails.map(emailKey))]
+  const elsewhere = Object.keys(input.accounts)
+    .filter((email) => !here.includes(email))
+    .sort()
   return {
-    accounts: input.connectedIds
-      .filter((id) => input.poolIds.includes(id))
-      .map((id) =>
-        accountView({
-          accountID: id,
-          record: input.store.status === "ok" ? input.store.state.accounts[storeKeyForAccount(id)] : undefined,
-          now,
-          clashes: (counts.get(poolAccountLabel(id)) ?? 0) > 1,
-        }),
-      ),
+    accounts: [...here, ...elsewhere].map((email) =>
+      accountView({
+        email,
+        account: input.accounts[email],
+        runtime: input.store,
+        here: here.includes(email),
+        now,
+      }),
+    ),
     timeZone: serverTimeZone(),
     utcOffset: serverUtcOffset(),
     available: input.available,

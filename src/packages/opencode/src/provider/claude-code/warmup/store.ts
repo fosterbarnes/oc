@@ -3,36 +3,39 @@ import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { Flock } from "@opencode-ai/core/util/flock"
 import { isRecord } from "@/util/record"
-import {
-  CLAIM_RETENTION_DAYS,
-  isScheduleEmpty,
-  localDateStr,
-  normalizeSchedule,
-  type DueOccurrence,
-  type WarmupSchedule,
-} from "./schedule"
+import { CLAIM_RETENTION_DAYS, normalizeSchedule, type WarmupSchedule } from "./schedule"
+
+// Machine-local warm-up runtime state, keyed by lowercased account email: claims (occurrence
+// instant -> claim time) and the latest outcome. Schedules live in synced oc.json
+// `claudeAccounts` (synced.ts). Runtime state never syncs as a config item: peers read it through
+// the sync listener's warm-up route only when a slot is due.
 
 export type AttemptOutcome = "sent" | "rejected" | "failed" | "timeout" | "missed"
+const OUTCOMES: readonly AttemptOutcome[] = ["sent", "rejected", "failed", "timeout", "missed"]
 export interface LastAttempt {
   scheduledAt: number
   attemptedAt: number
   outcome: AttemptOutcome
+  /** Tailnet host that made the attempt; absent for attempts from before cross-machine runs. */
+  host?: string
 }
-export interface AccountRecord {
-  enabled: boolean
-  schedule: WarmupSchedule
+export interface RuntimeRecord {
   claims: Record<string, number>
   lastAttempt?: LastAttempt
 }
-export interface WarmupFile {
-  accounts: Record<string, AccountRecord>
-  /** Raw entries this build cannot read. Ignored by the scheduler, written back unchanged. */
-  invalid?: Record<string, unknown>
+export interface RuntimeFile {
+  accounts: Record<string, RuntimeRecord>
 }
 
 export const STORE_LOCK_TIMEOUT_MS = 5_000
 
 export function defaultStoreFile(): string | null {
+  if (process.env.BUN_TEST != null) return null
+  return path.join(Global.Path.data, "claude-code", "warmup-state.json")
+}
+
+/** The pre-sync store (folder-keyed schedules); read once by the migration, never written. */
+export function legacyStoreFile(): string | null {
   if (process.env.BUN_TEST != null) return null
   return path.join(Global.Path.data, "claude-code", "warmup.json")
 }
@@ -48,127 +51,6 @@ export function _setStoreFile(file: string | null | undefined): void {
   storeFileOverride = file
 }
 
-// `unreadable` is an I/O failure (lock, permission): the file is left alone.
-// `malformed` is content no build can read: an explicit save replaces it and keeps a `.bad` copy.
-export type StoreRead =
-  | { status: "ok"; state: WarmupFile }
-  | { status: "missing" }
-  | { status: "unreadable"; error: string }
-  | { status: "malformed"; error: string }
-
-function storeReadError(read: Exclude<StoreRead, { status: "ok" }>): string {
-  return read.status === "missing" ? "warm-up store is missing" : read.error
-}
-
-export function badStoreFile(file: string): string {
-  return `${file}.bad`
-}
-
-// User-facing problem with the store, or undefined when every entry is readable.
-export function storeProblem(read: StoreRead, file: string | null): string | undefined {
-  if (read.status === "unreadable") return read.error
-  if (read.status === "malformed") {
-    if (!file) return read.error
-    return `${read.error}. Saving a schedule starts a new file and keeps the old one as ${badStoreFile(file)}`
-  }
-  if (read.status !== "ok" || !read.state.invalid) return undefined
-  const names = Object.keys(read.state.invalid).map((key) => path.basename(key))
-  return `Ignored unreadable warm-up schedule for ${names.join(", ")}; save it again to replace it`
-}
-
-// Shape check only; readStore normalizes and validates the schedule itself.
-function isRecordValue(value: unknown): value is AccountRecord {
-  if (!isRecord(value)) return false
-  if (typeof value.enabled !== "boolean") return false
-  if (!isRecord(value.schedule)) return false
-  if (!isRecord(value.claims)) return false
-  for (const stamp of Object.values(value.claims)) {
-    if (typeof stamp !== "number" || !Number.isFinite(stamp)) return false
-  }
-  if (value.lastAttempt !== undefined) {
-    if (!isRecord(value.lastAttempt)) return false
-    if (typeof value.lastAttempt.scheduledAt !== "number" || typeof value.lastAttempt.attemptedAt !== "number")
-      return false
-    if (!["sent", "rejected", "failed", "timeout", "missed"].includes(value.lastAttempt.outcome as string)) return false
-  }
-  return true
-}
-
-export function readStore(file: string | null): StoreRead {
-  if (!file) return { status: "missing" }
-  let text: string
-  try {
-    text = readFileSync(file, "utf8")
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { status: "missing" }
-    return { status: "unreadable", error: `cannot read warm-up store: ${String(error)}` }
-  }
-  let raw: unknown
-  try {
-    raw = JSON.parse(text)
-  } catch {
-    return { status: "malformed", error: "warm-up store is not valid JSON" }
-  }
-  if (!isRecord(raw) || !isRecord(raw.accounts)) return { status: "malformed", error: "warm-up store has no accounts" }
-  // One bad entry must not stop every account: skip it and keep its raw value.
-  const accounts: Record<string, AccountRecord> = {}
-  const invalid: Record<string, unknown> = {}
-  for (const [id, record] of Object.entries(raw.accounts)) {
-    if (!isRecordValue(record)) {
-      invalid[id] = record
-      continue
-    }
-    const normalized = normalizeSchedule(record.schedule)
-    if ("error" in normalized) {
-      invalid[id] = record
-      continue
-    }
-    accounts[id] = {
-      enabled: record.enabled,
-      schedule: normalized.schedule,
-      claims: { ...record.claims },
-      ...(record.lastAttempt ? { lastAttempt: { ...record.lastAttempt } } : {}),
-    }
-  }
-  return { status: "ok", state: { accounts, ...(Object.keys(invalid).length ? { invalid } : {}) } }
-}
-
-function pruneClaims(claims: Record<string, number>, nowMs: number): Record<string, number> {
-  const cutoff = localDateStr(nowMs - CLAIM_RETENTION_DAYS * 24 * 60 * 60 * 1000)
-  const kept: Record<string, number> = {}
-  for (const [key, stamp] of Object.entries(claims)) {
-    if (key.slice(0, 10) >= cutoff) kept[key] = stamp
-  }
-  return kept
-}
-
-export function writeStoreAtomic(file: string, state: WarmupFile): void {
-  mkdirSync(path.dirname(file), { recursive: true })
-  const tmp = `${file}.${process.pid}.tmp`
-  try {
-    writeFileSync(tmp, JSON.stringify({ accounts: { ...state.invalid, ...state.accounts } }), "utf8")
-    renameSync(tmp, file)
-  } catch (error) {
-    rmSync(tmp, { force: true })
-    throw error
-  }
-}
-
-function lockKey(file: string | null): string {
-  return `claude-warmup:${file ?? "memory"}`
-}
-
-async function withStoreLock<T>(
-  file: string | null,
-  lockDir: string | undefined,
-  fn: () => Promise<T> | T,
-): Promise<T> {
-  return Flock.withLock(lockKey(file), async () => fn(), {
-    ...(lockDir ? { dir: lockDir } : {}),
-    timeoutMs: STORE_LOCK_TIMEOUT_MS,
-  })
-}
-
 export class ScheduleValidationError extends Error {
   override readonly name = "ScheduleValidationError"
 }
@@ -177,114 +59,180 @@ export class WarmupStoreError extends Error {
   override readonly name = "WarmupStoreError"
 }
 
-// Pool ids are already materialized resolved dirs by the time they reach the
-// store, so keys only normalize Windows casing. Labels disambiguate
-// identical folder basenames with their parent path.
-export function storeKeyForAccount(accountID: string): string {
-  return process.platform === "win32" ? accountID.toLowerCase() : accountID
+function parseAttempt(value: unknown): LastAttempt | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.scheduledAt !== "number" || typeof value.attemptedAt !== "number") return undefined
+  if (!OUTCOMES.includes(value.outcome as AttemptOutcome)) return undefined
+  return {
+    scheduledAt: value.scheduledAt,
+    attemptedAt: value.attemptedAt,
+    outcome: value.outcome as AttemptOutcome,
+    ...(typeof value.host === "string" && value.host ? { host: value.host } : {}),
+  }
 }
 
-export async function setAccountSchedule(input: {
-  file: string | null
-  lockDir?: string
-  accountID: string
-  enabled: boolean
-  schedule: unknown
-  now?: number
-}): Promise<AccountRecord> {
-  const normalized = normalizeSchedule(input.schedule)
-  if ("error" in normalized) throw new ScheduleValidationError(normalized.error)
-  const file = input.file
-  if (!file) throw new WarmupStoreError("warm-up store is unavailable")
-  const now = input.now ?? Date.now()
-  return withStoreLock(file, input.lockDir, () => {
-    const read = readStore(file)
-    if (read.status === "unreadable") throw new WarmupStoreError(read.error)
-    // A save is the recovery path for a corrupt store: keep the old file beside it and start fresh.
-    if (read.status === "malformed") renameSync(file, badStoreFile(file))
-    const state: WarmupFile = read.status === "ok" ? read.state : { accounts: {} }
-    const key = storeKeyForAccount(input.accountID)
-    const previous = state.accounts[key]
-    const empty = isScheduleEmpty(normalized.schedule)
-    state.accounts[key] = {
-      enabled: empty ? false : input.enabled,
-      schedule: normalized.schedule,
-      claims: pruneClaims(previous?.claims ?? {}, now),
-      ...(previous?.lastAttempt ? { lastAttempt: previous.lastAttempt } : {}),
-    }
-    delete state.invalid?.[key]
-    writeStoreAtomic(file, state)
-    return state.accounts[key]!
-  }).catch((error) => {
-    if (error instanceof ScheduleValidationError || error instanceof WarmupStoreError) throw error
-    throw new WarmupStoreError(`cannot save warm-up schedule: ${String(error)}`)
+function parseClaims(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter((entry): entry is [string, number] => Number.isFinite(entry[1])),
+  )
+}
+
+// Runtime state is disposable: a missing, unreadable, or corrupt file reads as empty, and bad
+// entries are dropped. The worst case is one repeated greeting.
+export function readStore(file: string | null): RuntimeFile {
+  if (!file) return { accounts: {} }
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"))
+  } catch {
+    return { accounts: {} }
+  }
+  if (!isRecord(raw) || !isRecord(raw.accounts)) return { accounts: {} }
+  const accounts: Record<string, RuntimeRecord> = {}
+  for (const [email, value] of Object.entries(raw.accounts)) {
+    if (!isRecord(value)) continue
+    const lastAttempt = parseAttempt(value.lastAttempt)
+    accounts[email] = { claims: parseClaims(value.claims), ...(lastAttempt ? { lastAttempt } : {}) }
+  }
+  return { accounts }
+}
+
+export function writeStoreAtomic(file: string, state: RuntimeFile): void {
+  mkdirSync(path.dirname(file), { recursive: true })
+  const tmp = `${file}.${process.pid}.tmp`
+  try {
+    writeFileSync(tmp, JSON.stringify(state), "utf8")
+    renameSync(tmp, file)
+  } catch (error) {
+    rmSync(tmp, { force: true })
+    throw error
+  }
+}
+
+function pruneClaims(claims: Record<string, number>, nowMs: number): Record<string, number> {
+  const cutoff = nowMs - CLAIM_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  return Object.fromEntries(Object.entries(claims).filter(([key]) => Number(key) >= cutoff))
+}
+
+async function update<T>(
+  file: string,
+  lockDir: string | undefined,
+  what: string,
+  fn: (state: RuntimeFile) => { result: T; changed: boolean },
+): Promise<T> {
+  return Flock.withLock(
+    `claude-warmup:${file}`,
+    async () => {
+      const state = readStore(file)
+      const { result, changed } = fn(state)
+      if (changed) writeStoreAtomic(file, state)
+      return result
+    },
+    { ...(lockDir ? { dir: lockDir } : {}), timeoutMs: STORE_LOCK_TIMEOUT_MS },
+  ).catch((error) => {
+    throw new WarmupStoreError(`cannot ${what}: ${String(error)}`)
   })
 }
 
-// Claim-before-send gives at-most-once attempts across resident/native
-// servers sharing the data directory. The lock is released before any CLI
-// work; a crash after claiming loses that occurrence, which matches the
-// skip-missed-times policy.
-export async function claimDueOccurrences(input: {
+function recordFor(state: RuntimeFile, email: string): RuntimeRecord {
+  return (state.accounts[email] ??= { claims: {} })
+}
+
+// Claim-before-send: at most one attempt per occurrence on this machine (resident and native
+// servers share the data dir). Taken only by the machine about to send; the lock is released
+// before any CLI work, so a crash after claiming loses that occurrence.
+export async function claimOccurrence(input: {
   file: string | null
   lockDir?: string
-  accountID: string
-  occurrences: DueOccurrence[]
+  email: string
+  at: number
   now?: number
-}): Promise<DueOccurrence[]> {
-  if (!input.file || !input.occurrences.length) return []
+}): Promise<boolean> {
+  if (!input.file) return false
   const now = input.now ?? Date.now()
-  return withStoreLock(input.file, input.lockDir, () => {
-    const read = readStore(input.file)
-    if (read.status !== "ok") throw new WarmupStoreError(storeReadError(read))
-    const record = read.state.accounts[storeKeyForAccount(input.accountID)]
-    if (!record || !record.enabled || isScheduleEmpty(record.schedule)) return []
-    const claimed: DueOccurrence[] = []
-    for (const occurrence of input.occurrences) {
-      if (record.claims[occurrence.key] === undefined) {
-        record.claims[occurrence.key] = now
-        claimed.push(occurrence)
-      }
-    }
-    if (!claimed.length) return []
-    record.claims = pruneClaims(record.claims, now)
-    writeStoreAtomic(input.file!, read.state)
-    return claimed
-  }).catch((error) => {
-    if (error instanceof WarmupStoreError) throw error
-    throw new WarmupStoreError(`cannot claim warm-up occurrence: ${String(error)}`)
+  return update(input.file, input.lockDir, "claim warm-up occurrence", (state) => {
+    const record = recordFor(state, input.email)
+    if (record.claims[String(input.at)] !== undefined) return { result: false, changed: false }
+    record.claims = pruneClaims({ ...record.claims, [String(input.at)]: now }, now)
+    return { result: true, changed: true }
   })
 }
 
-// Latest-outcome updates merge into the current record without resurrecting
-// removed schedules or overwriting a newer attempt. Concurrent sends can
-// complete out of order, so a completion for an older scheduled occurrence
-// never overwrites the outcome of a newer one; only the enabled flag and
-// schedule from saves change state, never an outcome write.
+// A peer's claims and newer outcome, copied so this machine stops considering the slot and
+// shows where it ran.
+export async function adoptPeer(input: {
+  file: string | null
+  lockDir?: string
+  email: string
+  claims: Record<string, number>
+  lastAttempt?: LastAttempt
+  now?: number
+}): Promise<void> {
+  if (!input.file) return
+  const now = input.now ?? Date.now()
+  await update(input.file, input.lockDir, "record peer warm-up", (state) => {
+    const record = recordFor(state, input.email)
+    let changed = false
+    for (const [key, stamp] of Object.entries(input.claims)) {
+      if (record.claims[key] !== undefined) continue
+      record.claims[key] = stamp
+      changed = true
+    }
+    if (input.lastAttempt && newer(input.lastAttempt, record.lastAttempt)) {
+      record.lastAttempt = { ...input.lastAttempt }
+      changed = true
+    }
+    if (changed) record.claims = pruneClaims(record.claims, now)
+    return { result: undefined, changed }
+  })
+}
+
+function newer(next: LastAttempt, previous: LastAttempt | undefined) {
+  if (!previous) return true
+  if (next.scheduledAt !== previous.scheduledAt) return next.scheduledAt > previous.scheduledAt
+  return next.attemptedAt > previous.attemptedAt
+}
+
+// Concurrent sends can finish out of order: an older occurrence never overwrites a newer outcome.
 export async function recordAttempt(input: {
   file: string | null
   lockDir?: string
-  accountID: string
+  email: string
   attempt: LastAttempt
-}): Promise<boolean> {
-  if (!input.file) return false
-  return withStoreLock(input.file, input.lockDir, () => {
-    const read = readStore(input.file)
-    if (read.status !== "ok") throw new WarmupStoreError(storeReadError(read))
-    const record = read.state.accounts[storeKeyForAccount(input.accountID)]
-    if (!record) return false
-    const previous = record.lastAttempt
-    if (
-      previous &&
-      (previous.scheduledAt > input.attempt.scheduledAt ||
-        (previous.scheduledAt === input.attempt.scheduledAt && previous.attemptedAt >= input.attempt.attemptedAt))
-    )
-      return true
+}): Promise<void> {
+  if (!input.file) return
+  await update(input.file, input.lockDir, "record warm-up attempt", (state) => {
+    const record = recordFor(state, input.email)
+    if (!newer(input.attempt, record.lastAttempt)) return { result: undefined, changed: false }
     record.lastAttempt = { ...input.attempt }
-    writeStoreAtomic(input.file!, read.state)
-    return true
-  }).catch((error) => {
-    if (error instanceof WarmupStoreError) throw error
-    throw new WarmupStoreError(`cannot record warm-up attempt: ${String(error)}`)
+    return { result: undefined, changed: true }
   })
+}
+
+export interface LegacyRecord {
+  enabled: boolean
+  schedule: WarmupSchedule
+  lastAttempt?: LastAttempt
+}
+
+/** Folder-keyed records from the pre-sync `warmup.json`; unreadable entries are skipped. */
+export function readLegacyStore(file: string | null): Record<string, LegacyRecord> {
+  if (!file) return {}
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(file, "utf8"))
+  } catch {
+    return {}
+  }
+  if (!isRecord(raw) || !isRecord(raw.accounts)) return {}
+  const out: Record<string, LegacyRecord> = {}
+  for (const [dir, value] of Object.entries(raw.accounts)) {
+    if (!isRecord(value) || typeof value.enabled !== "boolean") continue
+    const normalized = normalizeSchedule(value.schedule)
+    if ("error" in normalized) continue
+    const lastAttempt = parseAttempt(value.lastAttempt)
+    out[dir] = { enabled: value.enabled, schedule: normalized.schedule, ...(lastAttempt ? { lastAttempt } : {}) }
+  }
+  return out
 }

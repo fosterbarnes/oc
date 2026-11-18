@@ -391,7 +391,18 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
     (fixture) =>
       Effect.gen(function* () {
         const pane = yield* openPane(fixture, { warmupAuth: true })
-        const store = path.join(fixture.home, ".local", "share", "opencode", "claude-code", "warmup.json")
+        // Opening or editing the dialog saves nothing: no runtime store, and no schedule in the
+        // synced `claudeAccounts` of oc.json.
+        const store = path.join(fixture.home, ".local", "share", "opencode", "claude-code", "warmup-state.json")
+        const ocJson = path.join(fixture.home, ".config", "opencode", "oc.json")
+        const nothingSaved = () =>
+          Effect.promise(async () => {
+            expect(await Bun.file(store).exists()).toBe(false)
+            const saved = (await Bun.file(ocJson)
+              .text()
+              .catch(() => "")) as string
+            expect(saved).not.toContain("warmup")
+          })
         yield* pane.waitFor("Ask anything")
         yield* pane.type(OC_PALETTE_KEY)
         yield* pane.waitFor("Commands")
@@ -419,7 +430,7 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         // Esc goes back to the schedule dialog. Wait for it: an ESC byte right before the macOS
         // palette key's escape sequence would be read with it as one key.
         yield* pane.waitFor("Every day", (shown) => !shown.includes("Send at"))
-        expect(yield* Effect.promise(() => Bun.file(store).exists())).toBe(false)
+        yield* nothingSaved()
         // Back out to the prompt (schedule dialog, then palette): the dialog has its own "Search" box,
         // and Cmd+O does not open the palette over it.
         yield* pane.type("\x1b")
@@ -440,7 +451,7 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         const sunday = yield* pane.waitFor("Est. reset Monday 03:00")
         expect(sunday).toContain("If this starts a new 5-hour window.")
         yield* pane.type("\x1b")
-        expect(yield* Effect.promise(() => Bun.file(store).exists())).toBe(false)
+        yield* nothingSaved()
         expect(yield* fixture.llm.inputs).toEqual([])
       }),
     180_000,

@@ -36,4 +36,11 @@ describe("decide", () => {
     expect(OcSync.decide(undefined, remote(1), ["skill:"])).toBe("skip")
     expect(OcSync.decide({ ...local(1), tags: ["windows"] }, remote(2), ["tag:windows"])).toBe("skip")
   })
+
+  test("machine-only oc keys are skipped even when the remote is newer", () => {
+    const entry = (id: string): OcSync.ManifestEntry => ({ id, hash: "r", at: 2, tags: [] })
+    expect(OcSync.decide(local(1, "l", "l"), entry("oc:claudeAccountNames"), [])).toBe("skip")
+    expect(OcSync.decide(undefined, entry("oc:claudeAccountNames"), [])).toBe("skip")
+    expect(OcSync.decide(local(1, "l", "l"), entry("oc:claudeAccounts"), [])).toBe("take")
+  })
 })

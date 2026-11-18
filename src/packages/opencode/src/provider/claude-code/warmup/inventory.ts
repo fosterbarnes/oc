@@ -1,5 +1,6 @@
 import { isRecord } from "@/util/record"
 import { cliRunner, warmupCwd, warmupEnv, type ChildTracker, type CliRunResult } from "./cli"
+import { noteProbe } from "./identities"
 
 export const AUTH_PROBE_TIMEOUT_MS = 15_000
 export const INVENTORY_TTL_MS = 60_000
@@ -7,22 +8,24 @@ export const INVENTORY_TTL_MS = 60_000
 export interface InventoryProbe {
   id: string
   status: "connected" | "signed-out" | "unknown"
+  /** Account email from `auth status`; synced account info is keyed by it. */
+  email?: string
 }
 
-function parseAuthStatus(stdout: string): InventoryProbe["status"] {
+function parseAuthStatus(stdout: string): Pick<InventoryProbe, "status" | "email"> {
   let body: unknown
   try {
     body = JSON.parse(stdout)
   } catch {
-    return "unknown"
+    return { status: "unknown" }
   }
-  if (!isRecord(body)) return "unknown"
-  if (body.loggedIn !== true) return "signed-out"
+  if (!isRecord(body)) return { status: "unknown" }
+  if (body.loggedIn !== true) return { status: "signed-out" }
   // Accept authenticated claude.ai subscription accounts, not API-key or
   // third-party-provider authentication.
   if (body.authMethod === "claude.ai" && (body.apiProvider === "firstParty" || body.apiProvider === undefined))
-    return "connected"
-  return "unknown"
+    return { status: "connected", ...(typeof body.email === "string" && body.email ? { email: body.email } : {}) }
+  return { status: "unknown" }
 }
 
 async function probeAccount(
@@ -56,10 +59,10 @@ async function probeAccount(
   if (result.code !== 0) {
     const output = `${result.stdout}\n${result.stderr}`.toLowerCase()
     if (/not logged in|login|unauthenticated|no auth/.test(output)) return { id: accountID, status: "signed-out" }
-    if (result.stdout.trim()) return { id: accountID, status: parseAuthStatus(result.stdout) }
+    if (result.stdout.trim()) return { id: accountID, ...parseAuthStatus(result.stdout) }
     return { id: accountID, status: "unknown" }
   }
-  return { id: accountID, status: parseAuthStatus(result.stdout) }
+  return { id: accountID, ...parseAuthStatus(result.stdout) }
 }
 
 let inventoryProbeOverride:
@@ -120,6 +123,7 @@ async function probeAll(
   // connected accounts and resurrect signed-out ones.
   let unknown = 0
   for (const result of results) {
+    noteProbe(result.id, result.status, result.email)
     if (result.status === "connected") lastKnownPresence.set(result.id, true)
     else if (result.status === "signed-out") lastKnownPresence.delete(result.id)
     else unknown += 1
@@ -167,14 +171,20 @@ export function listConnected(input: {
   return pending
 }
 
-// Fresh per-account recheck immediately before sending: true only for a
-// currently connected subscription login. Unknown (timeout, unparseable,
-// unexpected method) is not signed out, but it is not sendable either.
-export async function verifyAccountConnected(
+// Fresh per-account recheck immediately before sending: the signed-in email
+// only for a currently connected subscription login. Unknown (timeout,
+// unparseable, unexpected method) is not signed out, but not sendable either.
+// The caller sends only when it equals the scheduled account's email, so a
+// folder signed in to another account meanwhile never sends.
+export async function verifyAccountEmail(
   cliPath: string,
   accountID: string,
   signal?: AbortSignal,
   tracker?: ChildTracker,
-): Promise<boolean> {
-  return (await probeAccount(cliPath, accountID, AUTH_PROBE_TIMEOUT_MS, signal, tracker)).status === "connected"
+): Promise<string | undefined> {
+  const probe = await (inventoryProbeOverride
+    ? inventoryProbeOverride(cliPath, accountID, signal)
+    : probeAccount(cliPath, accountID, AUTH_PROBE_TIMEOUT_MS, signal, tracker))
+  noteProbe(accountID, probe.status, probe.email)
+  return probe.status === "connected" ? probe.email : undefined
 }

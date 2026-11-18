@@ -319,6 +319,36 @@ test("dated DST preview adds five elapsed hours in the server zone", () => {
   expect(formatLastAttempt(daily, "UTC")).toBe("No attempts yet")
 })
 
+test("last attempt names the machine only when the server sends a host", () => {
+  const hosted = { ...weekly, lastAttempt: { ...weekly.lastAttempt, host: "goonstation" } }
+  expect(formatLastAttempt(hosted, "UTC")).toMatch(/ Prompt sent on goonstation$/)
+  expect(formatLastAttempt(weekly, "UTC")).toMatch(/ Prompt sent$/)
+  expect(formatLastAttempt(weekly, "UTC")).not.toContain("goonstation")
+})
+
+test("not-signed-in row shows only when here is explicitly false", () => {
+  const rowsFor = (account: ClaudeWarmupAccount) =>
+    accountOptions({
+      account,
+      draft: draftFromAccount(account),
+      zone: "",
+      timeZone: "UTC",
+      utcOffset: "",
+      onMode: () => undefined,
+      onTimes: () => undefined,
+      onSave: () => undefined,
+      onSavePreset: () => undefined,
+      onLoadPreset: () => undefined,
+      onPause: () => undefined,
+      onResume: () => undefined,
+    }).filter((option) => option.value === "here")
+  const row = { value: "here", title: "Not signed in here: another machine sends it", inert: true }
+  expect(rowsFor({ ...daily, here: false })).toEqual([row])
+  expect(rowsFor({ ...daily, here: true })).toEqual([])
+  // Old servers omit `here`.
+  expect(rowsFor(daily)).toEqual([])
+})
+
 test("stale discovery results are ignored", async () => {
   const applied: ClaudeWarmupState[] = []
   let load = 0

@@ -10,25 +10,30 @@ import {
   accountConfigEntry,
   accountName,
   forgetAccount,
+  forgetAccountName,
   poolAccountIds,
   poolConfigDir,
   poolState,
+  projectAccountNames,
   reloadAccountNames,
   setAccountName,
 } from "@/provider/claude-code/accounts"
 import { cliCommand } from "@/provider/claude-code/cliExecutable"
-import { accountView, POLL_MS, stateView, tickOnce } from "@/provider/claude-code/warmup"
+import { accountView, createScheduler, describeLocal, POLL_MS, stateView } from "@/provider/claude-code/warmup"
 import { checkWarmupCli, killTracker, type ChildTracker } from "@/provider/claude-code/warmup/cli"
-import { poolIdsForConfig } from "@/provider/claude-code/warmup/identity"
+import { emailOf, forgetIdentity } from "@/provider/claude-code/warmup/identities"
+import { materializeAccountId, poolIdsForConfig } from "@/provider/claude-code/warmup/identity"
 import { forgetInventory, listConnected } from "@/provider/claude-code/warmup/inventory"
+import { createHousekeeping } from "@/provider/claude-code/warmup/migrate"
+import { setLocalViewProvider, type PeerSource } from "@/provider/claude-code/warmup/peers"
 import {
+  legacyStoreFile,
   readStore,
   ScheduleValidationError,
-  setAccountSchedule,
   storeFile,
-  storeProblem,
   WarmupStoreError,
 } from "@/provider/claude-code/warmup/store"
+import { emailKey, readClaudeAccounts, saveWarmup } from "@/provider/claude-code/warmup/synced"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ServerLifecycle } from "@/server/lifecycle"
@@ -298,7 +303,9 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
             return yield* new InvalidRequestError({ message: "The last Claude account cannot be removed" })
           yield* saveAccounts(pool.entries.filter((dir) => poolAccountIds([dir])[0] !== input.id))
           forgetAccount(input.id)
-          yield* attempt(() => setAccountName(entry, undefined))
+          // Local only: the synced name stays for the machines that still have this account.
+          yield* attempt(() => forgetAccountName(entry))
+          forgetIdentity(materializeAccountId(input.id))
           break
         case "signedIn":
           forgetAccount(input.id)
@@ -306,6 +313,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           break
         case "signOut":
           yield* attempt(() => signOut(pool.cliPath, input.id))
+          forgetIdentity(materializeAccountId(input.id))
           forgetInventory()
           break
       }
@@ -317,62 +325,61 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       const cli = yield* Effect.tryPromise(() => checkWarmupCli(pool.cliPath)).pipe(
         Effect.orElseSucceed(() => ({ available: false as const, error: "Claude CLI check failed" })),
       )
-      const file = storeFile()
-      const store = readStore(file)
-      // A store problem still lists accounts: saving a schedule is how the user recovers.
-      const problem = storeProblem(store, file)
-      const errors = (...parts: (string | undefined)[]) => parts.filter(Boolean).join("; ") || undefined
-      // Without a supported CLI there is nothing to probe with; report the
-      // update requirement instead of spawning a binary that cannot serve it.
+      const accounts = readClaudeAccounts()
+      const store = readStore(storeFile())
+      // Without a supported CLI there is nothing to probe with; synced accounts still list.
       if (!cli.available) {
-        return stateView({
-          poolIds: pool.poolIds,
-          connectedIds: [],
-          store,
-          available: false,
-          error: errors(cli.error, problem),
-        })
+        return stateView({ accounts, connectedEmails: [], store, available: false, error: cli.error })
       }
       const inventory = yield* Effect.tryPromise(() =>
         listConnected({ cliPath: pool.cliPath, candidates: pool.poolIds }),
       ).pipe(
         Effect.orElseSucceed(() => ({ at: Date.now(), connectedIds: [] as string[], error: "account probe failed" })),
       )
+      const connectedEmails = inventory.connectedIds.flatMap((dir) => emailOf(dir) ?? [])
+      const unidentified = inventory.connectedIds.length - connectedEmails.length
+      const errors = [
+        inventory.error,
+        unidentified
+          ? `could not read the email of ${unidentified} signed-in account${unidentified === 1 ? "" : "s"}; update claude`
+          : undefined,
+      ].filter(Boolean)
       return stateView({
-        poolIds: pool.poolIds,
-        connectedIds: inventory.connectedIds,
+        accounts,
+        connectedEmails,
         store,
         available: true,
-        error: errors(problem, inventory.error),
+        ...(errors.length ? { error: errors.join("; ") } : {}),
       })
     })
 
+    // `accountID` is the account email: schedules are synced and run on any machine signed in to it.
     const setClaudeWarmup = Effect.fn("GlobalHttpApi.setClaudeWarmup")(function* (ctx: {
       payload: WarmupSetInputType
     }) {
       const pool = yield* warmupPool()
-      if (!pool.poolIds.includes(ctx.payload.accountID)) {
-        return yield* notFound(`Unknown Claude account ${ctx.payload.accountID}`)
-      }
-      const record = yield* EffectPromise.refineRejection(
-        () =>
-          setAccountSchedule({
-            file: storeFile(),
-            accountID: ctx.payload.accountID,
-            enabled: ctx.payload.enabled,
-            schedule: ctx.payload.schedule,
-          }),
+      const email = emailKey(ctx.payload.accountID)
+      const known = readClaudeAccounts()[email] !== undefined || pool.poolIds.some((dir) => emailOf(dir) === email)
+      if (!known) return yield* notFound(`Unknown Claude account ${ctx.payload.accountID}`)
+      const account = yield* EffectPromise.refineRejection(
+        () => saveWarmup({ email, enabled: ctx.payload.enabled, schedule: ctx.payload.schedule }),
         (cause) => {
           if (cause instanceof ScheduleValidationError) {
             return new ApiWarmupScheduleError({ name: "WarmupScheduleError", data: { message: cause.message } })
           }
-          if (cause instanceof WarmupStoreError) {
+          if (cause instanceof WarmupStoreError || cause instanceof Error) {
             return new ApiWarmupStoreError({ name: "WarmupStoreError", data: { message: cause.message } })
           }
           return undefined
         },
       )
-      return accountView({ accountID: ctx.payload.accountID, record, now: Date.now() })
+      return accountView({
+        email,
+        account,
+        runtime: readStore(storeFile()),
+        here: pool.poolIds.some((dir) => emailOf(dir) === email),
+        now: Date.now(),
+      })
     })
 
     return handlers
@@ -396,65 +403,105 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 // webHandler/OpenAPI/Codegen layers or test layers schedules nothing. It runs
 // in the listener scope: scope close interrupts the loop, aborts in-flight
 // auth/sends, and stops only this loop's children. Config resolves to the
-// same service instance the HttpApi graph uses (identical node compilations
-// share one build under the listener memoMap), so the loop reads the normal
-// cached global config with the normal invalidation path: no second instance,
-// no per-tick reload. The first iteration only establishes the watermark and
-// overdue slots are never drained. With no enabled schedules the tick reads
-// one small file and probes nothing.
+// same service instance the HttpApi graph uses. Schedules come from synced
+// oc.json `claudeAccounts`; peers (server/syncPeer.ts) make each slot run on
+// one live machine. The start only sets the watermark; the first tick catches
+// up the latest slot of the last 5 h that no machine ran. With no enabled
+// schedules a tick is a stat of oc.json and probes nothing.
 export type WarmupLoopClock = {
   /** Wall clock for watermarking and tick windows; defaults to `Date.now`. */
   now: () => number
+}
+
+export type WarmupLoopDeps = {
+  /** Cross-machine peers; defaults to the tailnet sync peers. */
+  peers?: PeerSource
+  /** When the Claude account migration may run; defaults to after the first sync pull. */
+  ready?: () => boolean
 }
 
 function tickAbortSignal(controller: AbortController, interrupt: AbortSignal): AbortSignal {
   return AbortSignal.any([controller.signal, interrupt])
 }
 
-export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock) =>
+// syncPeer is loaded lazily: it pulls in the app runtime, which imports these handlers.
+const syncPeer = () => import("@/server/syncPeer").then((module) => module.SyncPeer)
+const defaultPeers: PeerSource = {
+  self: () => syncPeer().then((peer) => peer.warmupPeers.self()),
+  views: () => syncPeer().then((peer) => peer.warmupPeers.views()),
+}
+
+export const makeWarmupLoop = (pollMs: number, clock?: WarmupLoopClock, deps: WarmupLoopDeps = {}) =>
   Effect.gen(function* () {
     const config = yield* Config.Service
     const owned: ChildTracker = new Set()
     const controller = new AbortController()
     const nowMs = clock?.now ?? Date.now
+    const options = () => Effect.runPromise(config.getGlobal()).then((value) => claudeCodeOptions(value))
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         controller.abort()
         killTracker(owned)
+        setLocalViewProvider(undefined)
       }),
     )
-    let prev = nowMs()
+    const scheduler = createScheduler({
+      file: storeFile(),
+      tracker: owned,
+      clock: nowMs,
+      peers: deps.peers ?? defaultPeers,
+    })
+    let ready = deps.ready ?? (() => false)
+    if (!deps.ready) {
+      void syncPeer()
+        .then((peer) => (ready = peer.readyForAccountMigration))
+        .catch(() => undefined)
+    }
+    const housekeeping = createHousekeeping({
+      ready: () => ready(),
+      legacyFile: legacyStoreFile(),
+      runtimeFile: storeFile(),
+      probe: async (cliPath, poolIds, signal) => {
+        if (!(await checkWarmupCli(cliPath)).available) return
+        await listConnected({ cliPath, candidates: poolIds, signal, tracker: owned })
+      },
+      nameOf: (dir) => accountName(dir),
+      project: projectAccountNames,
+      accounts: () => readClaudeAccounts(),
+    })
+    setLocalViewProvider(async () => {
+      const current = await options()
+      return describeLocal({ cliPath: current.cliPath, poolIds: poolIdsForConfig(current.accounts), file: storeFile() })
+    })
+    scheduler.start(nowMs())
+    const warn = (what: string) =>
+      Effect.catchCause((cause: Cause.Cause<unknown>) =>
+        Result.isSuccess(Cause.findInterrupt(cause))
+          ? Effect.failCause(cause)
+          : Effect.logWarning(what, { cause: String(cause) }),
+      )
     yield* Effect.forkScoped(
       Effect.forever(
         Effect.sleep(pollMs).pipe(
           Effect.andThen(
             Effect.gen(function* () {
               const now = nowMs()
-              const options = claudeCodeOptions(yield* config.getGlobal())
+              const current = claudeCodeOptions(yield* config.getGlobal())
+              const poolIds = poolIdsForConfig(current.accounts)
               yield* Effect.tryPromise((interrupt) =>
-                tickOnce({
-                  file: storeFile(),
-                  prevMs: prev,
+                housekeeping(current.cliPath, poolIds, tickAbortSignal(controller, interrupt)),
+              ).pipe(warn("claude account upkeep failed"))
+              yield* Effect.tryPromise((interrupt) =>
+                scheduler.tick({
                   nowMs: now,
-                  poolIds: poolIdsForConfig(options.accounts),
-                  cliPath: options.cliPath,
+                  poolIds,
+                  cliPath: current.cliPath,
                   signal: tickAbortSignal(controller, interrupt),
-                  tracker: owned,
-                  clock: nowMs,
                   // Current membership reread at the send boundary, not the
                   // tick's snapshot: a removed account stops immediately.
-                  getPoolIds: async () => {
-                    return poolIdsForConfig(claudeCodeOptions(await Effect.runPromise(config.getGlobal())).accounts)
-                  },
+                  getPoolIds: async () => poolIdsForConfig((await options()).accounts),
                 }),
-              ).pipe(
-                Effect.catchCause((cause) =>
-                  Result.isSuccess(Cause.findInterrupt(cause))
-                    ? Effect.failCause(cause)
-                    : Effect.logWarning("claude warm-up tick failed", { cause: String(cause) }),
-                ),
-              )
-              prev = now
+              ).pipe(warn("claude warm-up tick failed"))
             }),
           ),
         ),

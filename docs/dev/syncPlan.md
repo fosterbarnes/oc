@@ -93,3 +93,25 @@ with backup, edit flows back with comments kept, broken jsonc tombstones nothing
 pack/unpack across homes. Real config: 143 items, 171 tree rows, pack 16 ms / 419 KB, round trip 0
 changes, cached collect 3 ms. Kept tests: `core/test/util/ocItems.test.ts` (secrets, rewrite, exclude
 tree), `core/test/util/ocSync.test.ts` (decide).
+
+## Claude accounts and warm-ups (2026-11-17)
+
+- oc.json `claudeAccounts` (synced as `oc:claudeAccounts`): per lowercased account email, the friendly
+  `name` and `warmup` (`enabled`, `schedule`, `updatedAt`). No credentials or folder paths: Claude
+  config folders map to different accounts on each machine.
+- Machine-local: `<data>/claude-code/identities.json` (folder -> email, from `claude auth status`),
+  `<data>/claude-code/warmup-state.json` (claims by occurrence instant, latest outcome with `host`).
+  `claudeAccountNames` is machine-only (`_MACHINE_OC_KEYS`); the server derives it from synced names.
+  The old folder-keyed `warmup.json` is read once by the migration and left in place.
+- `GET /oc-sync/warmup` (same gate as the other routes; 404 when sync is off or `oc:claudeAccounts`
+  is excluded): emails signed in here, claims of the last 24 h, latest outcomes. Fetched only when
+  a slot is due.
+- Run once: machines signed in to the account rank by tailnet host name; rank `r` fires at
+  `slot + r * 60 s` unless a peer already claimed it. A machine claims only when it sends
+  (at most once; a crash after claiming loses that slot). Duplicates need a split tailnet.
+- Sleep/restart: the first normal tick after a gap or start catches up each account's latest slot
+  of the last 5 h, not before its `updatedAt`, unless a peer ran it.
+- Migration (folder names and schedules -> `claudeAccounts`) waits for the first sync cycle and
+  only fills missing fields.
+- Every server write of oc.json goes through `OcConfig.edit` under `OcItems.OC_CONFIG_LOCK`, which
+  sync applies also hold. The TUI's own small `oc.json` writes (`ocSettings.ts`) are not locked.

@@ -8432,6 +8432,7 @@ export type GlobalClaudeWarmupResponses = {
   200: {
     accounts: Array<{
       accountID: string
+      here?: boolean
       label: string
       enabled: boolean
       schedule:
@@ -8456,6 +8457,7 @@ export type GlobalClaudeWarmupResponses = {
         scheduledAt: number
         attemptedAt: number
         outcome: "sent" | "rejected" | "failed" | "timeout" | "missed"
+        host?: string
       }
     }>
     timeZone: string
@@ -8517,6 +8519,7 @@ export type GlobalSetClaudeWarmupResponses = {
    */
   200: {
     accountID: string
+    here?: boolean
     label: string
     enabled: boolean
     schedule:
@@ -8541,6 +8544,7 @@ export type GlobalSetClaudeWarmupResponses = {
       scheduledAt: number
       attemptedAt: number
       outcome: "sent" | "rejected" | "failed" | "timeout" | "missed"
+      host?: string
     }
   }
 }

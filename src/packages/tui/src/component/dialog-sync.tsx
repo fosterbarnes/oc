@@ -26,11 +26,9 @@ export function DialogSync() {
 
   const save = (next: OcSync.Settings) => {
     setSettings(next)
-    try {
-      persistOcSync(next)
-    } catch (error) {
+    persistOcSync(next).catch((error) => {
       toast.show({ variant: "error", message: `Sync setting not saved: ${errorMessage(error)}` })
-    }
+    })
   }
   const isExcluded = (id: string) => OcItems.excluded(id, tagsById().get(id) ?? [], settings().exclude)
   const state = (node: OcItems.TreeNode): TreeState => {

@@ -12,6 +12,8 @@ export interface DueOccurrence {
 
 export const MAX_TIMES_PER_DAY = 24
 export const CLAIM_RETENTION_DAYS = 8
+/** One Claude usage window: a missed slot older than this is not worth a late warm-up. */
+export const CATCHUP_MS = 5 * 60 * 60 * 1000
 
 const TIME_RE = /^(\d{2}):(\d{2})$/
 const WEEKDAY_NAMES = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const
@@ -154,10 +156,11 @@ export function occurrencesInWindow(
     for (const time of timesForDate(schedule, dayMs)) {
       const at = occurrenceMs(year, month, day, time)
       if (at === undefined || at <= fromExclusiveMs || at > toInclusiveMs) continue
-      const key = `${localDateStr(at)}|${time}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      out.push({ key, at, time })
+      const slotDay = `${localDateStr(at)}|${time}`
+      if (seen.has(slotDay)) continue
+      seen.add(slotDay)
+      // The claim key is the instant, so machines in the same zone agree on it exactly.
+      out.push({ key: String(at), at, time })
     }
     if (`${year}-${pad(month + 1)}-${pad(day)}` === lastStr) break
     const next = new Date(year, month, day + 1, 12, 0, 0, 0)

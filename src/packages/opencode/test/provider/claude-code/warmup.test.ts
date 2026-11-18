@@ -1,21 +1,28 @@
 /**
- * Claude warm-up schedules (warmup/): validation, due selection, the
- * locked atomic store, the pinned sender environment, and the tick rules.
- * No real CLI is spawned here; the fake-model sibling covers the installed
- * binary against TestLLMServer.
+ * Claude warm-up (warmup/): schedule validation and windows, the pinned sender, inventory, the
+ * machine-local runtime store, and the scheduler's tick rules (pending queue, peers, standby,
+ * catch-up, send-time checks). No real CLI is spawned for sends; the fake-model sibling covers
+ * the installed binary against TestLLMServer. Synced accounts, identities and migration are in
+ * warmupSync.test.ts.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { _resetAccountPool, _setAccountPoolFile } from "@/provider/claude-code/accounts.js"
 import {
-  _resetAccountPool,
-  _setAccountPoolFile,
-  poolState,
-  setCurrentAccount,
-} from "@/provider/claude-code/accounts.js"
-import { accountView, isStillSendable, sendWarmup, stateView, tickOnce } from "@/provider/claude-code/warmup"
+  accountView,
+  createScheduler,
+  describeLocal,
+  FIRE_ALLOWANCE_MS,
+  LOCAL_HOST,
+  rankFor,
+  sendWarmup,
+  STANDBY_MS,
+  stateView,
+  type TickResult,
+} from "@/provider/claude-code/warmup"
 import {
   _setCliRunner,
   buildWarmupArgs,
@@ -25,25 +32,33 @@ import {
   warmupCwd,
   type ChildTracker,
 } from "@/provider/claude-code/warmup/cli"
+import { _resetIdentities, emailOf } from "@/provider/claude-code/warmup/identities"
 import { materializePoolIds } from "@/provider/claude-code/warmup/identity"
-import { _resetInventoryForTests, _setInventoryProbe, listConnected } from "@/provider/claude-code/warmup/inventory"
 import {
+  _resetInventoryForTests,
+  _setInventoryProbe,
+  listConnected,
+  verifyAccountEmail,
+} from "@/provider/claude-code/warmup/inventory"
+import { parsePeerView, type PeerSource, type PeerView } from "@/provider/claude-code/warmup/peers"
+import {
+  CATCHUP_MS,
   isScheduleEmpty,
   nextOccurrence,
   normalizeSchedule,
   occurrencesInWindow,
   occurrenceMs,
   parseTimeList,
-  type DueOccurrence,
 } from "@/provider/claude-code/warmup/schedule"
 import {
-  badStoreFile,
-  claimDueOccurrences,
+  adoptPeer,
+  claimOccurrence,
+  readLegacyStore,
   readStore,
   recordAttempt,
-  setAccountSchedule,
-  storeKeyForAccount,
+  type LastAttempt,
 } from "@/provider/claude-code/warmup/store"
+import type { SyncedAccounts } from "@/provider/claude-code/warmup/synced"
 
 let dir = ""
 let storeFile = ""
@@ -52,16 +67,18 @@ beforeEach(() => {
   _resetAccountPool()
   _setAccountPoolFile(null)
   _resetInventoryForTests()
+  _resetIdentities(null)
   _setCliRunner(null)
   _setInventoryProbe(null)
   dir = mkdtempSync(path.join(tmpdir(), "warmup-"))
-  storeFile = path.join(dir, "warmup.json")
+  storeFile = path.join(dir, "warmup-state.json")
 })
 
 afterEach(() => {
   _resetAccountPool()
   _setAccountPoolFile(null)
   _resetInventoryForTests()
+  _resetIdentities(undefined)
   _setCliRunner(null)
   _setInventoryProbe(null)
   rmSync(dir, { recursive: true, force: true })
@@ -73,21 +90,6 @@ const weekly = (days: Record<string, string[]>): { mode: "weekly"; days: Record<
   days,
 })
 
-// A minute-start occurrence with a tight window around it. A non-positive
-// offset stays inside the firing allowance (queued under 60s by
-// construction: the minute start is always less than 60s old); -150_000 is
-// always past it, so the occurrence is claimed but recorded as missed.
-function minuteSlot(offsetMs: number): { time: string; at: number; prevMs: number; nowMs: number } {
-  const at = Math.floor((Date.now() + offsetMs) / 60_000) * 60_000
-  const date = new Date(at)
-  return {
-    time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`,
-    at,
-    prevMs: at - 30_000,
-    nowMs: at + 30_000,
-  }
-}
-
 const connectedAuth = {
   code: 0,
   stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }),
@@ -95,13 +97,113 @@ const connectedAuth = {
   timedOut: false,
 }
 
-const signedOutAuth = { code: 1, stdout: "", stderr: "not logged in", timedOut: false }
+const connectedAs = (email: string) => ({
+  ...connectedAuth,
+  stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty", email }),
+})
 
 const sentResult = {
   code: 0,
   stdout: JSON.stringify({ type: "result", is_error: false, result: "hi", session_id: "test-session" }),
   stderr: "",
   timedOut: false,
+}
+
+// ---- scheduler rig ---------------------------------------------------------------------------
+
+const EMAIL = "a@example.test"
+/**
+ * A local instant yesterday: slots are daily local wall-clock times, so no real clock is read. The
+ * day is yesterday rather than a literal date because the store prunes claims older than 8 days
+ * against the real clock (peer claims are adopted with it).
+ */
+const DAY = new Date(Date.now() - 24 * 60 * 60 * 1000)
+const at = (hour: number, minute = 0, second = 0) =>
+  new Date(DAY.getFullYear(), DAY.getMonth(), DAY.getDate(), hour, minute, second, 0).getTime()
+const SLOT = at(12)
+const SEC = 1000
+
+const accountsAt = (times: string[], updatedAt = 0): SyncedAccounts => ({
+  [EMAIL]: { warmup: { enabled: true, schedule: daily(times), updatedAt } },
+})
+
+function peerView(host: string, input: Partial<PeerView> = {}): PeerView {
+  return { host, connected: [EMAIL], claims: {}, last: {}, ...input }
+}
+
+/** A fake PeerSource whose views are read live, so a test can have a peer claim mid-sequence. */
+function peerSource(self: string, views: () => PeerView[] | Promise<PeerView[]>): PeerSource {
+  return { self: async () => self, views: async () => views() }
+}
+
+interface TickExtra {
+  wall?: number
+  poolIds?: string[]
+  getPoolIds?: () => string[]
+  cliPath?: string
+  signal?: AbortSignal
+}
+
+interface Rig {
+  scheduler: ReturnType<typeof createScheduler>
+  state: { accounts: SyncedAccounts; emails: Record<string, string | undefined>; sends: string[]; auth: number }
+  clock: { value: number }
+  /** One tick at `nowMs`, with the wall clock (send deadlines) at `nowMs` unless `wall` says otherwise. */
+  tick(nowMs: number, extra?: TickExtra): Promise<TickResult>
+  attempt(email?: string): LastAttempt | undefined
+  claims(email?: string): string[]
+}
+
+function rig(options: { accounts?: SyncedAccounts; peers?: PeerSource; emails?: Record<string, string> } = {}): Rig {
+  const state: Rig["state"] = {
+    accounts: options.accounts ?? accountsAt(["12:00"]),
+    emails: options.emails ?? { a: EMAIL },
+    sends: [],
+    auth: 0,
+  }
+  const clock = { value: 0 }
+  _setInventoryProbe(async (_cli, id) => {
+    state.auth += 1
+    const email = state.emails[id]
+    return email ? { id, status: "connected", email } : { id, status: "signed-out" }
+  })
+  _setCliRunner(async (opts) => {
+    if (opts.args[0] === "auth") return connectedAuth
+    state.sends.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
+    return sentResult
+  })
+  const scheduler = createScheduler({
+    file: storeFile,
+    lockDir: path.join(dir, "locks"),
+    clock: () => clock.value,
+    accounts: () => state.accounts,
+    peers: options.peers,
+  })
+  return {
+    scheduler,
+    state,
+    clock,
+    tick(nowMs, extra = {}) {
+      clock.value = extra.wall ?? nowMs
+      return scheduler.tick({
+        nowMs,
+        poolIds: extra.poolIds ?? ["a"],
+        cliPath: extra.cliPath ?? "claude",
+        ...(extra.getPoolIds ? { getPoolIds: extra.getPoolIds } : {}),
+        ...(extra.signal ? { signal: extra.signal } : {}),
+      })
+    },
+    attempt: (email = EMAIL) => readStore(storeFile).accounts[email]?.lastAttempt,
+    claims: (email = EMAIL) => Object.keys(readStore(storeFile).accounts[email]?.claims ?? {}),
+  }
+}
+
+const NOTHING = { fired: 0, missed: 0, skipped: 0 }
+
+/** Establishes the watermark 30 s before the slot and takes the quiet tick before it. */
+async function arm(r: Rig, slot = SLOT) {
+  r.scheduler.start(slot - 30 * SEC)
+  expect(await r.tick(slot - 15 * SEC)).toEqual(NOTHING)
 }
 
 test("time parser: trims, dedupes, sorts, and rejects bad clock values", () => {
@@ -142,286 +244,6 @@ test("schedule validation: daily and weekly modes, blank weekends, bad shapes", 
   expect(isScheduleEmpty({ mode: "daily", times: ["07:00"] })).toBe(false)
 })
 
-test("save: normalizes times, empty schedule disables, pause retains times", async () => {
-  const saved = await setAccountSchedule({
-    file: storeFile,
-    accountID: "acc-a",
-    enabled: true,
-    schedule: { mode: "daily", times: ["12:00", "07:00", "07:00"] },
-  })
-  expect(saved.enabled).toBe(true)
-  expect(saved.schedule).toEqual({ mode: "daily", times: ["07:00", "12:00"] })
-  const paused = await setAccountSchedule({
-    file: storeFile,
-    accountID: "acc-a",
-    enabled: false,
-    schedule: { mode: "daily", times: ["12:00", "07:00"] },
-  })
-  expect(paused.enabled).toBe(false)
-  expect(paused.schedule).toEqual({ mode: "daily", times: ["07:00", "12:00"] })
-  const cleared = await setAccountSchedule({
-    file: storeFile,
-    accountID: "acc-a",
-    enabled: true,
-    schedule: { mode: "daily", times: [] },
-  })
-  expect(cleared.enabled).toBe(false)
-})
-
-test("save: concurrent account updates preserve each other", async () => {
-  await Promise.all([
-    setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) }),
-    setAccountSchedule({ file: storeFile, accountID: "b", enabled: true, schedule: daily(["08:00"]) }),
-  ])
-  const read = readStore(storeFile)
-  expect(read.status).toBe("ok")
-  if (read.status !== "ok") return
-  expect(read.state.accounts["a"]?.schedule).toEqual({ mode: "daily", times: ["07:00"] })
-  expect(read.state.accounts["b"]?.schedule).toEqual({ mode: "daily", times: ["08:00"] })
-})
-
-test("save: malformed clock values and unknown shapes are rejected before any write", async () => {
-  await expect(
-    setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["nope"]) }),
-  ).rejects.toThrow()
-  expect(readStore(storeFile).status).toBe("missing")
-})
-
-test("store: a bad entry is skipped but kept; a corrupt file is replaced only by a save, keeping a .bad copy", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const good = JSON.parse(await Bun.file(storeFile).text()).accounts.a
-  writeFileSync(storeFile, JSON.stringify({ accounts: { a: good, b: { enabled: "yes" } } }), "utf8")
-  const partial = readStore(storeFile)
-  expect(partial.status === "ok" && Object.keys(partial.state.accounts)).toEqual(["a"])
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["08:00"]) })
-  expect(JSON.parse(await Bun.file(storeFile).text()).accounts.b).toEqual({ enabled: "yes" })
-
-  writeFileSync(storeFile, "not json", "utf8")
-  expect(readStore(storeFile).status).toBe("malformed")
-  expect(await Bun.file(storeFile).text()).toBe("not json")
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["09:00"]) })
-  expect(await Bun.file(badStoreFile(storeFile)).text()).toBe("not json")
-  const fresh = readStore(storeFile)
-  expect(fresh.status === "ok" && fresh.state.accounts["a"]?.schedule).toEqual({ mode: "daily", times: ["09:00"] })
-})
-
-test("claims: a normal tick fires once and a repeated poll cannot resubmit", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const at = occurrenceMs(2026, 9, 13, "07:00")!
-  const occurrences: DueOccurrence[] = [{ key: "2026-10-13|07:00", at, time: "07:00" }]
-  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at })).toHaveLength(1)
-  expect(await claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at })).toHaveLength(0)
-})
-
-test("claims: two clients contending for one occurrence, one wins", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const at = occurrenceMs(2026, 9, 13, "07:00")!
-  const occurrences: DueOccurrence[] = [{ key: "2026-10-13|07:00", at, time: "07:00" }]
-  const [first, second] = await Promise.all([
-    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at }),
-    claimDueOccurrences({ file: storeFile, accountID: "a", occurrences, now: at }),
-  ])
-  expect(first.length + second.length).toBe(1)
-})
-
-test("claims: pausing before the send boundary cancels unstarted work", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const at = occurrenceMs(2026, 9, 13, "07:00")!
-  await claimDueOccurrences({
-    file: storeFile,
-    accountID: "a",
-    occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }],
-  })
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: false, schedule: daily(["07:00"]) })
-  expect(isStillSendable({ store: readStore(storeFile), accountID: "a", poolIds: ["a"], connectedIds: ["a"] })).toBe(
-    false,
-  )
-  expect(isStillSendable({ store: readStore(storeFile), accountID: "a", poolIds: ["a"], connectedIds: [] })).toBe(false)
-  expect(isStillSendable({ store: readStore(storeFile), accountID: "zz", poolIds: ["a"], connectedIds: ["a"] })).toBe(
-    false,
-  )
-})
-
-test("claims: never switch the pool current account or session pins", async () => {
-  const ids = ["a", "b"]
-  setCurrentAccount("a", ids)
-  const before = poolState(ids, Date.now())
-  await setAccountSchedule({ file: storeFile, accountID: "b", enabled: true, schedule: daily(["07:00"]) })
-  const at = occurrenceMs(2026, 9, 13, "07:00")!
-  await claimDueOccurrences({
-    file: storeFile,
-    accountID: "b",
-    occurrences: [{ key: "2026-10-13|07:00", at, time: "07:00" }],
-  })
-  await recordAttempt({
-    file: storeFile,
-    accountID: "b",
-    attempt: { scheduledAt: at, attemptedAt: at + 1, outcome: "sent" },
-  })
-  expect(poolState(ids, Date.now())).toEqual(before)
-})
-
-test("outcomes: failure and timeout record without retry or failover", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const at = Date.now()
-  expect(
-    await recordAttempt({
-      file: storeFile,
-      accountID: "a",
-      attempt: { scheduledAt: at, attemptedAt: at + 5, outcome: "failed" },
-    }),
-  ).toBe(true)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
-  // A newer attempt wins; an older duplicate never overwrites it.
-  expect(
-    await recordAttempt({
-      file: storeFile,
-      accountID: "a",
-      attempt: { scheduledAt: at, attemptedAt: at + 2, outcome: "sent" },
-    }),
-  ).toBe(true)
-  const reread = readStore(storeFile)
-  expect(reread.status === "ok" && reread.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
-  // Recording for a removed account writes nothing and never resurrects it.
-  expect(
-    await recordAttempt({
-      file: storeFile,
-      accountID: "gone",
-      attempt: { scheduledAt: at, attemptedAt: at + 9, outcome: "sent" },
-    }),
-  ).toBe(false)
-  const final = readStore(storeFile)
-  expect(final.status === "ok" && "gone" in final.state.accounts).toBe(false)
-})
-
-test("outcomes: a slow older occurrence never overwrites a newer scheduled attempt", async () => {
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00", "08:00"]) })
-  const early = Date.now() - 7200_000
-  const late = Date.now() - 3600_000
-  // Newer scheduled occurrence completes first.
-  expect(
-    await recordAttempt({
-      file: storeFile,
-      accountID: "a",
-      attempt: { scheduledAt: late, attemptedAt: late + 1, outcome: "sent" },
-    }),
-  ).toBe(true)
-  // Older scheduled occurrence completes later: outcome stays with the newer schedule.
-  expect(
-    await recordAttempt({
-      file: storeFile,
-      accountID: "a",
-      attempt: { scheduledAt: early, attemptedAt: late + 2, outcome: "failed" },
-    }),
-  ).toBe(true)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt).toEqual({
-    scheduledAt: late,
-    attemptedAt: late + 1,
-    outcome: "sent",
-  })
-  expect(read.status === "ok" && read.state.accounts["a"]?.enabled).toBe(true)
-})
-
-test("tick: restart, sleep, and stall gaps skip overdue work without spawning", async () => {
-  let spawns = 0
-  _setCliRunner(async () => {
-    spawns += 1
-    return { code: 0, stdout: "{}", stderr: "", timedOut: false }
-  })
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const now = Date.now()
-  // A gap larger than the firing allowance is a suspend or stall: skip all crossed slots.
-  const stalled = await tickOnce({
-    file: storeFile,
-    prevMs: now - 3600_000,
-    nowMs: now,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(stalled).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  // A backward clock move re-establishes the watermark.
-  const backward = await tickOnce({
-    file: storeFile,
-    prevMs: now + 1000,
-    nowMs: now,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(backward).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  expect(spawns).toBe(0)
-})
-
-test("tick: a stalled queue past the firing allowance records missed, never sends", async () => {
-  let spawns = 0
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") return connectedAuth
-    spawns += 1
-    return sentResult
-  })
-  const slot = minuteSlot(-150_000)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  // A window two minutes in the past: the occurrence is claimed, but by send
-  // time it is already outside the firing allowance, so it is missed.
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(result.missed).toBe(1)
-  expect(spawns).toBe(0)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("missed")
-})
-
-test("tick: malformed store stops sends and never spawns", async () => {
-  let spawns = 0
-  _setCliRunner(async () => {
-    spawns += 1
-    return { code: 0, stdout: "{}", stderr: "", timedOut: false }
-  })
-  writeFileSync(storeFile, "not json", "utf8")
-  const now = Date.now()
-  const result = await tickOnce({ file: storeFile, prevMs: now - 1000, nowMs: now, poolIds: ["a"], cliPath: "claude" })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  expect(spawns).toBe(0)
-})
-
-test("tick: a failing send records its outcome once, with no retry", async () => {
-  const seen: string[] = []
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") return connectedAuth
-    seen.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
-    return { code: 1, stdout: "", stderr: "boom", timedOut: false }
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(result.fired).toBe(1)
-  expect(seen).toHaveLength(1)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("failed")
-  // The claimed occurrence never resubmits on the next tick.
-  const second = await tickOnce({
-    file: storeFile,
-    prevMs: slot.nowMs,
-    nowMs: Date.now(),
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(second.fired).toBe(0)
-  expect(seen).toHaveLength(1)
-})
-
 test("sender outcomes: timeout, rejection, and unsupported flags map without retry", async () => {
   _setCliRunner(async () => ({ code: null, stdout: "", stderr: "", timedOut: true }))
   const timedOut = await sendWarmup({ cliPath: "claude", accountID: "a", scheduledAt: Date.now(), timeoutMs: 20 })
@@ -456,109 +278,6 @@ test("sender outcomes: timeout, rejection, and unsupported flags map without ret
   }))
   const sent = await sendWarmup({ cliPath: "claude", accountID: "a", scheduledAt: Date.now() })
   expect(sent.outcome).toBe("sent")
-})
-
-test("tick: an enabled schedule with no due work never touches the CLI", async () => {
-  let calls = 0
-  _setCliRunner(async () => {
-    calls += 1
-    return connectedAuth
-  })
-  // Schedule sits at 07:00; the tick window is mid-afternoon with nothing due.
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily(["07:00"]) })
-  const afternoon = new Date()
-  afternoon.setHours(15, 0, 0, 0)
-  const prevMs = afternoon.getTime() - 10_000
-  const nowMs = afternoon.getTime()
-  // Guard the fixture: 07:00 really is outside this window in any zone.
-  expect(occurrencesInWindow({ mode: "daily", times: ["07:00"] }, prevMs, nowMs)).toEqual([])
-  const result = await tickOnce({ file: storeFile, prevMs, nowMs, poolIds: ["a"], cliPath: "claude" })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  expect(calls).toBe(0)
-})
-
-test("tick: stopping while send-time auth is pending skips model; durable claims may remain", async () => {
-  let modelSpawns = 0
-  let authSpawns = 0
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") {
-      authSpawns += 1
-      if (authSpawns === 1) return connectedAuth
-      await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve(), { once: true }))
-      return { code: null, stdout: "", stderr: "spawn failed: aborted", timedOut: false }
-    }
-    modelSpawns += 1
-    return sentResult
-  })
-  const controller = new AbortController()
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const pending = tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-    signal: controller.signal,
-  })
-  await new Promise((resolve) => setTimeout(resolve, 100))
-  controller.abort()
-  expect(await pending).toEqual({ fired: 0, missed: 0, skipped: 1 })
-  expect(authSpawns).toBe(2)
-  expect(modelSpawns).toBe(0)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && Object.keys(read.state.accounts["a"]?.claims ?? {})).toHaveLength(1)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt).toBeUndefined()
-})
-
-test("tick: an already-aborted tick never probes or spawns", async () => {
-  let spawns = 0
-  _setCliRunner(async () => {
-    spawns += 1
-    return connectedAuth
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const controller = new AbortController()
-  controller.abort()
-  expect(
-    await tickOnce({
-      file: storeFile,
-      prevMs: slot.prevMs,
-      nowMs: slot.nowMs,
-      poolIds: ["a"],
-      cliPath: "claude",
-      signal: controller.signal,
-    }),
-  ).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  expect(spawns).toBe(0)
-})
-
-test("tick: accounts outside the connected inventory claim nothing and burn no outcome", async () => {
-  let modelSpawns = 0
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") {
-      return opts.env.CLAUDE_CONFIG_DIR === "a" ? connectedAuth : signedOutAuth
-    }
-    modelSpawns += 1
-    return sentResult
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  await setAccountSchedule({ file: storeFile, accountID: "b", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a", "b"],
-    cliPath: "claude",
-  })
-  expect(result.fired).toBe(1)
-  expect(modelSpawns).toBe(1)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt?.outcome).toBe("sent")
-  expect(read.status === "ok" && read.state.accounts["b"]?.claims).toEqual({})
-  expect(read.status === "ok" && read.state.accounts["b"]?.lastAttempt).toBeUndefined()
 })
 
 test("windows: daily fires across midnight and weekly skips blank days", () => {
@@ -626,48 +345,6 @@ test("windows: a spring-forward gap skips the nonexistent time when the zone obs
   expect(missing).toBeUndefined()
 })
 
-test("identity: every candidate materializes before use; saved schedules never retarget", async () => {
-  const previous = process.env.CLAUDE_CONFIG_DIR
-  delete process.env.CLAUDE_CONFIG_DIR
-  try {
-    const home = process.env.HOME ?? process.env.USERPROFILE ?? ""
-    const expected = path.resolve(path.join(home, ".claude"))
-    expect(materializePoolIds(undefined)).toEqual([expected])
-    const second = path.join(dir, "second")
-    expect(materializePoolIds(["~/.claude", second, second])).toEqual([expected, path.resolve(second)])
-    // A schedule saved under the materialized dir stays there when a later
-    // shell change moves the inherited config dir elsewhere.
-    await setAccountSchedule({ file: storeFile, accountID: expected, enabled: true, schedule: daily(["07:00"]) })
-    const moved = path.join(dir, "moved-home", ".claude")
-    process.env.CLAUDE_CONFIG_DIR = moved
-    expect(materializePoolIds(undefined)).toEqual([path.resolve(moved)])
-    const read = readStore(storeFile)
-    expect(read.status === "ok" && Object.keys(read.state.accounts)).toEqual([storeKeyForAccount(expected)])
-    expect(read.status === "ok" && read.state.accounts[storeKeyForAccount(expected)]?.schedule).toEqual({
-      mode: "daily",
-      times: ["07:00"],
-    })
-  } finally {
-    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
-    else process.env.CLAUDE_CONFIG_DIR = previous
-  }
-})
-
-test("identity: duplicate basenames keep distinct identities with disambiguated labels", () => {
-  const first = path.join(dir, "one", ".claude")
-  const second = path.join(dir, "two", ".claude")
-  expect(materializePoolIds([first, second])).toEqual([path.resolve(first), path.resolve(second)])
-  const view = stateView({
-    poolIds: [path.resolve(first), path.resolve(second)],
-    connectedIds: [path.resolve(first), path.resolve(second)],
-    store: { status: "missing" },
-    available: true,
-  })
-  expect(view.accounts).toHaveLength(2)
-  expect(view.accounts[0]!.label).not.toBe(view.accounts[1]!.label)
-  expect(view.accounts[0]!.accountID).toBe(path.resolve(first))
-})
-
 test("schedule validation: each array entry is its own exact HH:mm", () => {
   expect(normalizeSchedule({ mode: "daily", times: ["07:00", "12:00"] })).toEqual({
     schedule: { mode: "daily", times: ["07:00", "12:00"] },
@@ -689,44 +366,6 @@ test("schedule validation: each array entry is its own exact HH:mm", () => {
 
 test("sender cwd: an owned data-dir folder, never a shared root or repo", () => {
   expect(warmupCwd().startsWith(Global.Path.data)).toBe(true)
-})
-
-test("sender recheck: fresh per-account probe gates each send", async () => {
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") return signedOutAuth
-    return sentResult
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 0 })
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && read.state.accounts["a"]?.claims).toEqual({})
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt).toBeUndefined()
-})
-
-test("tick: a removed account stops via the current membership callback", async () => {
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") return connectedAuth
-    return sentResult
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-    getPoolIds: () => [],
-  })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 1 })
 })
 
 test("inventory: changed candidates or cliPath start fresh, never stale or shared", async () => {
@@ -874,52 +513,6 @@ test("cli gate: 2.1.293 floor, unknown fails visibly", async () => {
   expect(missing.error).toMatch(/not found/)
 })
 
-test("tick: an unsupported CLI skips sends without spawning", async () => {
-  let spawns = 0
-  _setCliRunner(async () => {
-    spawns += 1
-    return { code: 0, stdout: "{}", stderr: "", timedOut: false }
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "definitely-not-a-claude-binary",
-  })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 1 })
-  expect(spawns).toBe(0)
-})
-
-test("tick: queued send-time auth pin skips model when the account signed out after claim", async () => {
-  let modelSpawns = 0
-  let authProbes = 0
-  _setCliRunner(async (opts) => {
-    if (opts.args[0] === "auth") {
-      authProbes += 1
-      return authProbes === 1 ? connectedAuth : signedOutAuth
-    }
-    modelSpawns += 1
-    return sentResult
-  })
-  const slot = minuteSlot(0)
-  await setAccountSchedule({ file: storeFile, accountID: "a", enabled: true, schedule: daily([slot.time]) })
-  const result = await tickOnce({
-    file: storeFile,
-    prevMs: slot.prevMs,
-    nowMs: slot.nowMs,
-    poolIds: ["a"],
-    cliPath: "claude",
-  })
-  expect(result).toEqual({ fired: 0, missed: 0, skipped: 1 })
-  expect(modelSpawns).toBe(0)
-  const read = readStore(storeFile)
-  expect(read.status === "ok" && Object.keys(read.state.accounts["a"]?.claims ?? {})).toHaveLength(1)
-  expect(read.status === "ok" && read.state.accounts["a"]?.lastAttempt).toBeUndefined()
-})
-
 test("inventory: transient nonzero exit with empty stdout keeps last known presence", async () => {
   let calls = 0
   _setCliRunner(async (opts) => {
@@ -946,14 +539,909 @@ test("inventory: listener-owned tracker receives auth probe children", async () 
   await listConnected({ cliPath: "claude", candidates: ["a"], tracker: owned })
 })
 
-test("view: unconfigured accounts are off with no next run, zone is always present", () => {
-  const view = stateView({ poolIds: ["a"], connectedIds: ["a", "zz"], store: { status: "missing" }, available: true })
-  expect(view.accounts).toHaveLength(1)
-  expect(view.accounts[0]).toMatchObject({ accountID: "a", label: "a", enabled: false })
-  expect(view.accounts[0]!.nextAt).toBeUndefined()
-  expect(view.accounts[0]!.lastAttempt).toBeUndefined()
+// ---- scheduler: on time, claims, peers, standby ------------------------------------------------
+
+test("tick 1: an on-time slot fires once with no peers; repeat ticks and a restarted scheduler do not resend", async () => {
+  const r = rig()
+  await arm(r)
+  // Nothing is due yet: no auth probe, no CLI.
+  expect(r.state.auth).toBe(0)
+  expect(await r.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toEqual({ scheduledAt: SLOT, attemptedAt: SLOT, outcome: "sent" })
+  expect(r.claims()).toEqual([String(SLOT)])
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + 30 * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual(["a"])
+
+  // A restarted process re-crosses the slot from its own watermark; the stored claim stops it.
+  const restarted = rig()
+  await arm(restarted)
+  expect(await restarted.tick(SLOT)).toEqual(NOTHING)
+  expect(restarted.state.sends).toEqual([])
+})
+
+test("tick 2: a slot a peer already claimed is not sent; the claim and the peer's outcome are copied locally", async () => {
+  const peerLast: LastAttempt = { scheduledAt: SLOT, attemptedAt: SLOT + 2 * SEC, outcome: "sent", host: "win" }
+  const r = rig({
+    peers: peerSource("mac", () => [
+      peerView("win", { claims: { [EMAIL]: { [String(SLOT)]: SLOT + SEC } }, last: { [EMAIL]: peerLast } }),
+    ]),
+  })
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.scheduler.pendingCount()).toBe(0)
+  expect(readStore(storeFile).accounts[EMAIL]?.claims).toEqual({ [String(SLOT)]: SLOT + SEC })
+  expect(r.attempt()).toEqual(peerLast)
+  expect(r.attempt()?.host).toBe("win")
+  // Later ticks stay quiet.
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+})
+
+test("tick 2: a peer's outcome for a different slot is not adopted as this slot's", async () => {
+  const other: LastAttempt = {
+    scheduledAt: SLOT - 24 * 60 * 60 * 1000,
+    attemptedAt: SLOT,
+    outcome: "sent",
+    host: "win",
+  }
+  const r = rig({
+    peers: peerSource("mac", () => [
+      peerView("win", { claims: { [EMAIL]: { [String(SLOT)]: SLOT + SEC } }, last: { [EMAIL]: other } }),
+    ]),
+  })
+  await arm(r)
+  await r.tick(SLOT)
+  expect(r.claims()).toEqual([String(SLOT)])
+  expect(r.attempt()).toBeUndefined()
+})
+
+test("tick 3: two machines signed in; rank 0 (sorted host) fires on time and records its host", async () => {
+  const r = rig({ peers: peerSource("aaa-goon", () => [peerView("zzz-mac")]) })
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, outcome: "sent", host: "aaa-goon" })
+})
+
+test("tick 3: rank 1 stands by for STANDBY_MS without claiming, then fires if rank 0 has not claimed", async () => {
+  const r = rig({ peers: peerSource("zzz-mac", () => [peerView("aaa-goon")]) })
+  await arm(r)
+  for (const offset of [0, 15, 30, 45]) {
+    expect(await r.tick(SLOT + offset * SEC)).toEqual(NOTHING)
+    expect(r.scheduler.pendingCount()).toBe(1)
+    // Standby never writes a claim.
+    expect(r.claims()).toEqual([])
+  }
+  expect(r.state.sends).toEqual([])
+  expect(await r.tick(SLOT + STANDBY_MS)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, attemptedAt: SLOT + STANDBY_MS, host: "zzz-mac" })
+  expect(r.claims()).toEqual([String(SLOT)])
+})
+
+test("tick 3: rank 1 skips when rank 0 claimed the slot by the time standby ends", async () => {
+  let claimed = false
+  const rankZeroLast: LastAttempt = {
+    scheduledAt: SLOT,
+    attemptedAt: SLOT + 5 * SEC,
+    outcome: "sent",
+    host: "aaa-goon",
+  }
+  const r = rig({
+    peers: peerSource("zzz-mac", () => [
+      peerView(
+        "aaa-goon",
+        claimed ? { claims: { [EMAIL]: { [String(SLOT)]: SLOT + 5 * SEC } }, last: { [EMAIL]: rankZeroLast } } : {},
+      ),
+    ]),
+  })
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + 45 * SEC)).toEqual(NOTHING)
+  claimed = true
+  expect(await r.tick(SLOT + STANDBY_MS)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.scheduler.pendingCount()).toBe(0)
+  expect(r.attempt()).toEqual(rankZeroLast)
+})
+
+test("tick 3: rank only counts machines signed in to that account", () => {
+  expect(rankFor("mac", EMAIL, [])).toBe(0)
+  expect(rankFor("mac", EMAIL, [peerView("goon")])).toBe(1)
+  expect(rankFor("goon", EMAIL, [peerView("mac")])).toBe(0)
+  // A peer without this account never outranks us.
+  expect(rankFor("mac", EMAIL, [peerView("goon", { connected: ["other@example.test"] })])).toBe(0)
+  expect(rankFor("mid", EMAIL, [peerView("zzz"), peerView("aaa")])).toBe(1)
+})
+
+test("tick 4: a failing peer fetch, an omitted (404) peer, and a peer without the account are ignored", async () => {
+  const failing = rig({
+    peers: {
+      self: async () => "zzz-mac",
+      views: async () => {
+        throw new Error("tailnet down")
+      },
+    },
+  })
+  await arm(failing)
+  expect(await failing.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(failing.state.sends).toEqual(["a"])
+  // Peer lookup failed, so the host is unknown and not recorded.
+  expect(failing.attempt()?.host).toBeUndefined()
+
+  rmSync(storeFile, { force: true })
+  // The source leaves a 404 peer out: this machine is alone and fires at once, not after standby.
+  const omitted = rig({ peers: peerSource("zzz-mac", () => []) })
+  await arm(omitted)
+  expect(await omitted.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(omitted.attempt()).toMatchObject({ host: "zzz-mac" })
+
+  rmSync(storeFile, { force: true })
+  const elsewhere = rig({
+    peers: peerSource("zzz-mac", () => [peerView("aaa-goon", { connected: ["other@example.test"] })]),
+  })
+  await arm(elsewhere)
+  expect(await elsewhere.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+})
+
+test("tick 4: peer views parse defensively; a body from an older build is not a view", () => {
+  expect(parsePeerView("win", undefined)).toBeUndefined()
+  expect(parsePeerView("win", {})).toBeUndefined()
+  expect(parsePeerView("win", { connected: "x", claims: {} })).toBeUndefined()
+  expect(parsePeerView("win", { connected: [], claims: null })).toBeUndefined()
+  const parsed = parsePeerView("win", {
+    connected: [EMAIL, 7],
+    claims: { [EMAIL]: { "100": 5, "200": "no" }, bad: "x" },
+    last: { [EMAIL]: { scheduledAt: 100, attemptedAt: 110, outcome: "sent" }, junk: { scheduledAt: "x" } },
+  })
+  expect(parsed).toEqual({
+    host: "win",
+    connected: [EMAIL],
+    claims: { [EMAIL]: { "100": 5 } },
+    last: { [EMAIL]: { scheduledAt: 100, attemptedAt: 110, outcome: "sent", host: "win" } },
+  })
+})
+
+// ---- scheduler: gaps, catch-up, clocks ---------------------------------------------------------
+
+test("tick 5: a gap fires nothing; the next normal tick fires only the latest crossed slot", async () => {
+  const r = rig({ accounts: accountsAt(["09:00", "12:00"]) })
+  r.scheduler.start(at(8))
+  expect(await r.tick(at(8, 0, 15))).toEqual(NOTHING)
+  // Sleep across both slots: the waking tick itself sends and probes nothing.
+  expect(await r.tick(at(12, 30))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  expect(r.state.auth).toBe(0)
+  expect(r.scheduler.pendingCount()).toBe(0)
+  // After one more poll awake, only 12:00 is caught up (09:00 is superseded), and once.
+  expect(await r.tick(at(12, 30, 15))).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, attemptedAt: at(12, 30, 15), outcome: "sent" })
+  expect(r.claims()).toEqual([String(SLOT)])
+  expect(await r.tick(at(12, 30, 30))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual(["a"])
+})
+
+test("tick 5: catch-up is not sent when a peer claimed the slot", async () => {
+  const r = rig({
+    accounts: accountsAt(["12:00"]),
+    peers: peerSource("mac", () => [peerView("win", { claims: { [EMAIL]: { [String(SLOT)]: SLOT + SEC } } })]),
+  })
+  r.scheduler.start(at(11))
+  await r.tick(at(11, 0, 15))
+  expect(await r.tick(at(12, 30))).toEqual(NOTHING)
+  expect(await r.tick(at(12, 30, 15))).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.claims()).toEqual([String(SLOT)])
+})
+
+test("tick 5: catch-up never sends a slot from before the schedule was saved", async () => {
+  const r = rig({ accounts: accountsAt(["12:00"], at(12, 10)) })
+  r.scheduler.start(at(11))
+  await r.tick(at(11, 0, 15))
+  await r.tick(at(12, 30))
+  expect(await r.tick(at(12, 30, 15))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  expect(r.state.auth).toBe(0)
+  // The same applies to an on-time crossing right after saving: slots before updatedAt are not queued.
+  const saved = rig({ accounts: accountsAt(["12:00"], SLOT + SEC) })
+  await arm(saved)
+  expect(await saved.tick(SLOT)).toEqual(NOTHING)
+  expect(saved.state.sends).toEqual([])
+})
+
+test("tick 5: catch-up covers a slot under 5 h old and not one past it", async () => {
+  expect(CATCHUP_MS).toBe(5 * 60 * 60 * 1000)
+  // 09:00 caught up at 13:59:30 (4 h 59 m 30 s old) ...
+  const inside = rig({ accounts: accountsAt(["09:00"]) })
+  inside.scheduler.start(at(8))
+  await inside.tick(at(8, 0, 15))
+  await inside.tick(at(13, 59, 15))
+  expect(await inside.tick(at(13, 59, 30))).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(inside.attempt()?.scheduledAt).toBe(at(9))
+  // ... but not at 14:00:30 (5 h 30 s old).
+  rmSync(storeFile, { force: true })
+  const past = rig({ accounts: accountsAt(["09:00"]) })
+  past.scheduler.start(at(8))
+  await past.tick(at(8, 0, 15))
+  await past.tick(at(14, 0, 15))
+  expect(await past.tick(at(14, 0, 30))).toEqual(NOTHING)
+  expect(past.state.sends).toEqual([])
+  expect(past.state.auth).toBe(0)
+})
+
+test("tick 6: start then the first tick catches up a slot crossed 10 min before start", async () => {
+  const r = rig()
+  r.scheduler.start(at(12, 10))
+  // Start itself only sets the watermark.
+  expect(r.state.sends).toEqual([])
+  expect(r.state.auth).toBe(0)
+  expect(await r.tick(at(12, 10, 15))).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, attemptedAt: at(12, 10, 15), outcome: "sent" })
+  expect(await r.tick(at(12, 10, 30))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual(["a"])
+})
+
+test("tick 6: start does not refire a slot already claimed in the store, nor one older than 5 h", async () => {
+  await claimOccurrence({ file: storeFile, lockDir: path.join(dir, "locks"), email: EMAIL, at: SLOT, now: SLOT })
+  const r = rig()
+  r.scheduler.start(at(12, 10))
+  expect(await r.tick(at(12, 10, 15))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+
+  const old = rig()
+  old.scheduler.start(at(18))
+  expect(await old.tick(at(18, 0, 15))).toEqual(NOTHING)
+  expect(old.state.sends).toEqual([])
+})
+
+test("tick 7: a backward clock does no work and re-establishes the watermark", async () => {
+  const r = rig({ accounts: accountsAt(["12:00"]) })
+  r.scheduler.start(at(11))
+  expect(await r.tick(at(11, 0, 15))).toEqual(NOTHING)
+  expect(await r.tick(at(10))).toEqual(NOTHING)
+  expect(await r.tick(at(10))).toEqual(NOTHING)
+  expect(await r.tick(at(10, 0, 15))).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  expect(r.state.auth).toBe(0)
+  expect(r.scheduler.pendingCount()).toBe(0)
+})
+
+test("tick: an enabled schedule with no due work never touches the CLI", async () => {
+  const r = rig({ accounts: accountsAt(["07:00"]) })
+  r.scheduler.start(at(14, 59, 45))
+  expect(await r.tick(at(15))).toEqual(NOTHING)
+  expect(await r.tick(at(15, 0, 15))).toEqual(NOTHING)
+  expect(r.state.auth).toBe(0)
+  expect(r.state.sends).toEqual([])
+})
+
+// ---- scheduler: checks at send time ------------------------------------------------------------
+
+test("tick 8: a folder re-signed to another account between enqueue and send sends nothing", async () => {
+  const r = rig()
+  await arm(r)
+  let probes = 0
+  _setInventoryProbe(async (_cli, id) => {
+    probes += 1
+    return { id, status: "connected", email: probes === 1 ? EMAIL : "someone-else@example.test" }
+  })
+  expect(await r.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(probes).toBe(2)
+  expect(r.state.sends).toEqual([])
+  expect(r.claims()).toEqual([])
+  expect(r.attempt()).toBeUndefined()
+  // The identity map follows the folder: it is now the other account.
+  expect(emailOf("a")).toBe("someone-else@example.test")
+})
+
+test("tick 8: a send-time probe with no email, or signed out, sends nothing and claims nothing", async () => {
+  for (const second of [{ status: "connected" as const }, { status: "signed-out" as const }]) {
+    rmSync(storeFile, { force: true })
+    const r = rig()
+    await arm(r)
+    let probes = 0
+    _setInventoryProbe(async (_cli, id) => {
+      probes += 1
+      return probes === 1 ? { id, status: "connected", email: EMAIL } : { id, ...second }
+    })
+    expect(await r.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+    expect(r.state.sends).toEqual([])
+    expect(r.claims()).toEqual([])
+  }
+})
+
+test("tick 9: pausing between enqueue and send sends nothing", async () => {
+  const r = rig()
+  await arm(r)
+  let probes = 0
+  _setInventoryProbe(async (_cli, id) => {
+    probes += 1
+    // The user pauses while the send-time probe is running.
+    if (probes === 2)
+      r.state.accounts = { [EMAIL]: { warmup: { enabled: false, schedule: daily(["12:00"]), updatedAt: 0 } } }
+    return { id, status: "connected", email: EMAIL }
+  })
+  expect(await r.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.claims()).toEqual([])
+})
+
+test("tick 9: paused before the slot queues nothing; pausing a standby slot drops it", async () => {
+  const off = rig({ accounts: { [EMAIL]: { warmup: { enabled: false, schedule: daily(["12:00"]), updatedAt: 0 } } } })
+  await arm(off)
+  expect(await off.tick(SLOT)).toEqual(NOTHING)
+  expect(off.state.auth).toBe(0)
+
+  rmSync(storeFile, { force: true })
+  const r = rig({ peers: peerSource("zzz-mac", () => [peerView("aaa-goon")]) })
+  await arm(r)
+  await r.tick(SLOT)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  r.state.accounts = { [EMAIL]: { warmup: { enabled: false, schedule: daily(["12:00"]), updatedAt: 0 } } }
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(r.scheduler.pendingCount()).toBe(0)
+  expect(await r.tick(SLOT + STANDBY_MS)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+})
+
+test("tick 9: an account removed from the pool stops via the current membership callback", async () => {
+  const r = rig()
+  await arm(r)
+  expect(await r.tick(SLOT, { getPoolIds: () => [] })).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.claims()).toEqual([])
+})
+
+test("tick 10: a rank-0 slot whose deadline passed before it could run records missed and never sends", async () => {
+  const r = rig()
+  await arm(r)
+  const wall = SLOT + FIRE_ALLOWANCE_MS + 5 * SEC
+  expect(await r.tick(SLOT, { wall })).toEqual({ fired: 0, missed: 1, skipped: 0 })
+  expect(r.state.sends).toEqual([])
+  expect(r.attempt()).toEqual({ scheduledAt: SLOT, attemptedAt: wall, outcome: "missed" })
+  expect(r.scheduler.pendingCount()).toBe(0)
+  // Missed slots are never retried by later ticks.
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+})
+
+test("tick: accounts outside the connected inventory queue nothing and burn no outcome", async () => {
+  const r = rig({
+    accounts: {
+      [EMAIL]: { warmup: { enabled: true, schedule: daily(["12:00"]), updatedAt: 0 } },
+      "b@example.test": { warmup: { enabled: true, schedule: daily(["12:00"]), updatedAt: 0 } },
+    },
+    emails: { a: EMAIL },
+  })
+  r.scheduler.start(SLOT - 30 * SEC)
+  await r.tick(SLOT - 15 * SEC, { poolIds: ["a", "b"] })
+  expect(await r.tick(SLOT, { poolIds: ["a", "b"] })).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()?.outcome).toBe("sent")
+  expect(r.claims("b@example.test")).toEqual([])
+  expect(r.attempt("b@example.test")).toBeUndefined()
+})
+
+test("tick: two accounts signed in here both send, each to its own folder", async () => {
+  const r = rig({
+    accounts: {
+      [EMAIL]: { warmup: { enabled: true, schedule: daily(["12:00"]), updatedAt: 0 } },
+      "b@example.test": { warmup: { enabled: true, schedule: daily(["12:00"]), updatedAt: 0 } },
+    },
+    emails: { a: EMAIL, b: "b@example.test" },
+  })
+  r.scheduler.start(SLOT - 30 * SEC)
+  await r.tick(SLOT - 15 * SEC, { poolIds: ["a", "b"] })
+  expect(await r.tick(SLOT, { poolIds: ["a", "b"] })).toEqual({ fired: 2, missed: 0, skipped: 0 })
+  expect(r.state.sends.toSorted()).toEqual(["a", "b"])
+})
+
+test("tick: a failing send records its outcome once, with no retry", async () => {
+  const r = rig()
+  const seen: string[] = []
+  _setCliRunner(async (opts) => {
+    if (opts.args[0] === "auth") return connectedAuth
+    seen.push(opts.env.CLAUDE_CONFIG_DIR ?? "")
+    return { code: 1, stdout: "", stderr: "boom", timedOut: false }
+  })
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(seen).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, outcome: "failed" })
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + STANDBY_MS)).toEqual(NOTHING)
+  expect(seen).toEqual(["a"])
+})
+
+test("tick: a store that cannot be written never sends", async () => {
+  const r = rig()
+  // A directory at the store path makes every claim write fail.
+  mkdirSync(storeFile)
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+})
+
+test("tick: an unsupported CLI skips sends without spawning", async () => {
+  const r = rig()
+  await arm(r)
+  expect(await r.tick(SLOT, { cliPath: "definitely-not-a-claude-binary" })).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(r.state.sends).toEqual([])
+  expect(r.state.auth).toBe(0)
+  expect(r.scheduler.pendingCount()).toBe(0)
+})
+
+test("tick: an already-aborted tick never probes or spawns", async () => {
+  const r = rig()
+  await arm(r)
+  const controller = new AbortController()
+  controller.abort()
+  expect(await r.tick(SLOT, { signal: controller.signal })).toEqual(NOTHING)
+  expect(r.state.auth).toBe(0)
+  expect(r.state.sends).toEqual([])
+})
+
+test("tick: stopping while send-time auth is pending skips the model and leaves no claim", async () => {
+  const r = rig()
+  _setInventoryProbe(null)
+  let modelSpawns = 0
+  let authSpawns = 0
+  _setCliRunner(async (opts) => {
+    if (opts.args[0] === "auth") {
+      authSpawns += 1
+      if (authSpawns === 1) return connectedAs(EMAIL)
+      await new Promise<void>((resolve) => opts.signal?.addEventListener("abort", () => resolve(), { once: true }))
+      return { code: null, stdout: "", stderr: "spawn failed: aborted", timedOut: false }
+    }
+    modelSpawns += 1
+    return sentResult
+  })
+  await arm(r)
+  const controller = new AbortController()
+  const pending = r.tick(SLOT, { signal: controller.signal })
+  await new Promise((resolve) => setTimeout(resolve, 100))
+  controller.abort()
+  expect(await pending).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(authSpawns).toBe(2)
+  expect(modelSpawns).toBe(0)
+  expect(r.claims()).toEqual([])
+  expect(r.attempt()).toBeUndefined()
+})
+
+test("tick: with no peer source the machine ranks itself first under LOCAL_HOST", async () => {
+  expect(LOCAL_HOST).toBe("local")
+  const r = rig()
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.attempt()?.host).toBeUndefined()
+})
+
+// ---- runtime store -------------------------------------------------------------------------------
+
+test("store: claims are exclusive, concurrent claimers see one winner, and accounts do not clobber each other", async () => {
+  const file = storeFile
+  const lockDir = path.join(dir, "locks")
+  const [first, second] = await Promise.all([
+    claimOccurrence({ file, lockDir, email: EMAIL, at: SLOT, now: SLOT }),
+    claimOccurrence({ file, lockDir, email: EMAIL, at: SLOT, now: SLOT }),
+  ])
+  expect([first, second].filter(Boolean)).toHaveLength(1)
+  expect(await claimOccurrence({ file, lockDir, email: EMAIL, at: SLOT, now: SLOT + 1 })).toBe(false)
+  await Promise.all([
+    claimOccurrence({ file, lockDir, email: "x@example.test", at: SLOT, now: SLOT }),
+    claimOccurrence({ file, lockDir, email: "y@example.test", at: SLOT, now: SLOT }),
+  ])
+  expect(Object.keys(readStore(file).accounts).toSorted()).toEqual([EMAIL, "x@example.test", "y@example.test"])
+  // No store file (test default) means nothing can be claimed, so nothing is sent.
+  expect(await claimOccurrence({ file: null, email: EMAIL, at: SLOT })).toBe(false)
+})
+
+test("store: old claims are pruned when a new one is taken", async () => {
+  const lockDir = path.join(dir, "locks")
+  const old = SLOT - 9 * 24 * 60 * 60 * 1000
+  const recent = SLOT - 2 * 24 * 60 * 60 * 1000
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: old, now: old })
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: recent, now: recent })
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: SLOT, now: SLOT })
+  expect(Object.keys(readStore(storeFile).accounts[EMAIL]!.claims).toSorted()).toEqual([String(recent), String(SLOT)])
+})
+
+test("store: a newer scheduled attempt is never overwritten by a slower older occurrence", async () => {
+  const lockDir = path.join(dir, "locks")
+  const early = SLOT - 3600_000
+  await recordAttempt({
+    file: storeFile,
+    lockDir,
+    email: EMAIL,
+    attempt: { scheduledAt: SLOT, attemptedAt: SLOT + 1, outcome: "sent", host: "win" },
+  })
+  await recordAttempt({
+    file: storeFile,
+    lockDir,
+    email: EMAIL,
+    attempt: { scheduledAt: early, attemptedAt: SLOT + 2, outcome: "failed" },
+  })
+  expect(readStore(storeFile).accounts[EMAIL]?.lastAttempt).toEqual({
+    scheduledAt: SLOT,
+    attemptedAt: SLOT + 1,
+    outcome: "sent",
+    host: "win",
+  })
+  // Same occurrence: the later attempt wins.
+  await recordAttempt({
+    file: storeFile,
+    lockDir,
+    email: EMAIL,
+    attempt: { scheduledAt: SLOT, attemptedAt: SLOT + 9, outcome: "failed" },
+  })
+  expect(readStore(storeFile).accounts[EMAIL]?.lastAttempt?.outcome).toBe("failed")
+})
+
+test("store: adopting a peer copies unknown claims and only a newer outcome", async () => {
+  const lockDir = path.join(dir, "locks")
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: SLOT, now: SLOT + 100 })
+  await recordAttempt({
+    file: storeFile,
+    lockDir,
+    email: EMAIL,
+    attempt: { scheduledAt: SLOT, attemptedAt: SLOT + 100, outcome: "sent" },
+  })
+  await adoptPeer({
+    file: storeFile,
+    lockDir,
+    email: EMAIL,
+    claims: { [String(SLOT)]: SLOT + 999, [String(SLOT + 1)]: SLOT + 5 },
+    lastAttempt: { scheduledAt: SLOT, attemptedAt: SLOT + 50, outcome: "failed", host: "win" },
+    now: SLOT + 1000,
+  })
+  const record = readStore(storeFile).accounts[EMAIL]!
+  // The existing claim keeps this machine's stamp; the unknown one is added.
+  expect(record.claims).toEqual({ [String(SLOT)]: SLOT + 100, [String(SLOT + 1)]: SLOT + 5 })
+  // The peer's outcome is older than ours, so ours stays.
+  expect(record.lastAttempt).toEqual({ scheduledAt: SLOT, attemptedAt: SLOT + 100, outcome: "sent" })
+})
+
+test("store: unreadable or corrupt state reads as empty and bad entries are dropped", () => {
+  expect(readStore(storeFile)).toEqual({ accounts: {} })
+  expect(readStore(null)).toEqual({ accounts: {} })
+  writeFileSync(storeFile, "not json", "utf8")
+  expect(readStore(storeFile)).toEqual({ accounts: {} })
+  writeFileSync(
+    storeFile,
+    JSON.stringify({
+      accounts: {
+        [EMAIL]: { claims: { "5": 7, x: "no" }, lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "bogus" } },
+        "b@example.test": "text",
+        "c@example.test": {
+          claims: {},
+          lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "missed", host: "win" },
+        },
+      },
+    }),
+    "utf8",
+  )
+  expect(readStore(storeFile)).toEqual({
+    accounts: {
+      [EMAIL]: { claims: { "5": 7 } },
+      "c@example.test": { claims: {}, lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "missed", host: "win" } },
+    },
+  })
+})
+
+test("store: the legacy folder-keyed warmup.json is read-only input, bad entries skipped", () => {
+  expect(readLegacyStore(null)).toEqual({})
+  expect(readLegacyStore(path.join(dir, "missing.json"))).toEqual({})
+  const legacy = path.join(dir, "warmup.json")
+  writeFileSync(
+    legacy,
+    JSON.stringify({
+      accounts: {
+        "/home/a/.claude": {
+          enabled: true,
+          schedule: { mode: "daily", times: ["12:00", "07:00"] },
+          lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "sent" },
+        },
+        "/home/b/.claude": { enabled: "yes", schedule: { mode: "daily", times: ["07:00"] } },
+        "/home/c/.claude": { enabled: false, schedule: { mode: "daily", times: ["25:00"] } },
+      },
+    }),
+    "utf8",
+  )
+  expect(readLegacyStore(legacy)).toEqual({
+    "/home/a/.claude": {
+      enabled: true,
+      schedule: { mode: "daily", times: ["07:00", "12:00"] },
+      lastAttempt: { scheduledAt: 1, attemptedAt: 2, outcome: "sent" },
+    },
+  })
+})
+
+// ---- identity, inventory emails, views -----------------------------------------------------------
+
+test("identity: every candidate materializes before use and keeps distinct folders", () => {
+  const previous = process.env.CLAUDE_CONFIG_DIR
+  delete process.env.CLAUDE_CONFIG_DIR
+  try {
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? ""
+    const expected = path.resolve(path.join(home, ".claude"))
+    expect(materializePoolIds(undefined)).toEqual([expected])
+    const second = path.join(dir, "second")
+    expect(materializePoolIds(["~/.claude", second, second])).toEqual([expected, path.resolve(second)])
+    // A later shell change moves the inherited default; saved state is keyed by email, not this.
+    const moved = path.join(dir, "moved-home", ".claude")
+    process.env.CLAUDE_CONFIG_DIR = moved
+    expect(materializePoolIds(undefined)).toEqual([path.resolve(moved)])
+    const first = path.join(dir, "one", ".claude")
+    const other = path.join(dir, "two", ".claude")
+    expect(materializePoolIds([first, other])).toEqual([path.resolve(first), path.resolve(other)])
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR
+    else process.env.CLAUDE_CONFIG_DIR = previous
+  }
+})
+
+test("inventory: probes carry the email into the identity map; verifyAccountEmail honours the probe override", async () => {
+  _setInventoryProbe(async (_cli, id) => ({
+    id,
+    status: id === "c" ? "signed-out" : "connected",
+    ...(id === "a" ? { email: "A@Example.test" } : {}),
+  }))
+  expect((await listConnected({ cliPath: "claude", candidates: ["a", "b", "c"] })).connectedIds).toEqual(["a", "b"])
+  // Emails are stored lowercased; a connected probe without one maps nothing.
+  expect(emailOf("a")).toBe("a@example.test")
+  expect(emailOf("b")).toBeUndefined()
+  expect(emailOf("c")).toBeUndefined()
+
+  expect(await verifyAccountEmail("claude", "a")).toBe("A@Example.test")
+  // Connected without an email, and signed out, are not sendable.
+  expect(await verifyAccountEmail("claude", "b")).toBeUndefined()
+  expect(await verifyAccountEmail("claude", "c")).toBeUndefined()
+  _setInventoryProbe(async (_cli, id) => ({ id, status: "unknown" }))
+  expect(await verifyAccountEmail("claude", "a")).toBeUndefined()
+  // Unknown keeps what was learned.
+  expect(emailOf("a")).toBe("a@example.test")
+})
+
+test("inventory: the real auth probe reads the email from `auth status --json`", async () => {
+  _setCliRunner(async () => connectedAs("Real@Example.test"))
+  expect((await listConnected({ cliPath: "claude", candidates: ["a"] })).connectedIds).toEqual(["a"])
+  expect(emailOf("a")).toBe("real@example.test")
+  _setCliRunner(async () => ({
+    code: 0,
+    stdout: JSON.stringify({ loggedIn: true, authMethod: "claude.ai", email: null }),
+    stderr: "",
+    timedOut: false,
+  }))
+  expect(await verifyAccountEmail("claude", "a")).toBeUndefined()
+})
+
+test("view: accounts signed in here list first, synced accounts signed in elsewhere follow, email is the id", () => {
+  const lastAttempt: LastAttempt = { scheduledAt: at(6), attemptedAt: at(6), outcome: "sent", host: "win" }
+  const view = stateView({
+    accounts: {
+      "b@example.test": { name: "Team", warmup: { enabled: true, schedule: daily(["07:00"]), updatedAt: 1 } },
+    },
+    connectedEmails: ["A@Example.test"],
+    store: { accounts: { "b@example.test": { claims: {}, lastAttempt } } },
+    available: true,
+    now: at(6, 30),
+  })
+  expect(view.accounts).toEqual([
+    {
+      accountID: "a@example.test",
+      label: "a@example.test",
+      enabled: false,
+      schedule: { mode: "daily", times: [] },
+      here: true,
+    },
+    {
+      accountID: "b@example.test",
+      label: "Team",
+      enabled: true,
+      schedule: { mode: "daily", times: ["07:00"] },
+      here: false,
+      nextAt: at(7),
+      lastAttempt,
+    },
+  ])
   expect(view.timeZone.length).toBeGreaterThan(0)
   expect(view.utcOffset).toMatch(/^UTC[+-]\d{2}:\d{2}$/)
   expect(view.available).toBe(true)
-  expect(accountView({ accountID: "default", now: Date.now() }).label).toBe("claude1")
+  expect(view.error).toBeUndefined()
+  expect(
+    stateView({ accounts: {}, connectedEmails: [], store: { accounts: {} }, available: false, error: "no cli" }),
+  ).toMatchObject({
+    accounts: [],
+    available: false,
+    error: "no cli",
+  })
+  expect(accountView({ email: "z@example.test", here: false, now: at(6) })).toEqual({
+    accountID: "z@example.test",
+    label: "z@example.test",
+    enabled: false,
+    schedule: { mode: "daily", times: [] },
+    here: false,
+  })
+})
+
+test("view: a paused or empty schedule has no next run", () => {
+  const paused = accountView({
+    email: EMAIL,
+    account: { warmup: { enabled: false, schedule: daily(["07:00"]), updatedAt: 1 } },
+    here: true,
+    now: at(6),
+  })
+  expect(paused.nextAt).toBeUndefined()
+  expect(paused.schedule).toEqual({ mode: "daily", times: ["07:00"] })
+})
+
+test("peer view: describeLocal reports emails signed in here, claims of the last day, and latest outcomes", async () => {
+  const lockDir = path.join(dir, "locks")
+  _setInventoryProbe(async (_cli, id) =>
+    id === "c"
+      ? { id, status: "signed-out" }
+      : { id, status: "connected", email: id === "a" || id === "b" ? EMAIL : "d@example.test" },
+  )
+  const dayAgo = SLOT - 25 * 60 * 60 * 1000
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: dayAgo, now: dayAgo })
+  await claimOccurrence({ file: storeFile, lockDir, email: EMAIL, at: SLOT, now: SLOT })
+  const attempt: LastAttempt = { scheduledAt: SLOT, attemptedAt: SLOT, outcome: "sent", host: "mac" }
+  await recordAttempt({ file: storeFile, lockDir, email: EMAIL, attempt })
+  const view = await describeLocal({
+    cliPath: "claude",
+    poolIds: ["a", "b", "c", "d"],
+    file: storeFile,
+    now: SLOT + 1000,
+  })
+  expect(view.connected.toSorted()).toEqual([EMAIL, "d@example.test"])
+  expect(view.claims).toEqual({ [EMAIL]: { [String(SLOT)]: SLOT } })
+  expect(view.last).toEqual({ [EMAIL]: attempt })
+})
+
+// ---- scheduler: standby, replacement, schedule edits, late claims ---------------------------------
+
+test("tick (a): a rank-1 machine whose better-ranked peer drops out mid-standby still fires", async () => {
+  let peers: PeerView[] = [peerView("aaa-goon")]
+  const r = rig({ peers: peerSource("zzz-mac", () => peers) })
+  await arm(r)
+  // Rank 1: this tick and the next only wait. The pending item remembers the highest rank seen.
+  expect(await r.tick(SLOT)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + 45 * SEC)).toEqual(NOTHING)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  // The peer disappears: this machine is rank 0 now and due at once. Its deadline is still the
+  // rank-1 one (SLOT + 120 s); a deadline recomputed from the current rank (SLOT + 60 s) would
+  // already have passed at +75 s and recorded `missed`.
+  peers = []
+  expect(await r.tick(SLOT + 75 * SEC)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, attemptedAt: SLOT + 75 * SEC, outcome: "sent" })
+})
+
+test("tick (b): a catch-up re-covering a pending slot restarts the standby wait from the wake", async () => {
+  const r = rig({ peers: peerSource("zzz-mac", () => [peerView("aaa-goon")]) })
+  await arm(r)
+  await r.tick(SLOT)
+  await r.tick(SLOT + 15 * SEC)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  // The clock steps back before the slot, then a long gap jumps forward over it again: the gap
+  // sets the catch-up origin to the earlier time, so the settle tick queues SLOT a second time.
+  expect(await r.tick(SLOT - 600 * SEC)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + 600 * SEC)).toEqual(NOTHING)
+  const wake = SLOT + 615 * SEC
+  // The original item (base SLOT) is long past its SLOT + 120 s deadline; the re-queued one has
+  // base = wake, so rank 1 waits a fresh STANDBY_MS from there instead of being dropped.
+  expect(await r.tick(wake)).toEqual(NOTHING)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  for (const offset of [15, 30, 45]) expect(await r.tick(wake + offset * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  expect(await r.tick(wake + STANDBY_MS)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.attempt()).toMatchObject({ scheduledAt: SLOT, attemptedAt: wake + STANDBY_MS, outcome: "sent" })
+})
+
+test("tick (c): a pending slot whose time was removed, or that predates a newer save, is dropped", async () => {
+  const both: SyncedAccounts = accountsAt(["12:00", "18:00"])
+  const standby = () => rig({ accounts: both, peers: peerSource("zzz-mac", () => [peerView("aaa-goon")]) })
+
+  // Queue processing: 12:00 is removed during the standby wait while 18:00 stays enabled, so
+  // the account is still "enabled" but the slot is no longer one of its times.
+  const removed = standby()
+  await arm(removed)
+  await removed.tick(SLOT)
+  expect(removed.scheduler.pendingCount()).toBe(1)
+  removed.state.accounts = accountsAt(["18:00"])
+  expect(await removed.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(removed.scheduler.pendingCount()).toBe(0)
+  expect(await removed.tick(SLOT + STANDBY_MS)).toEqual(NOTHING)
+  expect(removed.state.sends).toEqual([])
+
+  // Queue processing: a save newer than the slot (updatedAt after SLOT) drops it too.
+  rmSync(storeFile, { force: true })
+  const resaved = standby()
+  await arm(resaved)
+  await resaved.tick(SLOT)
+  resaved.state.accounts = accountsAt(["12:00", "18:00"], SLOT + SEC)
+  expect(await resaved.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(resaved.scheduler.pendingCount()).toBe(0)
+  expect(await resaved.tick(SLOT + STANDBY_MS)).toEqual(NOTHING)
+  expect(resaved.state.sends).toEqual([])
+
+  // Send boundary: the time is removed while the send-time probe runs, after the slot was
+  // already taken off the queue.
+  rmSync(storeFile, { force: true })
+  const late = rig({ accounts: both })
+  await arm(late)
+  let probes = 0
+  _setInventoryProbe(async (_cli, id) => {
+    probes += 1
+    if (probes === 2) late.state.accounts = accountsAt(["18:00"])
+    return { id, status: "connected", email: EMAIL }
+  })
+  expect(await late.tick(SLOT)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(late.state.sends).toEqual([])
+  expect(late.claims()).toEqual([])
+})
+
+test("tick (d): a standby machine re-reads peers right before claiming and skips a slot claimed meanwhile", async () => {
+  let claimed = false
+  let fetches = 0
+  const r = rig({
+    peers: peerSource("zzz-mac", () => {
+      fetches += 1
+      return [peerView("aaa-goon", claimed ? { claims: { [EMAIL]: { [String(SLOT)]: SLOT + 50 * SEC } } } : {})]
+    }),
+  })
+  await arm(r)
+  for (const offset of [0, 15, 30, 45]) expect(await r.tick(SLOT + offset * SEC)).toEqual(NOTHING)
+  // At the standby deadline the tick's own peer snapshot still shows no claim; rank 0 claims
+  // while this machine's send-time probe runs.
+  let probes = 0
+  _setInventoryProbe(async (_cli, id) => {
+    probes += 1
+    if (probes === 2) claimed = true
+    return { id, status: "connected", email: EMAIL }
+  })
+  const before = fetches
+  expect(await r.tick(SLOT + STANDBY_MS)).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  expect(fetches - before).toBe(2)
+  expect(r.state.sends).toEqual([])
+  // No local claim either: only the sender claims.
+  expect(r.claims()).toEqual([])
+  expect(r.attempt()).toBeUndefined()
+})
+
+test("tick (b2): a pending standby slot restarts its wait from the wake after sleeping through it", async () => {
+  // Rank 1: the better-ranked peer is connected and never claims.
+  const r = rig({ peers: peerSource("zzz-mac", () => [peerView("aaa-goon")]) })
+  await arm(r)
+  expect(await r.tick(SLOT)).toEqual(NOTHING)
+  expect(await r.tick(SLOT + 15 * SEC)).toEqual(NOTHING)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  // Sleep, forward time only: the gap tick sends nothing and leaves the pending item alone.
+  const gap = SLOT + 600 * SEC
+  expect(gap - (SLOT + 15 * SEC)).toBeGreaterThan(FIRE_ALLOWANCE_MS)
+  expect(await r.tick(gap)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  // The settle tick restarts the wait: the original item (deadline SLOT + 120 s) would be long
+  // dead, but it is kept with base = wake and its rank forgotten.
+  const wake = gap + 15 * SEC
+  expect(await r.tick(wake)).toEqual(NOTHING)
+  expect(r.scheduler.pendingCount()).toBe(1)
+  expect(await r.tick(wake + 15 * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual([])
+  // STANDBY_MS after the wake (plus a poll): due, and still inside the restarted deadline.
+  expect(await r.tick(wake + STANDBY_MS + 15 * SEC)).toEqual({ fired: 1, missed: 0, skipped: 0 })
+  expect(r.state.sends).toEqual(["a"])
+  expect(r.attempt()).toMatchObject({
+    scheduledAt: SLOT,
+    attemptedAt: wake + STANDBY_MS + 15 * SEC,
+    outcome: "sent",
+    host: "zzz-mac",
+  })
+  expect(await r.tick(wake + STANDBY_MS + 30 * SEC)).toEqual(NOTHING)
+  expect(r.state.sends).toEqual(["a"])
 })

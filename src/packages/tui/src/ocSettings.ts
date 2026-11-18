@@ -3,6 +3,8 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { Flock } from "@opencode-ai/core/util/flock"
+import { OcItems } from "@opencode-ai/core/util/ocItems"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { applyEdits, modify } from "jsonc-parser"
 import type { ToastContext } from "./ui/toast"
@@ -218,13 +220,26 @@ export function persistTuiSetting(
   return persistTuiSettingQueue
 }
 
-// Saves oc.json `sync` (`/sync` dialog). The resident server rereads it every sync tick.
-export function persistOcSync(value: { enabled: boolean; exclude: readonly string[] }) {
-  const file = ocConfigPath()
-  const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
-  const next = applyEdits(
-    text,
-    modify(text, ["sync"], value, { formattingOptions: { tabSize: 2, insertSpaces: true } }),
-  )
-  if (next !== text) fs.writeFileSync(file, next)
+let persistOcSyncQueue: Promise<void> = Promise.resolve()
+
+// Saves oc.json `sync` (`/sync` dialog). The resident server rereads it every sync tick. Holds the
+// shared oc.json lock (server writes and sync applies take it too) and re-reads inside it, so a
+// concurrent server write is never lost. Queued: rapid toggles land in order.
+export function persistOcSync(value: { enabled: boolean; exclude: readonly string[] }): Promise<void> {
+  const run = () =>
+    Flock.withLock(OcItems.OC_CONFIG_LOCK, async () => {
+      const file = ocConfigPath()
+      const text = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{}"
+      const next = applyEdits(
+        text,
+        modify(text, ["sync"], value, { formattingOptions: { tabSize: 2, insertSpaces: true } }),
+      )
+      if (next === text) return
+      const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
+      fs.writeFileSync(temporary, next)
+      fs.renameSync(temporary, file)
+    })
+  const result = persistOcSyncQueue.then(run)
+  persistOcSyncQueue = result.catch(() => undefined)
+  return result
 }
