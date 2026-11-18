@@ -29,6 +29,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { TodoWriteTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
+import { RenameFileTool } from "./renameFile"
 import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
@@ -176,6 +177,7 @@ const layer = Layer.effect(
     const bgKill = yield* BgKillTool
     const globtool = yield* GlobTool
     const writetool = yield* WriteTool
+    const renameFile = yield* RenameFileTool
     const edit = yield* EditTool
     const greptool = yield* GrepTool
     const patchtool = yield* ApplyPatchTool
@@ -283,6 +285,7 @@ const layer = Layer.effect(
           grep: Tool.init(greptool),
           edit: Tool.init(edit),
           write: Tool.init(writetool),
+          renameFile: Tool.init(renameFile),
           task: Tool.init(task),
           taskCancel: Tool.init(taskCancel),
           fetch: Tool.init(webfetch),
@@ -335,6 +338,7 @@ const layer = Layer.effect(
             tool.grep,
             tool.edit,
             tool.write,
+            tool.renameFile,
             tool.task,
             tool.taskCancel,
             tool.models,

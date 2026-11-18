@@ -131,6 +131,25 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~22:20) - v0.2.383 guwopQld - rename_file tool so /spit can rename plans - Claude Opus 5.5, low; Spit, Second opinion, Think, Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Spit -> Second opinion -> Think -> Imp; completed
+- Version: 0.2.383 guwopQld
+- Added `tool/renameFile.ts` (+ `.txt`), id `rename_file`: `filePath` + `newName` (bare name, so in place by input shape); rejects path separators, dot names, same name, `:` on Windows; `ctx.ask` `edit` on old and new path; inside `withFileLocks([from, to])` refuses missing source, directory, existing destination (except case-only rename: same dev+ino and names equal ignoring case); `fs.rename`; publishes Watcher unlink/add + `FileSystem.Event.Edited`.
+- Changed `permission/index.ts` `disabled()`: `rename_file` follows the `edit` rule (no own permission key). Registered in `tool/registry.ts` after `write`; not gated on `usesApplyPatch`.
+- Changed `~/.opencode/commands/spit.md` and `spitS.md` rule line: "Rename a plan with `rename_file`." (config, not in repo). Plan: `~/.config/opencode/plans/2026-11-17-rename-file-tool.md`.
+- Second opinion (Sol 6.2, Terra 6.1, DeepSeek v4.1) caught: spit `edit` also allows `mockups/**`; relative paths must resolve like `write.ts`; missing watcher events; check-then-rename race (now locked).
+- Verification: `test/tool/renameFile.test.ts` 5 pass (in-place rename, relative path, bad names, existing/dir/missing, case-only); registry + permission + commandPermissions suites 115 pass; `tsgo --noEmit` exit 0; probe of spit's real edit rules via `evaluateFile`: plan->`b.md` allow/allow, plans/sub allow/allow, ->`b.txt` deny on new path, repo file deny; `disabled()` shows tool under spit, hides it under `edit: deny`. Not run: live /spit rename (needs rebuilt oc).
+- MISTAKE: first second-opinion dispatch sent the literal placeholder "BRIEF" as the prompt; resent in the same sessions. Rule: paste the full brief text before calling task_batch.
+
+### User
+Plans
+- /spit and /spitS can now rename a plan file in its folder, for example `ocSourceBeam.md` to `ocMirror.md`.
+- The rename only works where the mode could already write, never overwrites another file, and cannot move files to another folder.
+
+---
+
 ## 2026-11-17 (~21:59) - v0.2.382 dongGuy - /mirror compares content, not "has changes" - Claude Opus 5.5, low; Debug, Plan, Implementation
 
 ### Agent

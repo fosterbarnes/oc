@@ -1,0 +1,6 @@
+Renames a file in place: same folder, new name.
+
+Usage:
+- `filePath` is the file to rename. `newName` is the new file name only, not a path; it cannot contain `/` or `\`.
+- Fails if a file with the new name already exists, or if `filePath` is a folder.
+- To move a file to another folder, this tool cannot help; ask the user.

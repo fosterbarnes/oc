@@ -263,7 +263,7 @@ export function disabled(
   ruleset: PermissionV1.Ruleset,
   turnRuleset?: PermissionV1.Ruleset,
 ): Set<string> {
-  const edits = ["edit", "write", "apply_patch"]
+  const edits = ["edit", "write", "apply_patch", "rename_file"]
   const reads = ["list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"]
   return new Set(
     tools.filter((tool) => {
