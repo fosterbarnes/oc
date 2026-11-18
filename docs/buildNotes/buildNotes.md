@@ -131,6 +131,28 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~21:26) - v0.2.381 gorlfriendOrganize - /spit plan writes after a command switch; mockups get their own folder - Claude Opus 5.5, low; Debug, Plan, Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug -> Think -> Imp in one chat; completed except the mockups folder move (user runs it)
+- Version: 0.2.381
+- Cause (measured, notes `~/.config/opencode/plans/2026-11-17-debug-spit-plan-write.md`): /spit's path-limited edit rule correctly routes edit/write/bash to `mcp__opencode_proxy__*` and turns Claude's Write/Edit/Bash off. After a mid-chat switch from /debug the model reused native `Write` from history; the CLI refused it ("No such tool available ... Continue without it") and the model gave up. oc never saw a permission check. 7 of 8 transcripts with the same refusal recovered via ToolSearch; this one did not.
+- Added `replacedToolsTurnNote` (provider/claude-code/prompts.ts), sharing `replacedToolsText` with the system prompt line so the two cannot drift. `planSpawn` returns `toolNote` when `tools.replaced` is non-empty; `turnStream.spawn` stores it on `ActiveProcess.toolNote`; the first send on that process appends it as the last text block (`appendTextBlock` in messageBuilder.ts, appended so `tool_result` blocks stay first) and clears it. A command switch already forces a respawn (catalog hash), so the note lands on exactly that turn. `respawnActiveProcess` does not copy it; the watchdog re-send reuses `this.userMsg`, which already carries it.
+- Rejected: `alwaysLoad` proxy tools (v0.2.153/190: flipping deferred/loaded made Claude report the server disconnected); a PreToolUse path hook (second permission path for one model mistake).
+- Added test `test/provider/claude-code/replacedToolsNote.test.ts`: fake CLI records stdin; a spit-shaped command plan gets the note on the first message only. Fails with the append disabled.
+- Personal config (not shipped): /spit, /spitS edit allow moved from `~/.config/opencode/plans/mockups/**` to `~/.config/opencode/mockups/**`; /imp, /impS deny moved the same way (still Claude-enforceable `Edit(//.../mockups/**)`); `oc:tui-mockup` SKILL.md and template.html use the new path.
+- Verification: `tsgo --noEmit` clean; new test pass (fail with fix disabled); 9 claude-code suites 90 pass / 0 fail; probe of the edited commands: spit plans/*.md allow, plans/x.html deny, mockups/** allow, repo deny; imp mockups/** deny with Claude deny rule. Live check pending /revive.
+- ERROR: the `mv plans/mockups mockups` was blocked by /imp's own deny on `plans/mockups/**`; left for the user.
+
+### User
+Claude Code chats
+- After switching to /spit (or any command that limits file edits) mid-chat, Claude is now told which oc tools replace its own Write, Edit and Bash, so it can write its plan file instead of giving up.
+
+Personal setup
+- HTML mockups now live in `~/.config/opencode/mockups` instead of inside the plans folder; /spit may write only plan `.md` files and mockups.
+
+---
+
 ## 2026-11-17 (~20:21) - v0.2.380 freebasedFractal - Claude accounts sync by email; warm-ups run on whichever machine is live - Claude Opus 5.5, low; Implementation
 
 ### Agent

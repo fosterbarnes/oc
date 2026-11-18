@@ -10,7 +10,7 @@ import type { TurnContext } from "./turnContext.js"
 import { shouldStripContextReminders } from "./messageBuilder.js"
 import { mergeOpencodeMcp, type RuntimeMcpStatus } from "./mcpBridge.js"
 import { fetchOpencodeToolList, showToast, type OpencodeToolListItem } from "./runtimeStatus.js"
-import { buildAppendedSystemPrompt, buildToolEnvironmentNote } from "./prompts.js"
+import { buildAppendedSystemPrompt, buildToolEnvironmentNote, replacedToolsTurnNote } from "./prompts.js"
 import { buildCliArgs, thinkingCliOptions } from "./cliArgs.js"
 import type { CliVersion } from "./cliVersion.js"
 import { ensureSkillPlugin, fetchOpencodeSkills, poolSkillsDir } from "./skillPlugin.js"
@@ -387,6 +387,8 @@ export async function planSpawn(input: {
     systemPromptFile,
     proxyServer,
     mcpHash: mcp.mcpHash,
+    // Goes out once, with the new process's first message (turnStream.ts).
+    toolNote: tools.replaced.length > 0 ? replacedToolsTurnNote(tools.replaced) : undefined,
   }
 }
 /**

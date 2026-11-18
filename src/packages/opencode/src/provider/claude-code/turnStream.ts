@@ -87,7 +87,7 @@ import { reportUsageObservation } from "@/provider/usage-observations.js"
 import { ScheduledResume } from "@/session/scheduledResume.js"
 import { OcConfig } from "@/config/oc.js"
 import { failoverQuestion } from "./failoverQuestion.js"
-import { ACCOUNT_FAILOVER_TOOL_CALL_PREFIX } from "./messageBuilder.js"
+import { ACCOUNT_FAILOVER_TOOL_CALL_PREFIX, appendTextBlock } from "./messageBuilder.js"
 import { log } from "./logger.js"
 import {
   CLAUDE_CODE_PROVIDER_ID,
@@ -435,6 +435,9 @@ class ClaudeTurn {
     }
 
     noteTurnStarted(this.activeProcess)
+    const toolNote = this.activeProcess.toolNote
+    this.activeProcess.toolNote = undefined
+    if (toolNote) this.userMsg = appendTextBlock(this.userMsg, toolNote)
     this.proc.stdin?.write(this.userMsg + "\n")
     log.debug("sent user message", { textLength: this.userMsg.length })
     // A reused child that goes silent after the envelope write (seen after a
@@ -487,6 +490,7 @@ class ClaudeTurn {
     )
     ap.toolCatalogHash = this.input.catalogHash
     ap.settings = this.turn.processSettings
+    ap.toolNote = plan.toolNote
     return ap
   }
 

@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto"
 import { join } from "node:path"
 import { log } from "./logger.js"
 import { pluginTmpDir } from "./tmp.js"
+import { CLAUDE_NATIVE_TOOLS } from "./shared.js"
 
 const MULTI_STEP_TASK_HINT = `## Continuing through multi-step tasks
 
@@ -108,17 +109,28 @@ export function buildToolEnvironmentNote(
       ? [
           "",
           "OpenCode-only tools are MCP tools named `mcp__opencode_proxy__<name>`. Load one with ToolSearch (`select:mcp__opencode_proxy__<name>`) if it is deferred, and always call it by its full name.",
-          ...(replaced.length > 0
-            ? [
-                `This command limits ${replaced.join(", ")}, so Claude Code's own versions are off this turn and these replace them: ${replaced.map((name) => `\`mcp__opencode_proxy__${name}\``).join(", ")}. Load them up front with ToolSearch \`select:${replaced.map((name) => `mcp__opencode_proxy__${name}`).join(",")}\`. Do not do their job through a shell (Python, sed, heredocs): that skips the command's rules.`,
-              ]
-            : []),
+          ...(replaced.length > 0 ? [replacedToolsText(replaced)] : []),
         ]
       : []),
     ...(proxyTools.includes("task") ? ["", SUBAGENT_DISPATCH_HINT] : []),
     ...(proxyTools.includes("question") ? ["", QUESTION_PROXY_HINT] : []),
     ...(proxyTools.includes("mode_switch") ? ["", MODE_SWITCH_PROXY_HINT] : []),
   ].join("\n")
+}
+
+/**
+ * Sent once with the first message to a new process whose command replaces Claude's built-ins.
+ * After a mid-chat command switch the model reuses the built-ins it called earlier, which the CLI
+ * now refuses with "Continue without it"; the system prompt note alone did not stop that.
+ */
+export function replacedToolsTurnNote(replaced: string[]): string {
+  const natives = replaced.flatMap((id) => CLAUDE_NATIVE_TOOLS[id]?.[0] ?? [])
+  return `[oc: ${replacedToolsText(replaced)} This includes Claude Code's own ${natives.join(", ")} used earlier in this conversation: they no longer run.]`
+}
+
+function replacedToolsText(replaced: string[]) {
+  const names = replaced.map((name) => `mcp__opencode_proxy__${name}`)
+  return `This command limits ${replaced.join(", ")}, so Claude Code's own versions are off this turn and these replace them: ${names.map((name) => `\`${name}\``).join(", ")}. Load them up front with ToolSearch \`select:${names.join(",")}\`. Do not do their job through a shell (Python, sed, heredocs): that skips the command's rules.`
 }
 
 export function buildAppendedSystemPrompt(options: {

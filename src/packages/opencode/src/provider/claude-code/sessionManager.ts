@@ -36,6 +36,8 @@ export interface ActiveProcess {
   toolCatalogHash?: string
   /** Temp file holding `--append-system-prompt-file` content; unlinked on exit. */
   systemPromptFile?: string
+  /** Text added once to the first user message this process gets (`replacedToolsTurnNote`). */
+  toolNote?: string
   /** Effort the process was spawned with, so a respawn keeps it. */
   effort?: ReasoningEffort
   /**

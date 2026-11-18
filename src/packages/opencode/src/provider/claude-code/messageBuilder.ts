@@ -375,6 +375,16 @@ export function getClaudeUserMessage(
   })
 }
 
+/**
+ * Add a text block after everything in a `getClaudeUserMessage` envelope. Appended, never
+ * prepended: a reply to a pending tool call must keep its `tool_result` blocks first.
+ */
+export function appendTextBlock(envelope: string, text: string): string {
+  const parsed = JSON.parse(envelope)
+  parsed.message.content.push({ type: "text", text })
+  return JSON.stringify(parsed)
+}
+
 const RESUME_USER_CHARS = 1500
 const RESUME_REPLY_CHARS = 4000
 const RESUME_PROGRESS_CHARS = 6000
