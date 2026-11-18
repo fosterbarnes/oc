@@ -15,7 +15,7 @@
 These rules apply to one activity each, so they live outside this file. Read the file before starting.
 
 - Writing `buildNotes.txt` or a commit subject: `docs/dev/commitMessage.md`. Subjects are `v<version> <versionTag> [<label> > <summary>]`, not conventional commits.
-- Running or writing provider, pane, or perf tests, and judging a test failure (known failures list): `docs/dev/testing.md`.
+- Running or writing provider, pane, or perf tests, and judging a test failure: `docs/dev/testing.md`.
 - `/agentTest` or a live check of a TUI change: `docs/dev/agentTest.md`.
 - `/debug`: `docs/dev/debugRuns.md`.
 - Installer VM test package: `docs/dev/vmAcceptance.md`.
@@ -181,10 +181,10 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible, you shouldn't be using globalThis.\* at all unless it's the only option.
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from the `src` workspace root (`src/package.json` `test` script prints "do not run tests from root" and exits 1); run from package dirs like `packages/opencode`.
-- `packages/opencode/test/preload.ts` sets a 30 s default timeout (Bun ignores `[test] timeout` in `bunfig.toml`), so a bare `bun test <file>` there needs no `--timeout`, and a CLI `--timeout` has no effect there (set a per-test timeout instead). Other packages still default to 5 s unless their `test` script passes one.
+- `packages/opencode/test/preload.ts` sets a 30 s default timeout (Bun ignores `[test] timeout` in `bunfig.toml`), but Bun applies it only to the first test file of a run (checked on 1.4.2, 2026-11-18). A single-file `bun test <file>` needs no `--timeout`; a multi-file or whole-suite run needs `--timeout 30000` (as `bun run test` and `.scripts/test.ps1` pass), or later files time out at 5 s. Other packages still default to 5 s unless their `test` script passes one.
 - Verification follows `principles.md` and the `verify` skill. Broader suites are user-driven through `.scripts/test.ps1`; there is no CI.
 - Probes: scratch tests go in `src/packages/<pkg>/test/tmp/verify/` (ignored by the `tmp` rule in `.gitignore`). Run with `bun test test/tmp/verify/<file>` from the package dir, then delete the folder and confirm with `Test-Path`. TUI probes: `openPane(fixture)` from `test/provider/claude-code/paneFixture.ts` under `OC_TUI_PANE=1` (`type`, `paste`, `click`, `waitFor`, `screen`); see `tuiPane.test.ts` for use. Harness probes: fake-model scenarios against `TestLLMServer`. Never build or install.
-- Known failures, fake-model, pane, perf, and cleanup rules: `docs/dev/testing.md`. Compare failures against its list; do not re-prove them with `git stash`, reverts, or baseline copies.
+- Failing tests, fake-model, pane, perf, and cleanup rules: `docs/dev/testing.md`. There is no known-failures list: a failing test is fixed in the same change.
 
 ## Session Runtime (Hybrid V1/V2)
 

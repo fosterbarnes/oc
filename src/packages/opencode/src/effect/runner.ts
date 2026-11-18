@@ -107,7 +107,9 @@ export const make = <A, E = never>(
 
   const stopShell = (shell: ShellHandle<A, E>) =>
     Effect.gen(function* () {
-      if (shell.ready) yield* shell.ready.await.pipe(Effect.exit, Effect.asVoid)
+      // A shell that fails before opening `ready` (e.g. its session lock grab) never opens it.
+      if (shell.ready)
+        yield* shell.ready.await.pipe(Effect.raceFirst(Fiber.await(shell.fiber)), Effect.exit, Effect.asVoid)
       yield* Deferred.succeed(shell.cancelled, undefined).pipe(Effect.asVoid)
       yield* Fiber.interrupt(shell.fiber)
     })

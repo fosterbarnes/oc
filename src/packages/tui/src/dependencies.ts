@@ -489,8 +489,9 @@ function rowInfo(
 
 /** Git Bash beside a Git for Windows install, from its `<root>\cmd\git.exe`. */
 export function gitBash(git: string | undefined) {
-  if (!git || path.basename(path.dirname(git)).toLowerCase() !== "cmd") return undefined
-  return path.join(path.dirname(path.dirname(git)), "git-bash.exe")
+  // Windows-only layout, so Windows path rules on every host.
+  if (!git || path.win32.basename(path.win32.dirname(git)).toLowerCase() !== "cmd") return undefined
+  return path.win32.join(path.win32.dirname(path.win32.dirname(git)), "git-bash.exe")
 }
 
 function exeAt(file: string | null | undefined): ShortcutTarget {

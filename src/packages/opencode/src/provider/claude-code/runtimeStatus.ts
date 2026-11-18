@@ -146,10 +146,24 @@ export function resolveSpawnCwdFrom(
   captured: string | undefined,
   sessionDir?: string,
 ): string {
-  if (configured) return configured
-  if (isUsableDirectory(sessionDir)) return sessionDir
-  if (isUsableDirectory(live)) return live
-  return captured ?? live
+  return decideSpawnCwd(configured, live, captured, sessionDir).resolved
+}
+
+/** Which branch of `resolveSpawnCwdFrom` a Claude CLI spawn takes. */
+export type CwdSource = "configured" | "session" | "process" | "captured" | "unresolved"
+
+/** The one branch decision behind both `resolveSpawnCwdFrom` and the startup diagnostics' `describeSpawnCwd`. */
+export function decideSpawnCwd(
+  configured: unknown,
+  live: string,
+  captured: string | undefined,
+  sessionDir?: string,
+): { resolved: string; source: CwdSource } {
+  if (typeof configured === "string" && configured.length > 0) return { resolved: configured, source: "configured" }
+  if (isUsableDirectory(sessionDir)) return { resolved: sessionDir, source: "session" }
+  if (isUsableDirectory(live)) return { resolved: live, source: "process" }
+  if (isUsableDirectory(captured)) return { resolved: captured, source: "captured" }
+  return { resolved: captured ?? live, source: "unresolved" }
 }
 
 /**

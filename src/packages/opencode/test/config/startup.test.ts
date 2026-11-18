@@ -102,7 +102,8 @@ test("macOS startup plans a LaunchAgent with the same identity, args and env, wi
 
 test("startup launcher parses in PowerShell without running it", async () => {
   await using tmp = await tmpdir()
-  const next = Startup.plan(context(tmp.path))
+  // A fixed state path: the plan only names files under it, and a host temp path can pass the 260-character cap.
+  const next = Startup.plan(context("C:\\state\\opencode"))
   const file = path.join(tmp.path, "launcher.ps1")
   await Bun.write(file, next.script)
   const result = Bun.spawnSync(

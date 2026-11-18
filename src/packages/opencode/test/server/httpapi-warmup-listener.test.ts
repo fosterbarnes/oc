@@ -43,7 +43,10 @@ const SCHEDULE_BASE_MS = new Date(2026, 6, 10, 12, 0, 0, 0).getTime()
 /** No tailnet: this machine alone, and the account migration gate is open. */
 const noPeers: PeerSource = { self: async () => "test-host", views: async () => [] }
 
-function warmupLoopLayer(currentMs: { value: number }, accounts: () => string[]) {
+/** The loop's clock, plus how many times the loop has read its config (once at the start of every tick). */
+type LoopClock = { value: number; reads: number }
+
+function warmupLoopLayer(currentMs: LoopClock, accounts: () => string[]) {
   return Layer.effectDiscard(
     makeWarmupLoop(POLL_MS, { now: () => currentMs.value }, { peers: noPeers, ready: () => true }),
   ).pipe(
@@ -51,21 +54,34 @@ function warmupLoopLayer(currentMs: { value: number }, accounts: () => string[])
       Layer.mock(Config.Service)({
         invalidate: () => Effect.void,
         getGlobal: () =>
-          Effect.succeed({
-            provider: { "claude-code": { options: { accounts: accounts(), cliPath: cliPath ?? "claude" } } },
+          Effect.sync(() => {
+            currentMs.reads += 1
+            return {
+              provider: { "claude-code": { options: { accounts: accounts(), cliPath: cliPath ?? "claude" } } },
+            }
           }),
       }),
     ),
   )
 }
 
-/** Steps the loop clock and TestClock one poll at a time so real promises settle between ticks. */
-function advanceTo(currentMs: { value: number }, targetMs: number) {
+/**
+ * Steps the loop clock one poll at a time, in lockstep with the loop: each step nudges TestClock until the loop
+ * starts a tick (reads its config) at the new time. A tick can outlast any fixed real-time wait under load; without
+ * the lockstep it either saw a gap past FIRE_ALLOWANCE_MS (treated as a suspend) or was left asleep on a TestClock
+ * nobody advanced. A send's own `getPoolIds` config read can end a step early; that only merges two steps.
+ */
+function advanceTo(currentMs: LoopClock, targetMs: number) {
   return Effect.gen(function* () {
     while (currentMs.value < targetMs) {
       currentMs.value += POLL_MS
-      yield* TestClock.adjust(POLL_MS)
-      yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)))
+      const reads = currentMs.reads
+      const deadline = Date.now() + 5_000
+      while (currentMs.reads === reads) {
+        if (Date.now() > deadline) return yield* Effect.die(new Error("the warm-up loop stopped ticking"))
+        yield* TestClock.adjust(POLL_MS)
+        yield* Effect.promise(() => new Promise<void>((resolve) => setImmediate(resolve)))
+      }
     }
   })
 }
@@ -136,7 +152,7 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
       })
 
       // Ticks land 20 ms after each poll boundary, so the slot sits strictly between two of them.
-      const currentMs = { value: SCHEDULE_BASE_MS - 45_000 + 20 }
+      const currentMs = { value: SCHEDULE_BASE_MS - 45_000 + 20, reads: 0 }
       yield* TestClock.setTime(currentMs.value)
       const scope = yield* Scope.make()
       yield* Layer.buildWithMemoMap(
@@ -174,7 +190,7 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
         return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
       })
 
-      const currentMs = { value: slotAt + 10 * 60_000 }
+      const currentMs = { value: slotAt + 10 * 60_000, reads: 0 }
       yield* TestClock.setTime(currentMs.value)
       const scope = yield* Scope.make()
       yield* Layer.buildWithMemoMap(
@@ -222,7 +238,7 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
         return { code: 0, stdout: sentBody, stderr: "", timedOut: false }
       })
 
-      const currentMs = { value: SCHEDULE_BASE_MS - 45_000 }
+      const currentMs = { value: SCHEDULE_BASE_MS - 45_000, reads: 0 }
       yield* TestClock.setTime(currentMs.value)
 
       const scope = yield* Scope.make()
@@ -263,7 +279,7 @@ describe.skipIf(!cliPath)("warmup listener lifecycle", () => {
       })
 
       let accounts: string[] = [accountA]
-      const currentMs = { value: SCHEDULE_BASE_MS - 45_000 }
+      const currentMs = { value: SCHEDULE_BASE_MS - 45_000, reads: 0 }
       yield* TestClock.setTime(currentMs.value)
 
       const scope = yield* Scope.make()

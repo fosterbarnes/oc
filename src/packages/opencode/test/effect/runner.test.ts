@@ -332,6 +332,29 @@ describe("Runner", () => {
   )
 
   it.live(
+    "cancel completes when the shell fails before opening ready",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const ready = yield* Latch.make()
+      const gate = yield* Deferred.make<void>()
+
+      // Stands in for the session lock grab failing before the shell body opens `ready`.
+      const sh = yield* runner
+        .startShell(Deferred.await(gate).pipe(Effect.andThen(Effect.die("held elsewhere"))), ready)
+        .pipe(Effect.forkChild)
+      yield* waitForState(runner, "Shell")
+
+      const stop = yield* runner.cancel.pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(gate, undefined)
+      const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("250 millis"))
+      expect(Exit.isSuccess(stopExit)).toBe(true)
+      expect(Exit.isFailure(yield* Fiber.await(sh))).toBe(true)
+    }),
+  )
+
+  it.live(
     "cancel does not mask shell defects",
     Effect.gen(function* () {
       const s = yield* Scope.Scope

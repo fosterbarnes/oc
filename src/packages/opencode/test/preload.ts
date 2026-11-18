@@ -6,8 +6,8 @@ import fs from "fs/promises"
 import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll, setDefaultTimeout } from "bun:test"
 
-// Bun ignores `[test] timeout` in bunfig.toml, so bare `bun test <file>` would use 5 s. This also
-// overrides a CLI `--timeout`; per-test timeouts still win.
+// Bun ignores `[test] timeout` in bunfig.toml, so bare `bun test <file>` would use 5 s. Bun applies this
+// only to the first file of a run: multi-file runs need `--timeout 30000` (the package `test` script).
 setDefaultTimeout(30000)
 
 // Set XDG env vars FIRST, before any src/ imports

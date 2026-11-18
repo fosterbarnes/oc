@@ -6,7 +6,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
 import { claudeCodeProviders } from "@/provider/claude-code/index.js"
-import { resolveSpawnCwdFrom } from "@/provider/claude-code/runtimeStatus.js"
+import { resolveSpawnCwdFrom, setOpencodeProjectDirectory } from "@/provider/claude-code/runtimeStatus.js"
 import {
   accountSettingsDrift,
   collectStartupDiagnostics,
@@ -45,6 +45,15 @@ test("describeSpawnCwd never disagrees with resolveSpawnCwd", () => {
   ]
   for (const [configured, live, captured] of cases) {
     assert.equal(describeSpawnCwd(configured, live, captured).resolved, resolveSpawnCwdFrom(configured, live, captured))
+  }
+})
+
+test("describeSpawnCwd ignores the process-wide captured directory when none is passed", () => {
+  setOpencodeProjectDirectory("/leak")
+  try {
+    assert.deepEqual(describeSpawnCwd(undefined, "/", undefined), { resolved: "/", source: "unresolved" })
+  } finally {
+    setOpencodeProjectDirectory(undefined)
   }
 })
 

@@ -9,16 +9,15 @@ describe("agentUrl: invalidateAgentUrl", () => {
     resetAgentUrlCache()
     fetchCalls = 0
     originalFetch = globalThis.fetch
+    // Counts only ServerConfig calls. Everything else (e.g. the client version lookup of cursor.com/install on a
+    // host without cursor-agent) gets a 404 here: never the network, and never a page the version cache would keep.
     globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (!String(input).includes("ServerConfig")) return new Response("not found", { status: 404 })
       fetchCalls++
-      const url = typeof input === "string" ? input : String(input)
-      if (url.includes("GetServerConfig") || url.includes("ServerConfig")) {
-        return new Response(JSON.stringify({ agentUrlConfig: { agentnUrl: "https://agentn.us.test.cursor.sh" } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }) as Response
-      }
-      return originalFetch(input as RequestInfo)
+      return new Response(JSON.stringify({ agentUrlConfig: { agentnUrl: "https://agentn.us.test.cursor.sh" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      })
     }) as typeof fetch
   })
 
@@ -74,7 +73,13 @@ describe("agentUrl: invalidateAgentUrl", () => {
   })
 
   test("malformed GetServerConfig replies fail with a protocol error", async () => {
-    const bodies = ["null", "42", "[]", JSON.stringify({ agentUrlConfig: null }), JSON.stringify({ agentUrlConfig: { agentnUrl: 7 } })]
+    const bodies = [
+      "null",
+      "42",
+      "[]",
+      JSON.stringify({ agentUrlConfig: null }),
+      JSON.stringify({ agentUrlConfig: { agentnUrl: 7 } }),
+    ]
     const serverConfig = globalThis.fetch
     for (const [index, body] of bodies.entries()) {
       globalThis.fetch = (async (input: RequestInfo | URL) => {

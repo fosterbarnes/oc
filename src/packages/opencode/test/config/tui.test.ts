@@ -526,7 +526,8 @@ it.instance("resolves keybind lookup from canonical keybinds", () =>
       expect(config.keybinds.get("command.palette.show")?.[0]?.key).toBe("alt+p")
       expect(config.keybinds.get("diff.open")?.[0]?.key).toBe("ctrl+j")
       expect(config.keybinds.get("session.new")?.[0]).toMatchObject({
-        key: "ctrl+shift+h",
+        // macKeys: macOS defaults use cmd (super) where other hosts use ctrl.
+        key: process.platform === "darwin" ? "super+shift+h" : "ctrl+shift+h",
         desc: "Go to Home",
       })
       expect(config.keybinds.get("which-key.toggle")?.[0]?.key).toBe("alt+k")

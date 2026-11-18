@@ -8,17 +8,25 @@ describe("detachedCommand ps1", () => {
   test("keeps caller text off the cmd command line", () => {
     const file = "C:\\tools\\revive test.ps1"
     const args = ['a" & echo hi & "b', "100%PATH%", "trailing\\"]
-    const command = detachedCommand(file, args)
+    const command = detachedCommand(file, args, {}, "win32")
     expect(command.file).toBe("cmd.exe")
     expect(command.args).toEqual(["/d", "/v:on", "/c", 'start "revive test" pwsh -NoProfile -File !OC_LAUNCH_ARGV!'])
     expect(command.options.env.OC_LAUNCH_ARGV).toBe(windowsArguments([file, ...args]))
   })
 
   test("drops cmd-active characters from the console title", () => {
-    expect(detachedCommand('C:\\tools\\a%b!c^d"e.ps1').args[3]).toStartWith('start "abcde" ')
+    expect(detachedCommand('C:\\tools\\a%b!c^d"e.ps1', [], {}, "win32").args[3]).toStartWith('start "abcde" ')
   })
 
-  test.skipIf(process.platform !== "win32")(
+  test("runs the script through pwsh directly off Windows", () => {
+    const args = ["-Flag", "$(touch x)", "; touch x"]
+    const command = detachedCommand("/tools/revive test.ps1", args, {}, "darwin")
+    expect(command.file).toBe("pwsh")
+    expect(command.args).toEqual(["-NoProfile", "-File", "/tools/revive test.ps1", ...args])
+    expect(command.options.detached).toBe(true)
+  })
+
+  test.skipIf(process.platform !== "win32" && !Bun.which("pwsh"))(
     "passes run_after_turn arguments to the script exactly without running injected commands",
     async () => {
       const directory = await fs.mkdtemp(path.join(os.tmpdir(), "oc-launch-"))
@@ -32,7 +40,11 @@ describe("detachedCommand ps1", () => {
             `Move-Item -LiteralPath '${output}.tmp' -Destination '${output}'\n`,
         )
         // Unquoted redirect target: the old `\"` quoting ran this as `type nul > <path>`.
-        const args = [`a" & type nul > ${injected} & "b`, "100%USERNAME%", "bang!USERNAME!", "C:\\dir\\", "-Flag"]
+        const windows = [`a" & type nul > ${injected} & "b`, "100%USERNAME%", "bang!USERNAME!", "C:\\dir\\", "-Flag"]
+        const args =
+          process.platform === "win32"
+            ? windows
+            : ["-Flag", ...windows, `$(touch ${injected})`, `; touch ${injected}`, `\`touch ${injected}\``]
         launchDetached(script, args)
         const deadline = Date.now() + 15_000
         while (!(await Bun.file(output).exists())) {

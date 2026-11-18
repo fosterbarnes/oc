@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { attachArgs, launcher, spawnCommand, unavailable } from "../../src/util/sessionTab"
 
 const target = { url: "http://127.0.0.1:4096/", directory: "C:\\work dir", sessionID: "ses_1" }
@@ -23,8 +24,12 @@ describe("util.sessionTab", () => {
   })
 
   test("launcher adds the entry script only under bun", () => {
-    expect(launcher("C:\\bun\\bun.exe", "C:\\src\\index.ts")).toEqual(["C:\\bun\\bun.exe", "C:\\src\\index.ts"])
-    expect(launcher("C:\\Apps\\opencode\\opencode.exe", "ignored")).toEqual(["C:\\Apps\\opencode\\opencode.exe"])
+    // Real exec paths are host paths.
+    const bun = path.join(path.sep, "bun", "bun.exe")
+    const entry = path.join(path.sep, "src", "index.ts")
+    const opencode = path.join(path.sep, "Apps", "opencode", "opencode.exe")
+    expect(launcher(bun, entry)).toEqual([bun, entry])
+    expect(launcher(opencode, "ignored")).toEqual([opencode])
   })
 
   test("spawns a tab in the current window", () => {

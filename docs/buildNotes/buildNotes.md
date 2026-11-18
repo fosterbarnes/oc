@@ -131,6 +131,38 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~02:13) - v0.2.385 palkiaSpeedrun - fix Mac test failures at the root; drop known-failures list - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed (plan `~/.config/opencode/plans/macKnownFailures.md`); 2 one-off flakes unreproduced
+- Version: 0.2.385 palkiaSpeedrun
+- Fixed `session/run-state.ts` `owned()`: per-session in-process `Semaphore` (module Map, never pruned) around flock acquire + work. Cause: Runner cancel sets Idle before old run's finalizers release flock, so in-process replacement (Esc then resend, cancel with loop queued behind `!cmd`) died `HeldElsewhereError`. Cross-process still fails at once (`timeoutMs: 0`).
+- Risk: a finalizer that waits on the session's next run would now deadlock (comment on `owned()`).
+- Fixed `effect/runner.ts` `stopShell`: `ready.await` races `Fiber.await(shell.fiber)`; a shell failing before opening `ready` hung cancel.
+- Added `SessionRunState.Interface.phase(sessionID)` (runner `_tag`, `Idle` without runner); `prompt.test.ts` "cancel interrupts loop queued behind shell" polls `ShellThenRun` instead of `sleep(50)`.
+- Added tests: `test/session/run-state.test.ts` (replacement waits; fails before fix with HeldElsewhereError), runner "cancel completes when the shell fails before opening ready" (hangs before fix).
+- Fixed `core/util/launchDetached.ts`: `.ps1` cmd.exe branch only on win32; else `pwsh -NoProfile -File <file> ...args` detached. `consoleTitle` uses `path.win32`. Real launch test now runs off Windows when pwsh exists, with POSIX payloads (`$(touch)`, `; touch`, backticks, leading `-Flag`).
+- Fixed `claude-code/startupDiagnostics.ts` `describeSpawnCwd`: no default params (explicit `undefined` pulled process-wide `getOpencodeProjectDirectory()`, order-dependent). One decision `runtimeStatus.decideSpawnCwd` -> `{ resolved, source }`; `resolveSpawnCwdFrom` returns `.resolved`. `CwdSource` moved to runtimeStatus, gains `session`.
+- Fixed `tui/dependencies.ts` `gitBash`: `path.win32` on every host.
+- Fixed tests: core pty (witness attachment + `stty -echo`; `attachCollecting` `includeReplay` option), Mac keybind expectations (`super` on darwin), cursor agentUrl stub (404 for non-ServerConfig, counts only ServerConfig), sessionTab `launcher` host paths, `startup.test.ts` parse test uses fixed `C:\state\opencode` (host tmp path + random suffix crossed the 260-char Run cap), warm-up listener `advanceTo` lockstep with loop via config-read counter (slow tick either looked like suspend gap > FIRE_ALLOWANCE_MS or left loop asleep on unadvanced TestClock; 30 ms probe repro failed 3/3 before, 10/10 pass under full CPU load after).
+- ERROR: Bun 1.4.2 applies preload `setDefaultTimeout(30000)` only to the first file of a run; `[test] timeout` in bunfig ignored. Whole-suite runs need `--timeout 30000` (`bun run test`, `.scripts/test.ps1` pass it). Corrected `AGENTS.md` Testing bullet and `test/preload.ts` comment.
+- Removed known-failures list: `docs/dev/testing.md` (section + flaky pane entry; pane rewind 15/15 on Mac per plan), `docs/dev/macos.md` pointer; `AGENTS.md` wording.
+- Unreproduced one-offs (opencode full suite): "handoff child kickoff failure is marked failed and published" (10 s poll, child never failed; 8/8 alone, 6/6 under load; kickoff dies before `owned()`, own permit), "v2 pty HttpApi > does not duplicate replay or strand close" (`POST /api/pty` 404; 6/6 under load), "Claude warm-up sender > aborts an in-flight warm-up" (120 s timeout once in a bare 5 s-default run; 3/3 alone). Fix on recurrence with the error text kept.
+- Verification: typecheck 16/16. Final: core 1079/0, tui 796/0, schema 15/0; opencode with `--timeout 30000` six runs: 0,0,1 (warm-up listener, since fixed),1 (startup, since fixed),2 (the unreproduced pair),0 fail. Each fixed test 3/3 after.
+- TODO (Windows PC, user): run `runner.test.ts`, `session/run-state.test.ts`, `prompt.test.ts`, core `launchDetached.test.ts`, `revive.test.ts`, `launcherSafety.test.ts`, `config/tui.test.ts`, `runtime.boot.test.ts`, `agentUrlInvalidate.test.ts`, `startupDiagnostics.test.ts`, `startup.test.ts`, `httpapi-warmup-listener.test.ts`, tui `dependencies`/`sessionTab`.
+
+### User
+Fixes
+- Pressing Esc and resending quickly, or cancelling while a message waits behind a `!` shell command, no longer fails with "Session is running in another oc process".
+- Cancelling a shell command that failed to start no longer hangs.
+- `run_after_turn` with a `.ps1` script now runs it through `pwsh` on macOS and Linux instead of failing.
+
+Tests
+- Fixed the Mac test failures at their cause; the docs no longer keep a list of accepted failures.
+- Whole-suite test runs need `--timeout 30000`; Bun only applies the 30-second default to the first file.
+
+---
+
 ## 2026-11-17 (~23:27) - v0.2.384 shartinMilkshake - subagent reasoning cutover on Mac and goonstation; old-name hint fix - Claude Opus 5.5, low; Imp
 
 ### Agent

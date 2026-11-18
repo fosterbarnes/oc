@@ -9,7 +9,7 @@ import { detectCliVersion } from "./cliVersion.js"
 import { log } from "./logger.js"
 import { mergeOpencodeMcp } from "./mcpBridge.js"
 import { summarizePermissionPreset, type PermissionPresetSummary } from "./permissionPresets.js"
-import { getOpencodeProjectDirectory, isUsableDirectory } from "./runtimeStatus.js"
+import { type CwdSource, decideSpawnCwd, getOpencodeProjectDirectory } from "./runtimeStatus.js"
 
 /**
  * One compact status block logged once per process, right after providers are
@@ -38,9 +38,6 @@ export interface StartupDiagnostics {
   permissionPresets: PermissionPresetSummary[]
   anthropicApiKeyInEnv: boolean
 }
-
-/** Which branch of `resolveSpawnCwd` a Claude CLI spawn would take right now. */
-export type CwdSource = "configured" | "process" | "captured" | "unresolved"
 
 export interface DiagnosticsProviderEntry {
   name?: string
@@ -109,23 +106,14 @@ export function resetOpencodeVersionProbe(): void {
 }
 
 /**
- * Mirror of `resolveSpawnCwd`'s priority order, but reporting *which* branch
- * won. `configured` means `options.cwd` pinned it, `process` is the normal
- * lazy path, `captured` means `process.cwd()` was unusable (macOS GUI launch
- * at `/`) and the captured project directory rescued it - that one is the
- * fingerprint of issue #4.
+ * `resolveSpawnCwd`'s decision, reporting *which* branch won. `configured`
+ * means `options.cwd` pinned it, `process` is the normal lazy path, `captured`
+ * means `process.cwd()` was unusable (macOS GUI launch at `/`) and the
+ * captured project directory rescued it - that one is the fingerprint of
+ * issue #4. Startup diagnostics have no session, so `session` never wins here.
  */
-export function describeSpawnCwd(
-  configured: unknown,
-  live: string = process.cwd(),
-  captured: string | undefined = getOpencodeProjectDirectory(),
-): { resolved: string; source: CwdSource } {
-  if (typeof configured === "string" && configured.length > 0) {
-    return { resolved: configured, source: "configured" }
-  }
-  if (isUsableDirectory(live)) return { resolved: live, source: "process" }
-  if (isUsableDirectory(captured)) return { resolved: captured, source: "captured" }
-  return { resolved: live, source: "unresolved" }
+export function describeSpawnCwd(configured: unknown, live: string, captured: string | undefined) {
+  return decideSpawnCwd(configured, live, captured)
 }
 
 function stringList(value: unknown): string[] {
@@ -154,7 +142,7 @@ export function collectStartupDiagnostics(
     }
   }
 
-  const cwd = describeSpawnCwd(firstOption(providers, "cwd"))
+  const cwd = describeSpawnCwd(firstOption(providers, "cwd"), process.cwd(), getOpencodeProjectDirectory())
 
   let mcpServers: string[] = []
   try {
@@ -205,11 +193,20 @@ export function accountSettingsDrift(accounts: readonly string[], pinned: unknow
     }
   })
   const keyDrift = DRIFT_KEYS.filter((key) => !pinnedKeys.includes(key.split(".")[0])).flatMap((key) => {
-    const values = parsed.map((json) => JSON.stringify(key.split(".").reduce<unknown>(
-      (value, part) => (value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined),
-      json,
-    )))
-    return new Set(values).size > 1 ? [`${key}: ${values.map((value, i) => `${accounts[i]}=${value ?? "unset"}`).join(", ")}`] : []
+    const values = parsed.map((json) =>
+      JSON.stringify(
+        key
+          .split(".")
+          .reduce<unknown>(
+            (value, part) =>
+              value && typeof value === "object" ? (value as Record<string, unknown>)[part] : undefined,
+            json,
+          ),
+      ),
+    )
+    return new Set(values).size > 1
+      ? [`${key}: ${values.map((value, i) => `${accounts[i]}=${value ?? "unset"}`).join(", ")}`]
+      : []
   })
   const memories = dirs
     .map((dir) => readText(path.join(dir, "CLAUDE.md")).replace(/\r\n/g, "\n").trim())

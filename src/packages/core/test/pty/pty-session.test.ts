@@ -65,7 +65,12 @@ const waitForEvents = (events: Queue.Queue<PtyEvent>, id: PtyID, count: number) 
     }),
   )
 
-const attachCollecting = Effect.fn("PtySessionTest.attachCollecting")(function* (id: PtyID, cursor?: number) {
+// includeReplay seeds the queue with the attach-time replay, for output already buffered before attaching.
+const attachCollecting = Effect.fn("PtySessionTest.attachCollecting")(function* (
+  id: PtyID,
+  cursor?: number,
+  options: { includeReplay?: boolean } = {},
+) {
   const pty = yield* Pty.Service
   const output = yield* Queue.unbounded<string>()
   const ended = yield* Deferred.make<{ exitCode?: number }>()
@@ -74,6 +79,7 @@ const attachCollecting = Effect.fn("PtySessionTest.attachCollecting")(function* 
     onData: (chunk) => Queue.offerUnsafe(output, chunk),
     onEnd: (event) => Deferred.doneUnsafe(ended, Effect.succeed(event)),
   })
+  if (options.includeReplay && attachment.replay) Queue.offerUnsafe(output, attachment.replay)
   attachment.activate()
   return { attachment, output, ended }
 })
@@ -162,7 +168,7 @@ describe("pty", () => {
       attached.attachment.detach()
       yield* pty.write(info.id, "AAA\n")
 
-      const verify = yield* attachCollecting(info.id)
+      const verify = yield* attachCollecting(info.id, undefined, { includeReplay: true })
       yield* waitForOutput(verify.output, "AAA")
       const leaked = yield* Queue.poll(attached.output)
       expect(leaked._tag).toBe("None")
@@ -206,37 +212,33 @@ describe("pty", () => {
   ptyTest("does not duplicate replay when data arrives before activate", () =>
     Effect.gen(function* () {
       const pty = yield* Pty.Service
-      const info = yield* createPty("cat")
+      // No tty echo, so every line appears once (from cat).
+      const info = yield* createPty("/usr/bin/env", ["sh", "-c", "stty -echo; echo READY; exec cat"])
+      const witness = yield* attachCollecting(info.id, undefined, { includeReplay: true })
+      yield* waitForOutput(witness.output, "READY")
       yield* pty.write(info.id, "AAA\n")
-      // Wait for the initial output to land in the retained buffer before attaching.
-      const probe = yield* attachCollecting(info.id)
-      yield* waitForOutput(probe.output, "AAA")
-      probe.attachment.detach()
+      yield* waitForOutput(witness.output, "AAA")
 
       const output = yield* Queue.unbounded<string>()
-      const ended = yield* Deferred.make<{ exitCode?: number }>()
       const attachment = yield* pty.attach(info.id, {
         cursor: 0,
         onData: (chunk) => Queue.offerUnsafe(output, chunk),
-        onEnd: (event) => Deferred.doneUnsafe(ended, Effect.succeed(event)),
+        onEnd: () => {},
       })
-      // Replay should contain the earlier AAA but not the later BBB.
       expect(attachment.replay).toContain("AAA")
       expect(attachment.replay).not.toContain("BBB")
-      // Data that arrives after attach but before activate must not be duplicated in replay.
+      // The witness seeing BBB proves it reached the tested subscriber before activate.
       yield* pty.write(info.id, "BBB\n")
+      yield* waitForOutput(witness.output, "BBB")
       attachment.activate()
-      expect(yield* waitForOutput(output, "BBB")).toContain("BBB")
-      // Drain any remaining chunks non-blockingly and verify BBB appeared exactly once across replay + live.
-      const pending: string[] = []
+
+      const received: string[] = []
       while (true) {
         const next = yield* Queue.poll(output)
         if (next._tag === "None") break
-        pending.push(next.value)
+        received.push(next.value)
       }
-      const combined = attachment.replay + pending.join("")
-      const bbbCount = (combined.match(/BBB/g) ?? []).length
-      expect(bbbCount).toBe(1)
+      expect(((attachment.replay + received.join("")).match(/BBB/g) ?? []).length).toBe(1)
     }),
   )
 
@@ -253,13 +255,11 @@ describe("pty", () => {
       attachment.activate()
       attachment.detach()
       yield* pty.write(info.id, "STALE\n")
-      // Give the PTY a moment to emit; detached subscriber must not receive it.
-      yield* Effect.sleep("100 millis")
+      // A fresh attachment seeing STALE proves the write landed; the detached one must still have nothing.
+      const fresh = yield* attachCollecting(info.id, undefined, { includeReplay: true })
+      yield* waitForOutput(fresh.output, "STALE")
       const leaked = yield* Queue.poll(output)
       expect(leaked._tag).toBe("None")
-      // A fresh attachment should still see the data via replay, proving the write landed but was isolated.
-      const fresh = yield* attachCollecting(info.id)
-      expect(yield* waitForOutput(fresh.output, "STALE")).toContain("STALE")
     }),
   )
 

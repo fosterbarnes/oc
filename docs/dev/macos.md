@@ -47,7 +47,3 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral.
   non-empty) brings that instance forward. Before check-in, `open -a` starts a second instance.
 - The resident server drops `WEZTERM_UNIX_SOCKET`/`WEZTERM_PANE` from its environment: it outlives the
   window that started it, and a `wezterm cli` call on a dead socket starts a stray mux server.
-
-## Known Mac test failures
-
-Listed with the other known failures in `docs/dev/testing.md`.

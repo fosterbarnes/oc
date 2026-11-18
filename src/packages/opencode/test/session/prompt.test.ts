@@ -2517,13 +2517,16 @@ unixNoLLMServer(
   "cancel interrupts loop queued behind shell",
   () =>
     Effect.gen(function* () {
-      const { prompt, chat } = yield* boot()
+      const { prompt, run, chat } = yield* boot()
 
       const sh = yield* prompt.shell({ sessionID: chat.id, agent: "build", command: "sleep 30" }).pipe(Effect.forkChild)
       yield* waitForBusy(chat.id)
 
       const loop = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-      yield* Effect.sleep(50)
+      yield* pollWithTimeout(
+        run.phase(chat.id).pipe(Effect.map((phase) => (phase === "ShellThenRun" ? true : undefined))),
+        "loop never queued behind the shell",
+      )
 
       yield* prompt.cancel(chat.id)
 

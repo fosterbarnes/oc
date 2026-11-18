@@ -32,7 +32,10 @@ export function detachedCommand(
   platform = process.platform,
 ): DetachedCommand {
   const options = { detached: true, stdio: "ignore", windowsHide: true, cwd: input.cwd, env: { ...input.env } } as const
-  if (file.toLowerCase().endsWith(".ps1")) {
+  const script = file.toLowerCase().endsWith(".ps1")
+  // Off Windows there is no console to open and argv passes through unparsed: pwsh runs the script directly.
+  if (script && platform !== "win32") return { file: "pwsh", args: ["-NoProfile", "-File", file, ...args], options }
+  if (script) {
     return {
       file: "cmd.exe",
       args: ["/d", "/v:on", "/c", `start "${consoleTitle(file)}" pwsh -NoProfile -File !OC_LAUNCH_ARGV!`],
@@ -79,7 +82,7 @@ export function windowsArguments(args: readonly string[]) {
 // argv splitting. The title stays literal (`start` reads its first quoted argument as the title),
 // minus characters cmd would act on.
 function consoleTitle(file: string) {
-  return path.basename(file, path.extname(file)).replace(/["%!^]/g, "")
+  return path.win32.basename(file, path.win32.extname(file)).replace(/["%!^]/g, "")
 }
 
 export * as LaunchDetached from "./launchDetached"

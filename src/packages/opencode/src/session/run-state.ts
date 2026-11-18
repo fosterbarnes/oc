@@ -3,7 +3,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
-import { Deferred, Effect, Exit, Fiber, Latch, Layer, Scope, Context } from "effect"
+import { Deferred, Effect, Exit, Fiber, Latch, Layer, Scope, Semaphore, Context } from "effect"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
@@ -25,6 +25,8 @@ export interface Interface {
   /** Waits out maintenance holding the session; a running turn is not waited on here (new turns coalesce). */
   readonly available: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID, options?: CancelOptions) => Effect.Effect<void>
+  /** The session runner's state tag; `Idle` when it has no runner. */
+  readonly phase: (sessionID: SessionID) => Effect.Effect<Runner.State<SessionV1.WithParts, never>["_tag"]>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
@@ -192,6 +194,8 @@ const layer = Layer.effect(
       completion,
       maintenance,
       cancel,
+      phase: (sessionID) =>
+        InstanceState.get(state).pipe(Effect.map((data) => data.runners.get(sessionID)?.state._tag ?? "Idle")),
       ensureRunning,
       startShell,
       cancellation: (sessionID) => Effect.sync(() => cancellations.get(sessionID) ?? 0),
@@ -241,19 +245,29 @@ export class HeldElsewhereError extends Error {
   override readonly name = "HeldElsewhereError"
 }
 
+// One permit per session touched in this process, never pruned (same keyed-lock pattern as snapshot/index.ts).
+const local = new Map<SessionID, Semaphore.Semaphore>()
+
 // Cross-process guard so the resident server and a native `opencode` window never drive the same session at once.
 // Held only while work runs; a crashed holder goes stale once its heartbeat stops.
+// The in-process permit makes a replacement run (cancel then resend) wait for the cancelled run's finalizers to
+// release the flock instead of failing as if another process held it. A finalizer that waits on the session's
+// next run would deadlock here.
 function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
-  return Effect.acquireRelease(
-    Effect.tryPromise({
-      try: (signal) => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, signal }),
-      catch: (cause) =>
-        cause instanceof Flock.ContentionError
-          ? new HeldElsewhereError("Session is running in another oc process", { cause })
-          : cause,
-    }).pipe(Effect.orDie),
-    (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
-  ).pipe(Effect.andThen(work), Effect.scoped)
+  const permit = local.get(sessionID) ?? Semaphore.makeUnsafe(1)
+  local.set(sessionID, permit)
+  return permit.withPermits(1)(
+    Effect.acquireRelease(
+      Effect.tryPromise({
+        try: (signal) => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, signal }),
+        catch: (cause) =>
+          cause instanceof Flock.ContentionError
+            ? new HeldElsewhereError("Session is running in another oc process", { cause })
+            : cause,
+      }).pipe(Effect.orDie),
+      (lock) => Effect.promise(() => lock.release().catch(() => undefined)),
+    ).pipe(Effect.andThen(work), Effect.scoped),
+  )
 }
 
 function busyError(sessionID: SessionID) {
