@@ -42,6 +42,7 @@ export const Info = Schema.Struct({
   subtask: Schema.optional(Schema.Boolean),
   whenBlank: Schema.optional(Schema.Literals(["ask", "send"])),
   hints: Schema.Array(Schema.String),
+  aliases: Schema.optional(Schema.Array(Schema.String)),
 }).annotate({ identifier: "Command" })
 
 // Turn rules and suggestion eligibility stay server-side, outside `GET /command`.
@@ -159,6 +160,7 @@ const layer = Layer.effect(
           permission: command.permission,
           toolHost: command.toolHost,
           pushSession: command.pushSession,
+          aliases: command.aliases,
           whenBlank: command.whenBlank ?? "ask",
           suggest: command.suggest ?? false,
           hints: hints(command.template),

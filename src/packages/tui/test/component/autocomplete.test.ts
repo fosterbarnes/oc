@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test"
-import { orderSlashFavorites, withExactSlashFirst } from "../../src/component/prompt/autocomplete"
+import {
+  MAX_SLASH_PICKS,
+  orderSlashFavorites,
+  rememberSlashPick,
+  rankSlashOptions,
+} from "../../src/component/prompt/autocomplete"
 
 test("slash favorites preserve alphabetical source order without duplicates or display-based identity", () => {
   const options = [
@@ -27,8 +32,40 @@ test("slash exact name or alias match ranks first", () => {
   const thinking = { display: "/thinking:(oc)  " }
   const think = { display: "/think:(command)  " }
   const compact = { display: "/compact:(oc)  ", aliases: ["/summarize"] }
-  expect(withExactSlashFirst([thinking, think], [compact, think, thinking], "think")).toEqual([think, thinking])
-  expect(withExactSlashFirst([thinking], [compact, think, thinking], "think")).toEqual([think, thinking])
-  expect(withExactSlashFirst([thinking], [compact, thinking], "summarize")).toEqual([compact, thinking])
-  expect(withExactSlashFirst([thinking, think], [think, thinking], "thin")).toEqual([thinking, think])
+  expect(rankSlashOptions([thinking, think], [compact, think, thinking], "think")).toEqual([think, thinking])
+  expect(rankSlashOptions([thinking], [compact, think, thinking], "think")).toEqual([think, thinking])
+  expect(rankSlashOptions([thinking], [compact, thinking], "summarize")).toEqual([compact, thinking])
+  expect(rankSlashOptions([thinking, think], [think, thinking], "thin")).toEqual([thinking, think])
+})
+
+test("slash name beats another command's alias, then the remembered pick, then fuzzy order", () => {
+  const push = { display: "/push:(command)  " }
+  const agentPush = { favoriteKey: "command:agent-push", display: "/agent-push:(command)  ", aliases: ["/push"] }
+  const autoDelete = { favoriteKey: "tui:auto", display: "/pushAutoDelete:(oc)  " }
+  expect(rankSlashOptions([autoDelete, agentPush], [agentPush, autoDelete], "push")).toEqual([agentPush, autoDelete])
+  expect(rankSlashOptions([autoDelete, agentPush, push], [agentPush, push, autoDelete], "push")).toEqual([
+    push,
+    autoDelete,
+    agentPush,
+  ])
+
+  const redo = { favoriteKey: "tui:redo", display: "/redo:(oc)  " }
+  const revive = { favoriteKey: "tui:revive", display: "/revive:(oc)  " }
+  expect(rankSlashOptions([redo, revive], [redo, revive], "re", "tui:revive")).toEqual([revive, redo])
+  // A pick that no longer matches (or no longer exists) is ignored.
+  expect(rankSlashOptions([redo], [redo, revive], "re", "tui:revive")).toEqual([redo])
+  expect(rankSlashOptions([redo, revive], [redo, revive], "re", "tui:gone")).toEqual([redo, revive])
+  // Exact match and pick both lead, without duplicates.
+  expect(rankSlashOptions([revive, redo], [redo, revive], "redo", "tui:revive")).toEqual([redo, revive])
+  expect(rankSlashOptions([redo, revive], [redo, revive], "redo", "tui:redo")).toEqual([redo, revive])
+})
+
+test("slash picks keep the newest entry per query and cap the store", () => {
+  expect(rememberSlashPick({ re: "a", pu: "b" }, "re", "c")).toEqual({ pu: "b", re: "c" })
+  expect(Object.keys(rememberSlashPick({ re: "a", pu: "b" }, "re", "c"))).toEqual(["pu", "re"])
+  const full = Object.fromEntries(Array.from({ length: MAX_SLASH_PICKS }, (_, i) => [`q${i}`, "k"]))
+  const next = rememberSlashPick(full, "new", "k")
+  expect(Object.keys(next).length).toBe(MAX_SLASH_PICKS)
+  expect(next.q0).toBeUndefined()
+  expect(next.new).toBe("k")
 })

@@ -111,7 +111,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
     // Fields picked by name: spreading would read each `template` getter, which fetches MCP prompts and
     // sends every skill body (the slash menu refreshes this list each time it opens).
     const getCommand = Effect.fn("InstanceHttpApi.command")(function* () {
-      return (yield* command.list()).map(({ name, description, agent, model, source, subtask, hints }) => ({
+      return (yield* command.list()).map(({ name, description, agent, model, source, subtask, hints, aliases }) => ({
         name,
         description,
         agent,
@@ -119,6 +119,7 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
         source,
         subtask,
         hints,
+        aliases,
       }))
     })
 

@@ -24374,6 +24374,12 @@
                 },
                 "pushSession": {
                   "type": "boolean"
+                },
+                "aliases": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               },
               "required": ["template"],
@@ -25973,6 +25979,12 @@
             "enum": ["ask", "send"]
           },
           "hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "aliases": {
             "type": "array",
             "items": {
               "type": "string"

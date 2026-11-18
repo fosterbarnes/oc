@@ -131,6 +131,27 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~19:11) - v0.2.378 layneCleo - Slash menu keeps your pick and supports command aliases - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (/imp from plan `~/.config/opencode/plans/slashMenuRanking.md`); completed
+- Version: 0.2.378 layneCleo
+- Added `aliases` to command frontmatter (`core/src/v1/config/command.ts`, `Schema.mutable` array: a readonly array failed `config.ts:887` typecheck), `Command.Info`, the `GET /command` field pick (`handlers/instance.ts`), and regenerated SDK `types.gen.ts`. `openapi.json` left for prePush.
+- Changed `withExactSlashFirst`, renamed `rankSlashOptions` (`tui/.../prompt/autocomplete.tsx`): exact name, then exact alias (name now beats another command's alias), then the row last picked for this query if still in the fuzzy results, then fuzzy order.
+- Added per-query pick memory in kv `slash.picks` (query -> favoriteKey), recorded in `select()`, capped at 200 via `rememberSlashPick`.
+- Fixed highlight jumping: when `options()` changes under an unchanged query, the selection follows the same item (`anchor` effect pair); query changes still reset to row 0.
+- Added `aliases: [push]` to `~/.opencode/commands/agent-push.md` and `~/.claude/skills/agent-push/SKILL.md`. They are separate copies, not a symlink as the file comment claims.
+- Skipped ranking tiers and an Enter debounce (plan "Not doing").
+- Verification: `bun test test/component/autocomplete.test.ts` 4 pass (new alias/pick/cap cases); tui, opencode, core `tsgo --noEmit` clean; opencode command + config tests 129 pass; loader probe on `~/.opencode` returned `agent-push` aliases `["push"]`. Sticky-highlight effect not run in a live TUI.
+
+### User
+Slash menu
+- Typing `/push` now puts `/agent-push` first, because commands can declare `aliases:` in their frontmatter.
+- The menu remembers what you picked for the text you typed, so `/re` keeps offering `/revive` even after an undo makes `/redo` appear.
+- The highlighted entry no longer silently changes to a different command while the menu updates.
+
+---
+
 ## 2026-11-17 (~18:59) - v0.2.377 wutangRapped - Slash menu no longer waits on MCP servers after launch - Claude Opus 5.5, low; Debug + Implementation
 
 ### Agent

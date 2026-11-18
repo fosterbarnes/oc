@@ -3,7 +3,18 @@ import { pathToFileURL } from "bun"
 import fuzzysort from "fuzzysort"
 import path from "path"
 import { firstBy } from "remeda"
-import { createMemo, createResource, createEffect, onMount, onCleanup, Index, Show, createSignal } from "solid-js"
+import {
+  createMemo,
+  createResource,
+  createEffect,
+  onMount,
+  onCleanup,
+  Index,
+  Show,
+  createSignal,
+  on,
+  untrack,
+} from "solid-js"
 import { createStore } from "solid-js/store"
 import { useEditorContext } from "../../context/editor"
 import { useProject } from "../../context/project"
@@ -120,6 +131,8 @@ export function Autocomplete(props: {
   const kv = useKV()
   const favorites = createMemo<string[]>(() => kv.get("slash.favorites", []))
   const favoriteKeys = createMemo(() => new Set(favorites()))
+  // Last slash row picked per typed query, so the same text keeps offering the same command.
+  const slashPicks = createMemo<Record<string, string>>(() => kv.get("slash.picks", {}))
   const favoriteShortcut = useCommandShortcut("prompt.autocomplete.favorite")
   const [store, setStore] = createStore({
     index: 0,
@@ -511,6 +524,7 @@ export function Autocomplete(props: {
         favoriteKey: `${serverCommand.source ?? "command"}:${serverCommand.name}`,
         display: "/" + serverCommand.name + label,
         description: serverCommand.description,
+        aliases: serverCommand.aliases?.map((alias) => "/" + alias),
         kind: serverCommand.source,
         onSelect: () => insertSlash(serverCommand.name),
       })
@@ -575,13 +589,34 @@ export function Autocomplete(props: {
       })
       .map((arr) => arr.obj)
 
-    if (store.visible === "/") return withExactSlashFirst(fuzziedNonFiles, nonFileOptions, searchValue)
+    if (store.visible === "/")
+      return rankSlashOptions(fuzziedNonFiles, nonFileOptions, searchValue, slashPicks()[searchValue])
     return [...fuzziedNonFiles, ...fileOptions].slice(0, 10)
   })
 
   createEffect(() => {
     filter()
     setStore("selected", 0)
+  })
+
+  // When rows change under an unchanged query (late command sync, /redo enabling), keep the
+  // highlight on the same command instead of the same row. Runs before the anchor effect below.
+  let anchor: { query: string; key: string } | undefined
+  createEffect(
+    on(
+      options,
+      (list) => {
+        if (!anchor || anchor.query !== untrack(search)) return
+        const key = anchor.key
+        const index = list.findIndex((option) => optionKey(option) === key)
+        if (index !== -1 && index !== untrack(() => store.selected)) moveTo(index)
+      },
+      { defer: true },
+    ),
+  )
+  createEffect(() => {
+    const option = options()[store.selected]
+    anchor = option && { query: untrack(search), key: optionKey(option) }
   })
 
   function move(direction: -1 | 1) {
@@ -617,6 +652,9 @@ export function Autocomplete(props: {
   function select() {
     const selected = options()[store.selected]
     if (!selected) return
+    const query = search()
+    if (store.visible === "/" && query && selected.favoriteKey && slashPicks()[query] !== selected.favoriteKey)
+      kv.set("slash.picks", rememberSlashPick(slashPicks(), query, selected.favoriteKey))
     // Native actions consume their trigger; prompt commands and mentions replace it themselves.
     if (selected.kind === "tui" && !selected.inserts) hide()
     else setStore("visible", false)
@@ -919,12 +957,32 @@ export function orderSlashFavorites(options: AutocompleteOption[], favorites: Re
   ]
 }
 
-// Fuzzy ranking can put a longer name above the one typed in full (/thinking over /think).
-export function withExactSlashFirst(ranked: AutocompleteOption[], all: AutocompleteOption[], search: string) {
+function optionKey(option: AutocompleteOption) {
+  return option.favoriteKey ?? option.display.trimEnd()
+}
+
+export const MAX_SLASH_PICKS = 200
+
+// Newest last; re-picking moves a query to the end so the oldest drop off first.
+export function rememberSlashPick(picks: Record<string, string>, query: string, key: string) {
+  const { [query]: _, ...rest } = picks
+  return Object.fromEntries([...Object.entries(rest), [query, key]].slice(-MAX_SLASH_PICKS))
+}
+
+// Fuzzy ranking can put a longer name above the one typed in full (/thinking over /think), and
+// shifts as rows come and go (/redo only exists after an undo). Order: exact name, exact alias,
+// the row last picked for this query (if it still matches), then fuzzy order.
+export function rankSlashOptions(
+  ranked: AutocompleteOption[],
+  all: AutocompleteOption[],
+  search: string,
+  pickedKey?: string,
+) {
   const typed = `/${search}`
-  const exact = all.find(
-    (option) => option.display.trimEnd().replace(/:\([^)]*\)$/, "") === typed || option.aliases?.includes(typed),
-  )
-  if (!exact) return ranked.slice(0, 10)
-  return [exact, ...ranked.filter((option) => option !== exact)].slice(0, 10)
+  const exact =
+    all.find((option) => option.display.trimEnd().replace(/:\([^)]*\)$/, "") === typed) ??
+    all.find((option) => option.aliases?.includes(typed))
+  const picked = pickedKey && ranked.find((option) => option.favoriteKey === pickedKey)
+  const first = [...new Set([exact, picked])].filter((option): option is AutocompleteOption => !!option)
+  return [...first, ...ranked.filter((option) => !first.includes(option))].slice(0, 10)
 }

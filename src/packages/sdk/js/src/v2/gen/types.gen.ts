@@ -2014,6 +2014,7 @@ export type Config = {
         [key: string]: "auto" | "oc" | "harness"
       }
       pushSession?: boolean
+      aliases?: Array<string>
     }
   }
   command_palette?: {
@@ -2546,6 +2547,7 @@ export type Command = {
   subtask?: boolean
   whenBlank?: "ask" | "send"
   hints: Array<string>
+  aliases?: Array<string>
 }
 
 export type Agent = {
