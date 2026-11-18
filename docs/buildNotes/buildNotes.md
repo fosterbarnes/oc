@@ -131,6 +131,27 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-17 (~19:23) - v0.2.379 outcheaWhispering - Push auto-delete decided by oc, not the agent - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (from /debug + /think plan `~/.config/opencode/plans/2026-11-17-push-autodelete-cleanup.md`); completed
+- Version: 0.2.379 outcheaWhispering
+- Why: oc.db history showed 21 of 22 `session_complete({ autoDelete: true })` calls refused (push run mid-session), 15 refusals echoed into push reports, 5 sessions deliberating over the flag (notes: `~/.config/opencode/plans/2026-11-17-debug-push-autodelete-noise.md`).
+- Removed the `autoDelete` parameter from `session_complete` (`opencode/src/tool/sessionComplete.ts`, `Parameters = Schema.Struct({})`). Stale callers passing it still decode (probe: Struct({}) accepts `{ autoDelete: true }`) and it is ignored.
+- Changed: in a push session (`ocPushSession`) every completion writes `ocAutoDelete = pushed && prompts === 1` (HEAD matches `@{u}`, and `isRealUserMessage` count is 1). Writing false also fixes a stale flag: before, a pushed session prompted again and re-completed kept `ocAutoDelete: true` and could be deleted with new work. Non-push sessions skip git, message read, and metadata write.
+- Tool output is always `Marked the current session complete.`; both "Not marked for auto-delete" strings removed. Push wording removed from `tool/session-complete.txt`.
+- Updated flag comment in `tui/src/pushAutoDelete.ts`; `isAutoDeletable` logic unchanged (keeps the `ocPushSession` re-check for older flags).
+- Outside repo: agent-push line 34 in `~/.opencode/commands/agent-push.md` and `~/.claude/skills/agent-push/SKILL.md` now says just "call `session_complete`"; wiki `Sessions.md` auto-delete sentence names the only-prompt rule (wiki not pushed).
+- Verification: `bun test test/tool/task.test.ts` 45 pass 0 fail (new test "a push session auto-deletes only after a verified push with no later prompt": not pushed false, pushed true, re-prompted false, non-push undefined); `bun run typecheck` clean in opencode and tui; `rg autoDelete` leaves only `pushAutoDelete` names.
+- Not done: `prompt.ts`/`command.ts` comments left as is (still accurate). Live TUI deletion check not run.
+
+### User
+Sessions
+- Ending a push no longer adds a "not set to auto-delete" line to the agent's report; oc decides auto-delete on its own.
+- A pushed session you keep working in is no longer auto-deleted after the agent finishes the later work.
+
+---
+
 ## 2026-11-17 (~19:11) - v0.2.378 layneCleo - Slash menu keeps your pick and supports command aliases - Claude Opus 5.5, low; Implementation
 
 ### Agent

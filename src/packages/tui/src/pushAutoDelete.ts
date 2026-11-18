@@ -14,8 +14,9 @@ import { errorMessage } from "./util/error"
 
 // Saved under its original key so an existing on/off choice carries over.
 const _KV_KEY = "agent_push_auto_delete"
-// Set by session_complete with autoDelete after a verified push (`AUTO_DELETE_KEY` in
-// opencode/src/tool/sessionComplete.ts). A later prompt clears sessionComplete, which keeps the session.
+// Written by session_complete in a push session: true after a verified push while the push command is
+// still the only prompt (`AUTO_DELETE_KEY` in opencode/src/tool/sessionComplete.ts). A later prompt
+// clears sessionComplete, and a later completion writes false, so a reused session is kept.
 const _FLAG = "ocAutoDelete"
 // Set only when a push command (frontmatter `pushSession: true`) opened the session (`PUSH_SESSION_KEY`),
 // so a push run mid-work never deletes, including sessions flagged before that rule existed.

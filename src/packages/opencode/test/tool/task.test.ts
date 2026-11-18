@@ -360,11 +360,30 @@ describe("tool.task", () => {
   )
 
   it.instance(
-    "autoDelete flags a session opened by a push command only after a verified push",
+    "a push session auto-deletes only after a verified push with no later prompt",
     () =>
       Effect.gen(function* () {
         const sessions = yield* Session.Service
         const { chat, assistant } = yield* seed()
+        // A real prompt: the push command that opened the session, then any later one.
+        const prompt = Effect.gen(function* () {
+          const user = yield* sessions.updateMessage({
+            id: MessageID.ascending(),
+            role: "user",
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            time: { created: Date.now() },
+          })
+          yield* sessions.updatePart({
+            id: PartID.ascending(),
+            sessionID: chat.id,
+            messageID: user.id,
+            type: "text",
+            text: "push",
+          })
+        })
+        yield* prompt
         yield* sessions.setMetadata({ sessionID: chat.id, metadata: { [PUSH_SESSION_KEY]: true } })
         const def = yield* (yield* SessionCompleteTool).init()
         const git = (...args: string[]) => {
@@ -374,7 +393,7 @@ describe("tool.task", () => {
         const complete = Effect.gen(function* () {
           yield* sessions.setSessionComplete({ sessionID: chat.id, sessionComplete: false })
           const result = yield* def.execute(
-            { autoDelete: true },
+            {},
             {
               sessionID: chat.id,
               messageID: assistant.id,
@@ -387,24 +406,21 @@ describe("tool.task", () => {
           )
           return { output: result.output, flag: (yield* sessions.get(chat.id)).metadata?.[AUTO_DELETE_KEY] }
         })
+        const output = "Marked the current session complete."
 
-        // No upstream: not pushed, so no flag, and the agent is told why.
-        expect(yield* complete).toEqual({
-          output: "Marked the current session complete. Not marked for auto-delete: HEAD does not match its upstream.",
-          flag: undefined,
-        })
+        // No upstream: not pushed, so no flag, and the reply never mentions auto-delete.
+        expect(yield* complete).toEqual({ output, flag: false })
         git("init", "--bare", "-q", "remote.git")
         git("remote", "add", "origin", "remote.git")
         git("push", "-q", "-u", "origin", "HEAD")
-        expect(yield* complete).toEqual({ output: "Marked the current session complete.", flag: true })
+        expect(yield* complete).toEqual({ output, flag: true })
         expect((yield* sessions.get(chat.id)).title).toBe(chat.title)
-        // Pushed, but the push command ran mid-session: the session and its history stay.
+        // Prompted again after the push: a later completion clears the flag, so the session stays.
+        yield* prompt
+        expect(yield* complete).toEqual({ output, flag: false })
+        // Pushed, but the push command ran mid-session: no flag is written.
         yield* sessions.setMetadata({ sessionID: chat.id, metadata: {} })
-        expect(yield* complete).toEqual({
-          output:
-            "Marked the current session complete. Not marked for auto-delete: the session did not start with a push command.",
-          flag: undefined,
-        })
+        expect(yield* complete).toEqual({ output, flag: undefined })
       }),
     { git: true },
   )
