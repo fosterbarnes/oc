@@ -366,6 +366,13 @@ export function getClaudeUserMessage(
 
   if (resume) content.unshift({ type: "text", text: resumeBlock(prompt, resume.sessionID, resume.progress) })
 
+  // Claude reads adjacent blocks with no separator: "Working directory initialized: /a/oc" then "test"
+  // arrived as the path "/a/octest". End each text block that has a block after it with a line break.
+  for (let i = 0; i < content.length - 1; i++) {
+    const block = content[i]
+    if (block.type === "text" && !/\s$/.test(block.text)) block.text += "\n\n"
+  }
+
   return JSON.stringify({
     type: "user",
     message: {

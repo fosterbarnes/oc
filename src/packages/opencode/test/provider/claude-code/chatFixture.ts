@@ -70,8 +70,8 @@ export const openChat = Effect.fnUntraced(function* (
 })
 
 // oc config for a Claude chat: the user's `proxyTools` and opt-in `todos` (see `openChat`).
-// `turnStats` adds the CLI's cumulative cost footer to each reply; oc's own cost is priced
-// from the turn's last API call only.
+// `turnStats` adds the CLI's cumulative cost footer to each reply; oc's own cost is the difference
+// between those totals (`turnCostFromTotal`), or the last API call's tokens when it is unknown.
 export function chatConfig(llmUrl: string, options: { turnStats?: boolean } = {}) {
   const config = testProviderConfig(llmUrl)
   return {

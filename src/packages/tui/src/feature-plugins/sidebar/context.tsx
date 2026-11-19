@@ -3,15 +3,11 @@ import type { BuiltinTuiPlugin } from "../builtins"
 import { createMemo, Show } from "solid-js"
 import { lastAssistantWithUsage } from "../../util/contextUsage"
 import { sessionCost } from "../../util/session"
+import { formatUsd } from "../../util/format"
 import { sectionOpen } from "./open"
 import { SidebarToggle } from "./toggle"
 
 const id = "internal:sidebar-context"
-
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
 
 function View(props: { api: TuiPluginApi; session_id: string }) {
   const [open, setOpen] = sectionOpen(props.api, "context", true)
@@ -48,7 +44,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
         <text fg={theme().text} selectable={false}>
           <b>Context</b>
           <Show when={!open()}>
-            <span style={{ fg: theme().textMuted }}>{` (${state().percent ?? 0}% used, ${money.format(cost())})`}</span>
+            <span style={{ fg: theme().textMuted }}>{` (${state().percent ?? 0}% used, ${formatUsd(cost())})`}</span>
           </Show>
         </text>
       </box>
@@ -58,7 +54,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
           <text fg={theme().textMuted}>{`${state().visible?.toLocaleString()} visible (estimate)`}</text>
         ) : null}
         <text fg={theme().textMuted}>{`${state().percent ?? 0}% used`}</text>
-        <text fg={theme().textMuted}>{money.format(cost())} spent</text>
+        <text fg={theme().textMuted}>{formatUsd(cost())} spent</text>
       </Show>
     </box>
   )

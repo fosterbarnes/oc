@@ -58,7 +58,7 @@ import { Locale } from "../../util/locale"
 import { contextUsage } from "../../util/contextUsage"
 import { formatSubagentUsage, numberDuplicateLabels, sessionCost, subagentLabel } from "../../util/session"
 import { errorMessage } from "../../util/error"
-import { formatDuration } from "../../util/format"
+import { formatDuration, formatUsd } from "../../util/format"
 import { createColors, createFrames } from "../../ui/spinner"
 import { useDialog } from "../../ui/dialog"
 import { DialogProvider as DialogProviderConnect } from "../dialog-provider"
@@ -122,11 +122,6 @@ export type PromptRef = {
   focus(): void
   submit(): void
 }
-
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-})
 
 const DRAFT_RETENTION_MIN_CHARS = 20
 // Prompts remount per route; the agent/model fade-in plays once per local context, not per session.
@@ -374,7 +369,7 @@ export function Prompt(props: PromptProps) {
         context.percent === undefined
           ? Locale.number(context.tokens)
           : `${Locale.number(context.tokens)} (${context.percent}%)`,
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: cost > 0 ? formatUsd(cost) : undefined,
     }
   })
 

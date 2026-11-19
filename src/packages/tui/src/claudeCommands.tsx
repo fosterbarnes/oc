@@ -62,13 +62,27 @@ export function createClaudeAccountCommands() {
     category: "oc",
     group: "Claude",
     run: async () => {
-      const all = await sdk.claudeAccount.state().catch((error) => {
+      const accounts = await sdk.claudeAccount.state().catch((error) => {
         toast.error(error)
         return undefined
       })
-      if (!all) return
-      // API credits are per session or agent only, never the global account.
-      const accounts = all.filter((account) => account.kind !== "api")
+      if (!accounts) return
+      const pick = async (account: (typeof accounts)[number]) => {
+        // A global API pick bills every unpinned chat: confirm it.
+        if (
+          account.kind === "api" &&
+          !(await DialogConfirm.show(
+            dialog,
+            "Use API credits for every chat?",
+            `Every new or unpinned Claude chat will bill ${account.label} API credits until you switch back.`,
+          ))
+        )
+          return
+        await sdk.claudeAccount
+          .set(account.id)
+          .then(() => toast.show({ message: `Claude account: ${account.label}`, variant: "info" }))
+          .catch(toast.error)
+      }
       dialog.replace(() => (
         <DialogSelect
           title="Switch Claude account (busy sessions switch after their running work)"
@@ -78,12 +92,8 @@ export function createClaudeAccountCommands() {
             description: accountDescription(account),
             value: account.id,
             onSelect: () => {
-              if (!account.current)
-                void sdk.claudeAccount
-                  .set(account.id)
-                  .then(() => toast.show({ message: `Claude account: ${account.label}`, variant: "info" }))
-                  .catch(toast.error)
               dialog.clear()
+              if (!account.current) void pick(account)
             },
           }))}
         />
@@ -476,9 +486,9 @@ export function createClaudeAccountCommands() {
     },
   }
 
-  // Reactive: global switch and failover entries appear only with 2+ configured accounts; the session
-  // one with 2+ profiles counting API credits, in a session or on Home (for the next session); the
-  // rollover one only with an `apiAccount`.
+  // Reactive: the failover entry appears only with 2+ configured accounts; the global switch with 2+
+  // profiles counting API credits; the session one likewise, in a session or on Home (for the next
+  // session); the rollover one only with an `apiAccount`.
   return () => {
     const options = sync.data.config.provider?.["claude-code"]?.options
     const logins = (options?.accounts as unknown[] | undefined)?.length ?? 0
@@ -486,7 +496,7 @@ export function createClaudeAccountCommands() {
     const profiles = Math.max(logins, 1) + (options?.apiAccount ? 1 : 0)
     return [
       manageAccounts,
-      ...(multi ? [switchAccount] : []),
+      ...(profiles > 1 ? [switchAccount] : []),
       ...(profiles > 1 && (route.data.type === "session" || route.data.type === "home") ? [switchSessionAccount] : []),
       ...(multi ? [failover] : []),
       ...(options?.apiAccount ? [apiRollover] : []),

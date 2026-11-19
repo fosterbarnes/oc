@@ -56,6 +56,29 @@ export function extractTurnStats(msg: ClaudeStreamMessage): TurnStats {
   return stats
 }
 
+/** Claude session id -> the last `total_cost_usd` its CLI reported. */
+const reportedTotals = new Map<string, number>()
+
+/**
+ * One turn's cost from the CLI's running total, which covers the whole Claude conversation: it grows
+ * turn by turn in one process and is restored on `--resume` (probed 2026-11-18: 0.0037, 0.0053, then
+ * 0.0055 after a resume). Undefined when the earlier total is unknown (a conversation resumed before
+ * this oc run saw it), so the caller keeps its token estimate instead of billing the whole history.
+ * A turn that ended without a `result` (preempted, denied, crashed) lands in the next difference.
+ */
+export function turnCostFromTotal(
+  claudeSessionId: string | undefined,
+  total: number | undefined,
+  resumed: boolean,
+): number | undefined {
+  if (!claudeSessionId || typeof total !== "number" || !Number.isFinite(total) || total < 0) return undefined
+  const previous = reportedTotals.get(claudeSessionId) ?? (resumed ? undefined : 0)
+  reportedTotals.set(claudeSessionId, total)
+  if (previous === undefined) return undefined
+  // A lower total means a conversation that started over: the whole total is this turn's.
+  return total >= previous ? total - previous : total
+}
+
 /** Dollars, at the precision the number actually carries information at. */
 export function formatCost(costUsd: number): string {
   if (!Number.isFinite(costUsd) || costUsd < 0) return "$0.00"

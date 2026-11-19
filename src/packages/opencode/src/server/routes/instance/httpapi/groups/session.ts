@@ -156,7 +156,7 @@ export const ClaudeAccount = Schema.Struct({
   current: Schema.Boolean,
   pinned: Schema.optional(Schema.Boolean),
   limitedUntil: Schema.optional(Schema.Number),
-  /** The API-credit profile: pickable per session or agent, never as the global account. */
+  /** The API-credit profile: bills API credits wherever it is picked (global, session, agent). */
   kind: Schema.optional(Schema.Literal("api")),
 })
 export const ClaudeAccounts = Schema.Struct({ accounts: Schema.Array(ClaudeAccount) })

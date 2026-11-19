@@ -385,3 +385,15 @@ test("stripping switches itself off as soon as compress is reachable", () => {
   )
   assert.equal(shouldStripContextReminders({ enabled: true, proxyTools: ["Task", "Bash"] }), true)
 })
+
+test("adjacent text blocks are separated so the CLI cannot glue them together", () => {
+  const out = parsed(
+    p([
+      { role: "user", content: [{ type: "text", text: "Working directory initialized: /a/oc" }] },
+      { role: "user", content: [{ type: "text", text: "test" }] },
+    ]),
+  )
+  const texts = out.message.content.map((b: any) => b.text)
+  assert.deepEqual(texts, ["Working directory initialized: /a/oc\n\n", "test"])
+  assert.doesNotMatch(texts.join(""), /\/a\/octest/)
+})

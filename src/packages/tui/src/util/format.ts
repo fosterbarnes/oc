@@ -18,3 +18,17 @@ export function formatDuration(secs: number) {
   const weeks = Math.floor(secs / 604800)
   return weeks === 1 ? "~1 week" : `~${weeks} weeks`
 }
+
+const usd2 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+const usd4 = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+})
+
+/** Dollars; under $1 up to 4 decimals, since a cheap turn costs fractions of a cent ($0.0044, not $0.00). */
+export function formatUsd(amount: number) {
+  if (!Number.isFinite(amount) || amount <= 0) return usd2.format(0)
+  return (amount < 1 ? usd4 : usd2).format(amount)
+}

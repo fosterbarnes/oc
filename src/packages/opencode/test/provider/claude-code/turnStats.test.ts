@@ -17,6 +17,7 @@ import {
   formatTokens,
   formatTurnStatsBlock,
   formatTurnStatsLine,
+  turnCostFromTotal,
   turnStatsLogPayload,
 } from "@/provider/claude-code/turnStats.js"
 import type { ClaudeStreamMessage } from "@/provider/claude-code/types.js"
@@ -119,4 +120,18 @@ test("the log payload is emitted whether or not the footer is", () => {
 test("turnStats is off unless the provider option asks for it", () => {
   assert.equal((createClaudeCode({})("claude-sonnet-5") as any).config.turnStats, false)
   assert.equal((createClaudeCode({ turnStats: true })("claude-sonnet-5") as any).config.turnStats, true)
+})
+
+test("turnCostFromTotal: per-turn cost from the CLI's conversation-wide running total", () => {
+  // Totals measured from a real CLI: two turns in one process, then a resume.
+  assert.equal(turnCostFromTotal("fresh", 0.0037, false), 0.0037)
+  assert.ok(Math.abs(turnCostFromTotal("fresh", 0.0053, false)! - 0.0016) < 1e-12)
+  assert.ok(Math.abs(turnCostFromTotal("fresh", 0.0055, true)! - 0.0002) < 1e-12)
+  // Resumed before this run saw it: unknown, so no history lands on one turn; the next one is known.
+  assert.equal(turnCostFromTotal("old", 3.88, true), undefined)
+  assert.ok(Math.abs(turnCostFromTotal("old", 3.9, true)! - 0.02) < 1e-12)
+  // A total that went down started over.
+  assert.equal(turnCostFromTotal("fresh", 0.001, true), 0.001)
+  assert.equal(turnCostFromTotal(undefined, 0.1, false), undefined)
+  assert.equal(turnCostFromTotal("x", Number.NaN, false), undefined)
 })

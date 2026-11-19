@@ -1841,6 +1841,19 @@ describe("SessionNs.getUsage", () => {
     expect(result.cost).toBe(0.04473525)
   })
 
+  test("uses the Claude Code turn cost and keeps the last-step tokens", () => {
+    const model = createModel({
+      context: 100_000,
+      output: 32_000,
+      cost: { input: 3, output: 15, cache: { read: 0.3, write: 0.3 } },
+    })
+    const turn = { model, usage: usage({ inputTokens: 1000, outputTokens: 50, totalTokens: 1050 }) }
+    const result = SessionNs.getUsage({ ...turn, metadata: { "claude-code": { turnCostUsd: 0.0044 } } })
+    expect(result.cost).toBe(0.0044)
+    expect(result.tokens.input).toBe(1000)
+    expect(SessionNs.getUsage(turn).cost).toBe(0.00375)
+  })
+
   test("uses matching context cost tier before over-200k fallback", () => {
     const model = createModel({
       context: 1_000_000,

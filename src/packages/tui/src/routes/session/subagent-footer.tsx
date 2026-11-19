@@ -9,6 +9,7 @@ import { useTheme } from "../../context/theme"
 import { SplitBorder } from "../../ui/border"
 import { contextUsage } from "../../util/contextUsage"
 import { Locale } from "../../util/locale"
+import { formatUsd } from "../../util/format"
 import { sessionCost, subagentLabel } from "../../util/session"
 import { useTerminalDimensions } from "@opentui/solid"
 import { OPENCODE_BASE_MODE, useBindings, useCommandShortcut, useOpencodeKeymap } from "../../keymap"
@@ -39,17 +40,12 @@ export function SubagentFooter() {
     if (!context) return
     const cost = sessionCost(session(), (id) => sync.data.session.filter((item) => item.parentID === id))
 
-    const money = new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-    })
-
     return {
       context:
         context.percent === undefined
           ? Locale.number(context.tokens)
           : `${Locale.number(context.tokens)} (${context.percent}%)`,
-      cost: cost > 0 ? money.format(cost) : undefined,
+      cost: cost > 0 ? formatUsd(cost) : undefined,
     }
   })
 

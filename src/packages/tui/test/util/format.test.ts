@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { formatDuration } from "../../src/util/format"
+import { formatDuration, formatUsd } from "../../src/util/format"
 
 describe("util.format", () => {
   describe("formatDuration", () => {
@@ -56,4 +56,16 @@ describe("util.format", () => {
       expect(formatDuration(604800)).toBe("~1 week")
     })
   })
+})
+
+test("formatUsd keeps sub-cent costs visible", () => {
+  expect([0, 0.00058, 0.0044, 0.12, 1.234, Number.NaN, -1].map(formatUsd)).toEqual([
+    "$0.00",
+    "$0.0006",
+    "$0.0044",
+    "$0.12",
+    "$1.23",
+    "$0.00",
+    "$0.00",
+  ])
 })

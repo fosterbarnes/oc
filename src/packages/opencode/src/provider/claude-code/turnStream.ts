@@ -46,6 +46,7 @@ import {
 import {
   apiAccountId,
   apiRolloverCandidate,
+  markModelLimited,
   applyFailoverChoice,
   canonicalAccountId,
   earliestLimitedUntil,
@@ -59,7 +60,7 @@ import {
   poolConfigDir,
   releaseApiPin,
 } from "./accounts.js"
-import { extractTurnStats, formatTurnStatsBlock, turnStatsLogPayload } from "./turnStats.js"
+import { extractTurnStats, formatTurnStatsBlock, turnCostFromTotal, turnStatsLogPayload } from "./turnStats.js"
 import {
   getActiveProcess,
   spawnClaudeProcess,
@@ -549,9 +550,15 @@ class ClaudeTurn {
     // API credits are not a usage window: a 429 there is transient (the CLI retries), and an empty
     // balance is handled at the result. Neither may mark the profile limited or move its pin to a login.
     if (this.account === apiAccountId()) return false
-    markAccountLimited(this.account, resetsAtMs)
+    const model = this.turn.effectiveModelId
+    // A rejection event with no usage window refuses this model (e.g. one needing extra usage the org
+    // disabled), not the login: gate only the model, so other models keep using the account.
+    if (rateLimitType === undefined) markModelLimited(this.account, model, resetsAtMs)
+    else markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
-    const pool = this.failoverDeclined ? [] : failoverCandidates(this.account, poolAccountIds(this.config.accounts))
+    const pool = this.failoverDeclined
+      ? []
+      : failoverCandidates(this.account, poolAccountIds(this.config.accounts), Date.now(), model)
     // Every pool account limited: API credits are the last resort, offered in `pickAccount`.
     const api = pool.length || this.failoverDeclined ? undefined : apiRolloverCandidate()
     const choices = api && api !== this.account ? [{ id: api }] : pool
@@ -1326,7 +1333,7 @@ class ClaudeTurn {
         this.out.note(
           unpinned
             ? `\n> **API credits used up:** this chat is unpinned and runs on ${global} when you send again.\n`
-            : "\n> **API credits used up.**\n",
+            : `\n> **API credits used up:** new work runs on ${global}.\n`,
         )
       }
       log.warn("claude API credits exhausted", { sessionKey: this.sk })
@@ -1363,7 +1370,8 @@ class ClaudeTurn {
     }
 
     const turnStats = extractTurnStats(msg)
-    this.resultMeta = resultMetadata(msg)
+    const turnCostUsd = turnCostFromTotal(msg.session_id, msg.total_cost_usd, this.cliArgs.includes("--resume"))
+    this.resultMeta = { ...resultMetadata(msg), ...(turnCostUsd === undefined ? {} : { turnCostUsd }) }
     log.info("conversation result", {
       sessionId: msg.session_id,
       numTurns: msg.num_turns,

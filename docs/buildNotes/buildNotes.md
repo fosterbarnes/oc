@@ -131,6 +131,68 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~21:57) - v0.2.390 fawstaLily - Claude chat cost is the real turn cost and shows sub-cent amounts - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp (after /debug and /think); completed, not committed
+- Version: 0.2.390 (shared with the uncommitted entries below)
+- Plan: `~/.config/opencode/plans/claudeCostSidebar.md` (with implementation notes); debug notes `~/.config/opencode/plans/2026-11-18-debug-wd-init-glue.md`.
+- Root cause: `getUsage` priced Claude's finish tokens, which are only the last step (`usage.ts` `toUsage`, kept for the context gauge). Screenshot chat stored $0.00058; the CLI's own total was $0.0044. The sidebar's `Intl.NumberFormat` currency then rounded every sub-cent turn to `$0.00`.
+- Added turnStats.ts `turnCostFromTotal`: per-turn cost = difference of the CLI's `total_cost_usd`, keyed by Claude session id. Real-CLI probes: the total is cumulative per conversation and restored on `--resume` (0.0037, 0.0053, then 0.0055 after a resume). An unknown earlier total on a resumed process returns undefined, so no history lands on one turn.
+- Changed turnStream.ts result handler to put `turnCostUsd` into the `claude-code` finish metadata; session.ts `getUsage` prefers it (after copilot's billed cost) over the token price. Tokens are unchanged.
+- Added tui util/format.ts `formatUsd` (under $1: up to 4 decimals); sidebar context.tsx, prompt/index.tsx and subagent-footer.tsx use it instead of three `Intl.NumberFormat` copies.
+- Kept the turn-stats footer cumulative: test flowReport.ts parses footers as running totals. Updated the chatFixture.ts comment.
+- Added FORK.md row "Real Claude chat cost". No wiki change.
+- Verification: opencode `bun test test/provider/claude-code/ test/session/` 1374 pass 29 skip 0 fail (new `turnCostFromTotal` and `getUsage` turn-cost tests); tui `test/util test/feature-plugins` 0 fail (new `formatUsd` test); `bun run typecheck` clean in opencode and tui. Not run live (needs `/revive`).
+- Known limit: a turn with no `result` (preempted, denied, crashed) is estimated from tokens, and its CLI spend also lands in the next turn's difference. A failover mid-turn moves to another conversation total. Old messages keep their stored cost.
+
+### User
+Claude chats
+- The sidebar's "spent", the prompt bar cost and the subagent footer now show what Claude Code says a reply cost, including every tool step, not only the last one.
+- Costs under a dollar show up to 4 decimals (for example $0.0044) instead of $0.00.
+
+---
+
+## 2026-11-18 (~21:41) - v0.2.390 fawstaLily - Claude no longer reads a new chat's directory and first message as one path - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug; completed, not committed
+- Version: 0.2.390 (shared with the uncommitted entry below)
+- Fixed messageBuilder.ts `getClaudeUserMessage`: every text block followed by another block now ends with `\n\n` unless it already ends in whitespace. Root cause: Claude reads adjacent content blocks with no separator, so the synthetic `Working directory initialized: /…/GitHub/oc` part (tui ocNewSession.ts `bootstrapSession`) and the first message `test` reached Claude as the path `/…/GitHub/octest`; Haiku then looked for that missing directory and asked the user. This bug existed before the API profile and affects every account. The screenshot only showed it on Team API.
+- Added getClaudeUserMessage.test.ts "adjacent text blocks are separated…" (fails with the fix reverted).
+- Verification: `bun test test/provider/claude-code/` 770 pass 19 skip 0 fail; `test/session/` + fakeModel 631 pass 10 skip 0 fail; `bun run typecheck` clean. Not run live (needs `/revive`).
+
+### User
+Claude chats
+- A new chat's first message no longer runs into the "Working directory initialized" line, so Claude no longer goes looking for a folder like `octest` that doesn't exist.
+
+---
+
+## 2026-11-18 (~21:23) - v0.2.390 fawstaLily - Team API as a global Claude account; model-only rejections gate one model - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp (after /debug and /think in the same chat); completed, not committed
+- Version: 0.2.390
+- Plan: `~/.config/opencode/plans/claudeApiProfileGlobal.md`; debug notes `~/.config/opencode/plans/2026-11-18-debug-claude-api-profile.md`. Reverses v0.2.388's "never the global account".
+- Changed accounts.ts `setCurrentAccount` and `nextUsableAccount` to accept the API id via `known()`; an unknown current (API key still loading, removed account) is no longer overwritten by `nextUsableAccount`; a limited API current moves to the best login (credits used up → global goes back to a login, no extra helper needed).
+- Added accounts.ts `modelLimited` map (`account|model` → until, pool-file `modelLimited`), `markModelLimited`, and an optional `model` filter on `failoverCandidates`.
+- Changed turnStream.ts `queueAccountSwitch`: a rejection event with `rateLimitType` undefined marks only `account|effectiveModelId`; failover filters by model. Root cause: a Fable 5.2 `org_level_disabled` rejection (resetsAt 2026-12-01) marked all three logins limited for 12 days while their usage was 31-49% weekly.
+- Changed the credits-used-up note for a global API pick to name the login new work runs on.
+- Changed tui claudeCommands.tsx global **Switch Claude account**: lists the API row, confirms ("Use API credits for every chat?") before a global API pick, shown with 2+ profiles.
+- Dropped plan step 3 (native `anthropic` auto-connect from the keychain key) at the operator's request mid-implementation; native Anthropic stays a manual `/connect`.
+- Updated FORK.md "Claude account pool" row, wiki `Claude-Code.md` API credit section (was stale since v0.2.388: no keychain, no pickers) and its `apiAccount` option row; server schema/handler comments.
+- Verification: `bun test test/provider/claude-code/` 768 pass 19 skip 0 fail (3 new pool tests + 1 new fake-CLI model-gate test, which fails with the turnStream change reverted); `bun run typecheck` clean in opencode and tui. Not run live: the global switch confirm and sidebar line in a terminal (needs `/revive`).
+- Known limit: a chat rolled over to API because of a model gate leaves the rollover on its next turn (logins are not account-limited), so a gated model asks again each turn under `ask`.
+- ERROR: the user's live `account-pool.json` still holds the bogus 2026-12-01 marks on all three logins; clear by picking each login in **Switch Claude account** (not edited by the agent).
+
+### User
+Claude accounts
+- **Switch Claude account** now lists your API-credit account (e.g. "Team API") next to your logins; picking it asks once, then every new chat bills API credits until you switch back or the credit runs out.
+- A login that refuses only one model (like a model needing extra usage your org turned off) is no longer marked out of usage for everything; only that model skips it.
+- The wiki's API credit section now explains every place you can use the key.
+
+---
+
 ## 2026-11-18 (~20:55) - v0.2.389 petrifiedLovecraft - Windows edit denials reach Claude; test profile leak - Claude Opus 5.5, low; Imp
 
 ### Agent

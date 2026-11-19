@@ -29,6 +29,7 @@ import {
   failoverCandidates,
   forgetSessionPin,
   markAccountLimited,
+  markModelLimited,
   nextUsableAccount,
   pinSessionAccount,
   poolAccount,
@@ -150,7 +151,6 @@ test("API profile: automatic picks never choose it; pins and agents can", () => 
   const now = 1_000_000
   configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
   const api = apiAccountId()!
-  expect(setCurrentAccount(api, ids, now)).toBe(false)
   expect(nextUsableAccount(ids, now)).not.toBe(api)
   expect(failoverCandidates(ids[0]!, ids, now).map((c) => c.id)).not.toContain(api)
   expect(pinSessionAccount("ses_1", api, ids, now)).toBe(true)
@@ -159,6 +159,46 @@ test("API profile: automatic picks never choose it; pins and agents can", () => 
   expect(sessionPin("ses_2", ids, now)).toBe(api)
   // A manual pin is not a rollover: it stays while pool accounts are usable.
   expect(turnAccount("ses_1", undefined, ids, now + 1)).toBe(api)
+})
+
+test("API profile: a global pick runs unpinned chats on credits until they run out, then a login takes over", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  expect(setCurrentAccount("C:/acct/nope", ids, now)).toBe(false)
+  expect(setCurrentAccount(api, ids, now)).toBe(true)
+  expect(turnAccount("ses_1", undefined, ids, now)).toBe(api)
+  expect(poolState(ids, now, undefined, undefined, { withApi: true }).find((a) => a.current)?.id).toBe(api)
+  // Failover still never offers it as an ordinary candidate.
+  expect(failoverCandidates(ids[0]!, ids, now).map((c) => c.id)).not.toContain(api)
+  // Credits used up (turnStream marks it an hour): the global pick moves to a login and stays there.
+  markAccountLimited(api, undefined, now)
+  expect(poolAccount(ids, now + 1)).toBe(ids[0])
+  expect(poolAccount(ids, now + 2 * 60 * 60 * 1000)).toBe(ids[0])
+})
+
+test("API profile: a global API pick survives while its key is still loading", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  setCurrentAccount(api, ids, now)
+  // Key not loaded yet: work goes to a login, but the stored pick is not overwritten.
+  configureApiAccount({ apiKey: "" }, ids)
+  expect(poolAccount(ids, now)).toBe(ids[0])
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  expect(poolAccount(ids, now)).toBe(api)
+})
+
+test("a rejection with no usage window gates that model only, not the login", () => {
+  const ids = ["a", "b"]
+  const now = 1_000_000
+  markModelLimited("b", "claude-fable", now + 60_000, now)
+  expect(failoverCandidates("a", ids, now, "claude-fable")).toEqual([])
+  expect(failoverCandidates("a", ids, now, "claude-opus").map((c) => c.id)).toEqual(["b"])
+  expect(poolState(ids, now).find((a) => a.id === "b")?.limitedUntil).toBeUndefined()
+  expect(failoverCandidates("a", ids, now + 60_001, "claude-fable").map((c) => c.id)).toEqual(["b"])
 })
 
 test("API profile: a manual pick clears its limit mark", () => {
@@ -715,7 +755,7 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (i
     const reader = response.stream.getReader()
     for (let next = await reader.read(); !next.done; next = await reader.read()) parts.push(next.value)
     const body = parts.flatMap((part) => (part.type === "text-delta" ? [part.delta] : [])).join("")
-    return { parts, body }
+    return { parts, body, ids: poolAccountIds(dirs) }
   } finally {
     await deleteActiveProcessAndWait(sk)
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
@@ -750,6 +790,20 @@ test("with every account limited the turn ends on the limit after one switch", a
   const turn = await poolTurn({ first: limited, second: limited })
   expect(turn.body.match(/Claude account switched/g)).toHaveLength(1)
   expect(turn.body).toContain("**rate limit:**")
+})
+
+test("a model-only rejection (no usage window) switches once and leaves both logins usable", async () => {
+  const gated = {
+    type: "rate_limit_event",
+    session_id: "fake-session",
+    rate_limit_info: { status: "rejected", resetsAt: 4_000_000_000, overageDisabledReason: "org_level_disabled" },
+  }
+  const refused = [init, gated, text("You've hit your limit"), endTurn, result(true)]
+  const turn = await poolTurn({ first: refused, second: refused })
+  expect(turn.body.match(/Claude account switched/g)).toHaveLength(1)
+  expect(poolState(turn.ids).some((account) => account.limitedUntil)).toBe(false)
+  expect(failoverCandidates(turn.ids[0]!, turn.ids, Date.now(), "claude-test-pool")).toEqual([])
+  expect(failoverCandidates(turn.ids[0]!, turn.ids, Date.now(), "claude-other").map((c) => c.id)).toEqual([turn.ids[1]])
 })
 
 test("session-limit result text without a rate_limit_event still switches and hides the limit reply", async () => {

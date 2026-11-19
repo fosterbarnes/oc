@@ -46,6 +46,12 @@ const IN_TEST = process.env.BUN_TEST != null
 
 const limitedUntil = new Map<string, number>()
 /**
+ * `modelKey(account, model)` -> until when that model is refused on that account. A rejection with no
+ * usage window (e.g. a model that needs extra usage the org disabled) gates one model, not the login.
+ */
+const modelLimited = new Map<string, number>()
+const modelKey = (id: string, model: string) => `${id}|${model}`
+/**
  * opencode session id -> pinned account id (a pool account or the API account), or `UNPINNED` once the
  * operator chose the global account, so an agent's `claudeAccount` does not pin the chat again.
  */
@@ -105,6 +111,7 @@ function ensureLoaded(now = Date.now()): void {
 function readPersist(now: number): void {
   if (!poolFile) return
   limitedUntil.clear()
+  modelLimited.clear()
   sessionAccounts.clear()
   apiRollover.clear()
   currentAccount = undefined
@@ -114,6 +121,7 @@ function readPersist(now: number): void {
       limitedUntil?: unknown
       sessionAccounts?: unknown
       apiRollover?: unknown
+      modelLimited?: unknown
     }
     if (typeof raw.currentAccount === "string" && raw.currentAccount) currentAccount = raw.currentAccount
     if (raw.sessionAccounts && typeof raw.sessionAccounts === "object") {
@@ -123,22 +131,26 @@ function readPersist(now: number): void {
     }
     if (Array.isArray(raw.apiRollover))
       for (const session of raw.apiRollover) if (typeof session === "string") apiRollover.add(session)
-    if (!raw.limitedUntil || typeof raw.limitedUntil !== "object") return
-    for (const [id, until] of Object.entries(raw.limitedUntil as Record<string, unknown>)) {
-      if (typeof until !== "number" || !Number.isFinite(until) || until <= now) continue
-      limitedUntil.set(id, until)
-    }
+    readUntilMap(raw.modelLimited, modelLimited, now)
+    readUntilMap(raw.limitedUntil, limitedUntil, now)
   } catch {
     // Missing or invalid file: start empty.
   }
 }
 
+/** Fill `into` from a persisted `{ key: untilMs }` object, skipping expired or invalid entries. */
+function readUntilMap(raw: unknown, into: Map<string, number>, now: number): void {
+  if (!raw || typeof raw !== "object") return
+  for (const [key, until] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof until === "number" && Number.isFinite(until) && until > now) into.set(key, until)
+  }
+}
+
 function persistPool(now = Date.now()): void {
   if (!poolFile) return
-  const limited: Record<string, number> = {}
-  for (const [id, until] of limitedUntil) {
-    if (until > now) limited[id] = until
-  }
+  const live = (map: Map<string, number>) => Object.fromEntries([...map].filter(([, until]) => until > now))
+  const limited = live(limitedUntil)
+  const models = live(modelLimited)
   try {
     mkdirSync(path.dirname(poolFile), { recursive: true })
     writeFileSync(
@@ -148,6 +160,7 @@ function persistPool(now = Date.now()): void {
         limitedUntil: limited,
         ...(sessionAccounts.size ? { sessionAccounts: Object.fromEntries(sessionAccounts) } : {}),
         ...(apiRollover.size ? { apiRollover: [...apiRollover] } : {}),
+        ...(Object.keys(models).length ? { modelLimited: models } : {}),
       }),
       { encoding: "utf8", mode: 0o600 },
     )
@@ -244,11 +257,14 @@ function rankUsable(ids: string[], from: string, now: number): FailoverCandidate
 export function nextUsableAccount(ids: string[], now = Date.now()): string | undefined {
   ensureLoaded(now)
   const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
-  if (currentAccount && ids.includes(currentAccount) && usable(currentAccount)) return currentAccount
+  // The global pick may be the API account; it stays while usable, like a login.
+  const current = currentAccount && known(currentAccount, ids) ? currentAccount : undefined
+  if (current && usable(current)) return current
   // A fresh pool starts at the first usable account; only a move off a limited one is ranked.
-  const next =
-    currentAccount && ids.includes(currentAccount) ? rankUsable(ids, currentAccount, now)[0]?.id : ids.find(usable)
-  if (next && next !== currentAccount) {
+  const next = current ? rankUsable(ids, current, now)[0]?.id : ids.find(usable)
+  // An unknown current (an API pick whose key is still loading, or a removed account) is not
+  // overwritten: the key may land later, and an explicit pick replaces it anyway.
+  if (next && next !== currentAccount && (current || !currentAccount)) {
     currentAccount = next
     persistPool(now)
   }
@@ -318,9 +334,21 @@ export function turnAccount(
 }
 
 /** Accounts a usage-rejected turn on `from` can move to, best first. Changes no pin or current account. */
-export function failoverCandidates(from: string, ids: string[], now = Date.now()): FailoverCandidate[] {
+export function failoverCandidates(from: string, ids: string[], now = Date.now(), model?: string): FailoverCandidate[] {
   ensureLoaded(now)
-  return rankUsable(ids, from, now).filter((candidate) => candidate.id !== from)
+  return rankUsable(ids, from, now).filter(
+    (candidate) => candidate.id !== from && (!model || (modelLimited.get(modelKey(candidate.id, model)) ?? 0) <= now),
+  )
+}
+
+/** `model` is refused on `id` until `resetsAtMs` (an hour without one); the account stays usable for other models. */
+export function markModelLimited(id: string, model: string, resetsAtMs: number | undefined, now = Date.now()): void {
+  ensureLoaded(now)
+  const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
+  const key = modelKey(id, model)
+  if (until <= (modelLimited.get(key) ?? 0)) return
+  modelLimited.set(key, until)
+  persistPool(now)
 }
 
 /** Move a failed-over turn's chat to `id`: a pinned chat's pin moves, otherwise the global current account. */
@@ -389,8 +417,9 @@ export function poolState(
  * Manual switch. A pick clears that account's limit mark, otherwise `nextUsableAccount` would move
  * straight back off it; a still-limited account fails over again when the CLI rejects the turn.
  */
+/** The global pick: a pool account or the API account (every unpinned chat then bills API credits). */
 export function setCurrentAccount(id: string, ids: string[], now = Date.now()): boolean {
-  if (!ids.includes(id)) return false
+  if (!known(id, ids)) return false
   ensureLoaded(now)
   limitedUntil.delete(id)
   currentAccount = id
@@ -759,6 +788,7 @@ export function forgetAccount(id: string, now = Date.now()): void {
 /** Test-only. Disables disk so tests cannot clobber the live pool file. */
 export function _resetAccountPool(): void {
   limitedUntil.clear()
+  modelLimited.clear()
   sessionAccounts.clear()
   apiRollover.clear()
   currentAccount = undefined

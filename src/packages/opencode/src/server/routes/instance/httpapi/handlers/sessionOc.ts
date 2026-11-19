@@ -215,7 +215,7 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
   }) {
     const ids = yield* claudePool()
     const { id, sessionID } = ctx.payload
-    // Without a session this sets the global account, which `setCurrentAccount` keeps to the pool.
+    // Without a session this sets the global account: a pool account or the API account.
     const ok = sessionID ? pinSessionAccount(sessionID, id, ids) : id !== undefined && setCurrentAccount(id, ids)
     if (!ok) return yield* new HttpApiError.BadRequest({})
     return { accounts: claudeState(ids, sessionID) }
