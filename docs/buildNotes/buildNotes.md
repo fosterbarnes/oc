@@ -131,6 +131,36 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-19 (~04:19) - v0.2.395 autopaidCheese - Mirror revive with no window open, and only when the target is idle - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed (Phase 2 of ~/.config/opencode/plans/mirrorHeadlessRevive.md), not committed
+- Version: 0.2.395
+- Added `SessionWork.busy` and `SessionWork.closeIfIdle` (core session/work.ts): the idle check and the admission close happen in one synchronous step.
+- Added module-level running counts `Pty.runningCount` (core pty.ts) and `ShellJobs.runningCount` (background/shellJobs.ts), and `ServerIdle` (server/idle.ts) that combines them with session work.
+- Added `POST /global/shutdown?ifIdle=1`, which answers 409 `ServerBusy` and keeps serving while anything runs. Once admission is closed, a failed dispose still ends in `controller.shutdown`.
+- Added `POST /global/oc/revive` (`global.ocRevive`). It answers 200 `{ state: started | busy | windows-open }`, not 202/409 as the plan had it. It validates `id`, and counts windows from the ledger `*.identity.json` files that match a live process, so both oc and native windows count. A null process list counts as windows-open. It then starts `oc oc --revive-headless <id>` detached from the server, without the server credentials in its env. SDK regenerated; exercise route added.
+- Added `ReviveHost.startHeadless`, `reviveHeadless` and `openWindows`. The headless revive builds, stops the server with `ifIdle`, installs and restarts. Any failure after the stop restarts the server (rollback first if the new one fails to start). It reports `revived`, `busy`, `unchanged` or `failed` in the status file.
+- Added `Resident.ServerBusyError`, `stopServer({ ifIdle })` (no force-kill after a 409), `serverVersion`, `waitForServerExit` and `requestMirrorRevive` (`no-server` / `too-old` when the server is missing or lacks the route).
+- Added the OcMirror status file (`status-<id>.json`: `writeStatus`/`readStatus`, with day-old cleanup that skips the file just written). `requestRevive` now returns `{ id, from, claimed }`. Sender `revive` returns `{ id, state }` (an old `{ claimed }` reply maps to window/unclaimed), and `status(target, id)` is new. Added the hidden CLI `oc oc mirror status --id`.
+- Changed the window path (deviation from the plan): the TUI's `swap` sends the `ifIdle` shutdown itself before handing off. A supervised launcher exits the TUI before `revivePipeline` runs, so the pipeline could not keep the window open on busy. The pipeline then waits for the server to exit (`ReviveContext.mirror`) and writes the status. Mirror revives skip the revive divider message. A mirror with an unchanged build reports `unchanged` and does not restart.
+- Changed dialog-mirror: after a revive starts, it polls `status` every 5 s for up to 20 min in the background and toasts the final result.
+- Verification: core, opencode, tui and sdk typecheck clean. New tests pass: closeIfIdle (core session-work), ifIdle 409 with a running session plus a bad revive id 400 (httpapi-global), and in revive.test.ts null process list -> windows-open, install throws -> server started again with status failed, busy -> nothing touched. Suites: core 36 pass; opencode test/server + test/config + shell tests 706 pass; `test:httpapi` 231 pass in coverage/auth/effect. Source probes: `oc mirror status` answers refused while accept is off, and `--revive-headless ../x` is rejected. Not run: a live two-machine mirror (needs the build installed on both).
+- Verification (cont.): `bun run generate` in packages/client produced no changes, and client typecheck is clean.
+- Pass cleanup: `SessionWork.busy` now sums runs per key (it counted keys, so "N session run(s)" undercounted). The revive id pattern is shared as `OcMirror.REVIVE_ID` instead of four copies. Inlined two single-use helpers (`mirrorFailed`, TUI `errorText`). Typecheck clean for core, opencode and tui; affected tests pass (core 11, opencode 39).
+- Fixed (after the first /revive): `ReviveHost.openWindows` missed native windows. They never register in the TUI ledger (`cli/tui/layer.ts` skips `Global.native`), so a native-only target still revived. It now also counts running copies of this install's native `opencode` (`Revive.nativeExecutable`), one per top-level process, and skips that count when running from Bun. Unit test added (fails without the fix). A probe on this Mac's real process list counted its 2 live oc windows; no native window was open, so the native count was not observed live.
+- MISTAKE: I made most source edits with python heredocs through Bash instead of Edit/Write, and one of them broke shellJobs.ts syntax (fixed with Edit). I also ran Prettier by hand. Rule: edit project files only with Edit/Write, and leave formatting to prePush.ps1.
+- ERROR: the first status test failed because the day-old cleanup parsed test id `2-2` as epoch 2 ms and deleted the file it had just written. Fixed by excluding the current file.
+
+### User
+Mirror
+- Mirroring now also revives a machine that has no oc window open, as long as nothing is running there.
+- A machine that is busy (a reply, a background shell job, or a terminal running) skips the revive, and its work keeps running.
+- When an oc window does take the revive and something is running on that machine, the window stays open and shows "Revive from <machine> skipped".
+- The sending machine reports the result when the revive finishes: "revived to vX", busy, no change needed, or failed with where the log is.
+
+---
+
 ## 2026-11-19 (~03:47) - v0.2.394 rominaJeff - Mirror hardening: opt-in per machine, own Tailscale devices only, no ssh option injection - Claude Opus 5.5, low; Imp
 
 ### Agent

@@ -571,14 +571,36 @@ export async function waitForExit(pid: number, timeoutMs: number, identity?: Res
   return !isPidAlive(pid, identity)
 }
 
-/** Asks the resident server to cancel its work and exit. The server bounds its own cleanup to 30 seconds. */
-async function requestShutdown(url: string, secret: string) {
-  const response = await fetch(`${url}/global/shutdown`, {
+/** An `ifIdle` stop the server refused: sessions, shell jobs, or terminals are running. It keeps serving. */
+export class ServerBusyError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ServerBusyError"
+  }
+}
+
+function basicAuth(secret: string) {
+  return `Basic ${Buffer.from(`opencode:${secret}`).toString("base64")}`
+}
+
+/**
+ * Asks the resident server to cancel its work and exit. The server bounds its own cleanup to 30 seconds.
+ * `ifIdle`: only when nothing is running; a refusal throws `ServerBusyError`.
+ */
+async function requestShutdown(url: string, secret: string, ifIdle?: boolean) {
+  const response = await fetch(`${url}/global/shutdown${ifIdle ? "?ifIdle=1" : ""}`, {
     method: "POST",
-    headers: { authorization: `Basic ${Buffer.from(`opencode:${secret}`).toString("base64")}` },
+    headers: { authorization: basicAuth(secret) },
     signal: AbortSignal.timeout(35_000),
   })
-  if (!response.ok) throw new Error(`Resident shutdown failed: HTTP ${response.status}`)
+  if (response.ok) return
+  if (ifIdle && response.status === 409) {
+    const body = (await response.json().catch(() => undefined)) as
+      | { name?: string; data?: { message?: string } }
+      | undefined
+    if (body?.name === "ServerBusy") throw new ServerBusyError(body.data?.message ?? "server busy")
+  }
+  throw new Error(`Resident shutdown failed: HTTP ${response.status}`)
 }
 
 /**
@@ -608,10 +630,12 @@ async function runStop(
   directory: string,
   prepared: NonNullable<Awaited<ReturnType<typeof prepareStop>>>,
   keepState?: boolean,
+  ifIdle?: boolean,
 ) {
   const { state, live } = prepared
   if (live) {
-    await requestShutdown(live.url, live.secret)
+    // A refused `ifIdle` stop throws here, before any force kill: the server stays up.
+    await requestShutdown(live.url, live.secret, ifIdle)
     if (!(await waitForExit(live.pid, 35_000, state))) {
       if (!live.identity) throw new Error(`Resident server ${live.pid} identity unavailable for forced stop`)
       await forceKill([live.identity])
@@ -629,12 +653,14 @@ export async function stopServer(
     processes?: TuiLedger.Process[] | null
     listProcesses?: () => TuiLedger.Process[]
     keepState?: boolean
+    // Stop only when the server is idle; otherwise throw `ServerBusyError` and touch nothing.
+    ifIdle?: boolean
   } = {},
 ) {
   const processes = opts.processes === undefined ? listOcProcesses(opts.listProcesses) : opts.processes
   const prepared = await prepareStop(directory, processes)
   if (!prepared) return { stopped: false }
-  const stopped = await runStop(directory, prepared, opts.keepState)
+  const stopped = await runStop(directory, prepared, opts.keepState, opts.ifIdle)
   if ((opts.killTuis ?? true) && processes !== null) {
     const pids = await ocProcessIds(processes, directory)
     await forceKill(processes.filter((item) => pids.includes(item.pid)))
@@ -701,6 +727,52 @@ export async function restartServer() {
 
 export async function startServer() {
   return withResidentLock(() => startServerUnlocked())
+}
+
+/** The running resident server's version (`/global/health`), or undefined when it does not answer. */
+export async function serverVersion() {
+  const state = await readResidentState().catch(() => undefined)
+  if (!state?.hostname || !state.port) return
+  const response = await fetch(`${residentUrl(state.hostname, state.port)}/global/health`, {
+    headers: { authorization: basicAuth(await serverSecret()) },
+    signal: AbortSignal.timeout(5_000),
+  }).catch(() => undefined)
+  if (!response?.ok) return
+  return ((await response.json().catch(() => ({}))) as { version?: string }).version
+}
+
+/** Waits up to 35 s for the recorded resident server to exit; true when none is left running. */
+export async function waitForServerExit() {
+  const state = await readResidentState()
+  if (!state?.pid) return true
+  return waitForExit(state.pid, 35_000, state.created ? state : undefined)
+}
+
+export type MirrorReviveState = "started" | "busy" | "windows-open" | "no-server" | "too-old"
+
+/**
+ * `oc oc mirror revive` when no window claimed the request: asks this machine's resident server
+ * (`POST /global/oc/revive`, loopback and secret) to start the no-window revive helper.
+ * `no-server`: nothing runs here, so nothing needs a restart. `too-old`: the server lacks the route.
+ */
+export async function requestMirrorRevive(
+  id: string,
+  from?: string,
+): Promise<{ state: MirrorReviveState; detail?: string }> {
+  const prepared = await prepareStop(serverStateDirectory(), listOcProcesses()).catch(() => undefined)
+  if (!prepared?.live) return { state: "no-server" }
+  const response = await fetch(`${prepared.live.url}/global/oc/revive`, {
+    method: "POST",
+    headers: { authorization: basicAuth(prepared.live.secret), "content-type": "application/json" },
+    body: JSON.stringify({ id, ...(from ? { from } : {}) }),
+    signal: AbortSignal.timeout(30_000),
+  })
+  const body = (await response.json().catch(() => undefined)) as { state?: unknown; detail?: unknown } | undefined
+  if (response.ok && (body?.state === "started" || body?.state === "busy" || body?.state === "windows-open"))
+    return { state: body.state, ...(typeof body.detail === "string" ? { detail: body.detail } : {}) }
+  // An older server has no such route (404, or a catch-all page that is not this JSON).
+  if (response.status === 404 || response.ok) return { state: "too-old" }
+  throw new Error(`Resident revive request failed: HTTP ${response.status}`)
 }
 
 export function startupLockExpired(

@@ -58,8 +58,8 @@ const _SAFE_ARG = /^[A-Za-z0-9._/-]+$/
 const _HASH = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
 // An ssh destination: optional `user@`, then a host name. No leading `-`, so it is never an option.
 const _DESTINATION = /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*$/
-// `requestRevive` ids (`<ms>-<pid>`); they name claim files.
-const _REVIVE_ID = /^\d+-\d+$/
+// `requestRevive` ids (`<ms>-<pid>`); they name claim and status files, so every side checks them.
+export const REVIVE_ID = /^\d+-\d+$/
 // Temporary commit identity: the snapshot commit never lands on a branch.
 const _GIT_IDENTITY = {
   GIT_AUTHOR_NAME: "oc mirror",
@@ -242,12 +242,35 @@ export async function push(
   })
 }
 
-/** Asks the target's open oc window to revive. False when no window took it. */
-export async function revive(target: Target) {
+// How the target took a revive request. `window`: an open oc window revives. `started`: no window,
+// so its resident server started the no-window helper. Both report through `status`. The rest end
+// here: `busy` (work running), `windows-open` (a window did not answer), `no-server` (oc is not
+// running there), `too-old` (its oc predates no-window revive), `unclaimed` (an old target, no window).
+export type ReviveStart = "window" | "started" | "busy" | "windows-open" | "no-server" | "too-old" | "unclaimed"
+
+/** Asks the target to revive: an open oc window, else its resident server when nothing runs there. */
+export async function revive(target: Target): Promise<{ id?: string; state: ReviveStart; detail?: string }> {
   const from = senderName()
   const args = _SAFE_ARG.test(from) ? ["--from", from] : []
-  const output = await run([...target.command, "oc", "oc", "mirror", "revive", ...args], { timeout: _PROBE_TIMEOUT })
-  return (answer(lastJson(output)) as { claimed: boolean }).claimed
+  // The target waits up to 10 s for a window, then may ask its server: more than a probe.
+  const output = await run([...target.command, "oc", "oc", "mirror", "revive", ...args], { timeout: 45_000 })
+  const value = answer(lastJson(output)) as { id?: unknown; state?: unknown; detail?: unknown; claimed?: unknown }
+  // TODO: drop once no machine runs v0.2.394 (answered `{ claimed }` only).
+  if (value.state === undefined) return { state: value.claimed === true ? "window" : "unclaimed" }
+  const states: ReviveStart[] = ["window", "started", "busy", "windows-open", "no-server", "too-old"]
+  const state = states.find((item) => item === value.state)
+  if (!state) throw new Error("Invalid reply from the other machine")
+  // The id goes back to the target as an argument: request ids only.
+  const id = typeof value.id === "string" && REVIVE_ID.test(value.id) ? value.id : undefined
+  return { id, state, ...(typeof value.detail === "string" ? { detail: value.detail.slice(0, 200) } : {}) }
+}
+
+/** The target's revive status for request `id`; undefined until it writes one. */
+export async function status(target: Target, id: string): Promise<ReviveStatus | undefined> {
+  if (!REVIVE_ID.test(id)) throw new Error(`Invalid revive id: ${id}`)
+  const output = await run([...target.command, "oc", "oc", "mirror", "status", "--id", id], { timeout: _PROBE_TIMEOUT })
+  const value = answer(lastJson(output)) as { status?: unknown }
+  return parseStatus(value.status)
 }
 
 // Commit of the work tree `tree` (from `worktreeTree`) on top of HEAD; HEAD itself when clean.
@@ -379,6 +402,52 @@ export async function receive(
 
 export type ReviveRequest = { id: string; from: string; at: number }
 
+// Progress of one revive request, written by whichever side runs it (a window or the no-window helper)
+// as `status-<id>.json` in `reviveDir`, and read by the sender through `oc oc mirror status`.
+export const REVIVE_STATES = ["building", "revived", "busy", "unchanged", "failed"] as const
+export type ReviveState = (typeof REVIVE_STATES)[number]
+export type ReviveStatus = { state: ReviveState; detail?: string; version?: string; log?: string; at: number }
+
+/** Writes request `id`'s status atomically and removes status files older than a day. */
+export async function writeStatus(id: string, status: Omit<ReviveStatus, "at">) {
+  if (!REVIVE_ID.test(id)) throw new Error(`Invalid revive id: ${id}`)
+  const dir = reviveDir()
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+  const file = path.join(dir, `status-${id}.json`)
+  await fs.writeFile(`${file}.tmp`, JSON.stringify({ ...status, at: Date.now() }))
+  await fs.rename(`${file}.tmp`, file)
+  const names = await fs.readdir(dir).catch(() => [] as string[])
+  await Promise.all(
+    names
+      .filter(
+        (name) =>
+          name !== path.basename(file) &&
+          /^status-\d+-\d+\.json$/.test(name) &&
+          Date.now() - Number(name.split("-")[1]) > 24 * 3_600_000,
+      )
+      .map((name) => fs.rm(path.join(dir, name), { force: true })),
+  )
+}
+
+export async function readStatus(id: string) {
+  if (!REVIVE_ID.test(id)) throw new Error(`Invalid revive id: ${id}`)
+  const text = await fs.readFile(path.join(reviveDir(), `status-${id}.json`), "utf8").catch(() => undefined)
+  return text === undefined ? undefined : parseStatus(JSON.parse(text))
+}
+
+function parseStatus(raw: unknown): ReviveStatus | undefined {
+  const value = raw as Partial<ReviveStatus> | null | undefined
+  if (!value || !REVIVE_STATES.includes(value.state as ReviveState)) return
+  const text = (item: unknown) => (typeof item === "string" ? item.slice(0, 300) : undefined)
+  return {
+    state: value.state as ReviveState,
+    detail: text(value.detail),
+    version: text(value.version),
+    log: text(value.log),
+    at: typeof value.at === "number" ? value.at : 0,
+  }
+}
+
 export function reviveDir() {
   return path.join(Global.Path.state, "mirror")
 }
@@ -386,6 +455,7 @@ export function reviveDir() {
 /**
  * Leaves a revive request for an open oc window (`takeRevive`) and waits for one to claim it.
  * Claims are exclusive-create files named by request id, so two windows never both revive.
+ * `claimed` false: no window took it, and this call holds the claim (the no-window revive may run).
  */
 export async function requestRevive(from: string) {
   const dir = reviveDir()
@@ -412,7 +482,7 @@ export async function requestRevive(from: string) {
   )
   if (!claimed) await fs.rm(file, { force: true })
   await removeOldClaims(dir)
-  return claimed
+  return { id: request.id, from: request.from, claimed }
 }
 
 /** Claims a fresh pending revive request; the caller revives only when this returns one. */
@@ -426,7 +496,7 @@ export async function takeRevive(): Promise<ReviveRequest | undefined> {
   if (
     !request ||
     typeof request.id !== "string" ||
-    !_REVIVE_ID.test(request.id) ||
+    !REVIVE_ID.test(request.id) ||
     typeof request.at !== "number" ||
     Date.now() - request.at > _REVIVE_FRESH
   )

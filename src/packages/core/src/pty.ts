@@ -89,6 +89,18 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Pty") {}
 
+// Every live layer's sessions, so the server's idle check (opencode server/idle.ts) sees PTYs of
+// all loaded instances without resolving each one.
+const _allSessions = new Set<Map<PtyID, { info: Info }>>()
+
+/** PTYs still running in any loaded instance of this process. */
+export function runningCount() {
+  let count = 0
+  for (const sessions of _allSessions)
+    for (const session of sessions.values()) if (session.info.status === "running") count++
+  return count
+}
+
 const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -99,6 +111,7 @@ const layer = Layer.effect(
     const runFork = Effect.runForkWith(context)
     const sessions = new Map<PtyID, Active>()
     const exitOrder: PtyID[] = []
+    _allSessions.add(sessions)
 
     function notifyEnd(session: Active, event: { exitCode?: number }) {
       // Snapshot subscribers before clearing so stale callbacks from a concurrent detach cannot resurface.
@@ -132,6 +145,7 @@ const layer = Layer.effect(
       Effect.sync(() => {
         for (const session of sessions.values()) teardown(session)
         sessions.clear()
+        _allSessions.delete(sessions)
         exitOrder.length = 0
       }),
     )

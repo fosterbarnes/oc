@@ -89,4 +89,36 @@ describe("SessionWork maintenance", () => {
       expect(yield* work.run("a", Effect.succeed("admitted"))).toBe("admitted")
     }),
   )
+
+  it.live("closeIfIdle refuses while work or maintenance runs, then closes admission", () =>
+    Effect.gen(function* () {
+      const work = yield* SessionWork.Service
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const active = yield* work
+        .run("a", Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(finish))))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      expect(work.busy()).toBe(1)
+      expect(yield* work.closeIfIdle).toBe(false)
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.await(active)
+
+      const maintenanceStarted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const maintaining = yield* work
+        .maintain("b", Deferred.succeed(maintenanceStarted, undefined).pipe(Effect.andThen(Deferred.await(release))))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(maintenanceStarted)
+      expect(yield* work.closeIfIdle).toBe(false)
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.await(maintaining)
+      // Refused attempts changed nothing: work is still admitted.
+      expect(yield* work.run("a", Effect.succeed("admitted"))).toBe("admitted")
+
+      expect(yield* work.closeIfIdle).toBe(true)
+      expect((yield* work.run("a", Effect.die("must not run")).pipe(Effect.exit))._tag).toBe("Failure")
+      expect((yield* work.maintain("a", Effect.die("must not run")).pipe(Effect.exit))._tag).toBe("Failure")
+    }),
+  )
 })

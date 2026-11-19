@@ -5,6 +5,7 @@ import fsp from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { OcMirror } from "@opencode-ai/core/util/ocMirror"
 import { OcRelease } from "@opencode-ai/core/util/ocRelease"
 import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { terminalAppScript, type TerminalInfo } from "@opencode-ai/core/util/terminal"
@@ -51,6 +52,9 @@ export type ReviveContext = {
   resume?: string
   // macOS WezTerm: where the window sat, so the reopened one lands in the same place.
   window?: WeztermWindow.Placement
+  // A /mirror revive request id: the window already stopped the server if idle, and the pipeline
+  // writes the request's status (core util/ocMirror.ts) for the sending machine.
+  mirror?: string
 }
 
 /** Written by the TUI for `oc oc --revive-prepare`: the slow, failure-prone work before oc stops. */
@@ -137,6 +141,7 @@ export function parseContext(input: unknown): ReviveContext {
     !optional(value.tuiPid, pid) ||
     !optional(value.resume, text) ||
     !optional(value.window, placement) ||
+    !optional(value.mirror, (item) => typeof item === "string" && OcMirror.REVIVE_ID.test(item)) ||
     !optional(value.shellIdentity, processIdentity) ||
     (value.shellIdentity !== undefined && (value.shellIdentity as TuiLedger.Process).pid !== value.shellPid)
   ) {

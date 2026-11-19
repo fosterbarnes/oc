@@ -759,3 +759,66 @@ test("build outputs must exist and must not provide the same name twice", async 
   await expect(Revive.installSources([first, second])).rejects.toThrow("Two build outputs provide runtime")
   await expect(Revive.installSources([path.join(tmp.path, "missing")])).rejects.toThrow("Build output not found")
 })
+
+// No-window /mirror revive (ReviveHost.startHeadless / reviveHeadless).
+test("a no-window revive counts an unavailable process list as an open window", async () => {
+  const result = await ReviveHost.startHeadless("1-1", undefined, () => Promise.reject(new Error("no list")))
+  expect(result.state).toBe("windows-open")
+})
+
+test("a no-window revive counts a native window of this install, which has no ledger record", async () => {
+  await using tmp = await tmpdir()
+  const live = (pid: number, parentPid: number, executable: string) => ({ pid, parentPid, executable, startedAt: 1 })
+  const processes = [
+    live(10, 1, "/Apps/oc/opencode"),
+    live(11, 10, "/Apps/oc/opencode"),
+    live(12, 1, "/Apps/oc/oc"),
+    live(13, 1, "/Other/opencode"),
+  ]
+  expect(await ReviveHost.openWindows(processes, tmp.path, "/Apps/oc/oc")).toBe(1)
+  expect(await ReviveHost.openWindows(processes.slice(2), tmp.path, "/Apps/oc/oc")).toBe(0)
+})
+
+test("a no-window revive starts the server again when the install throws", async () => {
+  const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+  const { OcConfig } = await import("../../src/config/oc")
+  await using dir = await tmpdir()
+  await OcConfig.edit((settings) => ({ revive: { ...settings.revive, build: { source: dir.path } } }))
+  const calls: string[] = []
+  const result = await ReviveHost.reviveHeadless("2-2", {
+    prepare: async () => [path.join(dir.path, "out")],
+    installSources: async () => [],
+    stop: async () => calls.push("stop"),
+    install: async () => {
+      calls.push("install")
+      throw new Error("disk full")
+    },
+    start: async () => calls.push("start"),
+    installDir: dir.path,
+  })
+  expect(calls).toEqual(["stop", "install", "start"])
+  expect(result).toEqual({ state: "failed", detail: "disk full" })
+  expect(await OcMirror.readStatus("2-2")).toMatchObject({ state: "failed", detail: "disk full", log: "revive.log" })
+})
+
+test("a no-window revive leaves a busy server alone", async () => {
+  const { OcConfig } = await import("../../src/config/oc")
+  await using dir = await tmpdir()
+  await OcConfig.edit((settings) => ({ revive: { ...settings.revive, build: { source: dir.path } } }))
+  const calls: string[] = []
+  const result = await ReviveHost.reviveHeadless("3-3", {
+    prepare: async () => [path.join(dir.path, "out")],
+    installSources: async () => [],
+    stop: async () => {
+      throw new Resident.ServerBusyError("1 session run(s) running")
+    },
+    install: async () => {
+      calls.push("install")
+      return async () => {}
+    },
+    start: async () => calls.push("start"),
+    installDir: dir.path,
+  })
+  expect(result).toEqual({ state: "busy", detail: "1 session run(s) running" })
+  expect(calls).toEqual([])
+})

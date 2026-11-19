@@ -2199,6 +2199,13 @@ export type ServerLifecycleUnavailable = {
   }
 }
 
+export type ServerBusy = {
+  name: "ServerBusy"
+  data: {
+    message: string
+  }
+}
+
 export type WarmupScheduleError = {
   name: "WarmupScheduleError"
   data: {
@@ -8363,7 +8370,9 @@ export type GlobalUpgradeResponse = GlobalUpgradeResponses[keyof GlobalUpgradeRe
 export type GlobalShutdownData = {
   body?: never
   path?: never
-  query?: never
+  query?: {
+    ifIdle?: string
+  }
   url: "/global/shutdown"
 }
 
@@ -8373,9 +8382,9 @@ export type GlobalShutdownErrors = {
    */
   400: BadRequestError
   /**
-   * ServerLifecycleUnavailable
+   * ServerLifecycleUnavailable | ServerBusy
    */
-  409: ServerLifecycleUnavailable
+  409: ServerLifecycleUnavailable | ServerBusy
 }
 
 export type GlobalShutdownError = GlobalShutdownErrors[keyof GlobalShutdownErrors]
@@ -8388,6 +8397,37 @@ export type GlobalShutdownResponses = {
 }
 
 export type GlobalShutdownResponse = GlobalShutdownResponses[keyof GlobalShutdownResponses]
+
+export type GlobalOcReviveData = {
+  body?: {
+    id: string
+    from?: string
+  }
+  path?: never
+  query?: never
+  url: "/global/oc/revive"
+}
+
+export type GlobalOcReviveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type GlobalOcReviveError = GlobalOcReviveErrors[keyof GlobalOcReviveErrors]
+
+export type GlobalOcReviveResponses = {
+  /**
+   * Whether the revive helper started
+   */
+  200: {
+    state: "started" | "busy" | "windows-open"
+    detail?: string
+  }
+}
+
+export type GlobalOcReviveResponse = GlobalOcReviveResponses[keyof GlobalOcReviveResponses]
 
 export type GlobalRestartData = {
   body?: never

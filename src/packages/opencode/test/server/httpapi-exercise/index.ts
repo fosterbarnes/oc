@@ -1837,6 +1837,13 @@ const scenarios: Scenario[] = [
     .status(400),
   // oc routes. Writes that would touch Claude accounts, warm-up or resume stores, or start a model call
   // are exercised through payload validation (400) or a missing session (404).
+  // A valid id would start a real revive helper: payload validation only.
+  http.protected
+    .post("/global/oc/revive", "global.ocRevive")
+    .global()
+    .probe({ path: "/global/oc/revive", body: { id: "../x" } })
+    .at(() => ({ path: "/global/oc/revive", body: { id: "../x" } }))
+    .status(400),
   http.protected.get("/global/claude/warmup", "global.claudeWarmup").global().json(200, object, "status"),
   http.protected
     .put("/global/claude/warmup", "global.setClaudeWarmup")

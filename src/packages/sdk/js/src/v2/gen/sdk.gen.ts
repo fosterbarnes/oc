@@ -102,6 +102,8 @@ import type {
   GlobalEventResponses,
   GlobalHealthErrors,
   GlobalHealthResponses,
+  GlobalOcReviveErrors,
+  GlobalOcReviveResponses,
   GlobalRestartErrors,
   GlobalRestartResponses,
   GlobalSetClaudeWarmupErrors,
@@ -1591,10 +1593,52 @@ export class Global extends HeyApiClient {
    *
    * Dispose OpenCode instances and stop a managed server.
    */
-  public shutdown<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+  public shutdown<ThrowOnError extends boolean = false>(
+    parameters?: {
+      ifIdle?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "ifIdle" }] }])
     return (options?.client ?? this.client).post<GlobalShutdownResponses, GlobalShutdownErrors, ThrowOnError>({
       url: "/global/shutdown",
       ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Revive oc with no window open
+   *
+   * Starts the oc revive helper for a /mirror request when no oc window is open and nothing is running; otherwise says why not.
+   */
+  public ocRevive<ThrowOnError extends boolean = false>(
+    parameters?: {
+      id?: string
+      from?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "body", key: "id" },
+            { in: "body", key: "from" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<GlobalOcReviveResponses, GlobalOcReviveErrors, ThrowOnError>({
+      url: "/global/oc/revive",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

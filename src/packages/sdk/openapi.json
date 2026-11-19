@@ -692,7 +692,16 @@
       "post": {
         "tags": ["global"],
         "operationId": "global.shutdown",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "ifIdle",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
+        ],
         "responses": {
           "200": {
             "description": "Server shutdown scheduled",
@@ -716,11 +725,18 @@
             }
           },
           "409": {
-            "description": "ServerLifecycleUnavailable",
+            "description": "ServerLifecycleUnavailable | ServerBusy",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ServerLifecycleUnavailable"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ServerLifecycleUnavailable"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ServerBusy"
+                    }
+                  ]
                 }
               }
             }
@@ -732,6 +748,75 @@
           {
             "lang": "js",
             "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.shutdown({\n  ...\n})"
+          }
+        ]
+      }
+    },
+    "/global/oc/revive": {
+      "post": {
+        "tags": ["global"],
+        "operationId": "global.ocRevive",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Whether the revive helper started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": ["started", "busy", "windows-open"]
+                    },
+                    "detail": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["state"],
+                  "additionalProperties": false,
+                  "description": "Whether the revive helper started"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BadRequestError"
+                }
+              }
+            }
+          }
+        },
+        "description": "Starts the oc revive helper for a /mirror request when no oc window is open and nothing is running; otherwise says why not.",
+        "summary": "Revive oc with no window open",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^\\d+-\\d+$"
+                  },
+                  "from": {
+                    "type": "string"
+                  }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "x-codeSamples": [
+          {
+            "lang": "js",
+            "source": "import { createOpencodeClient } from \"@opencode-ai/sdk\n\nconst client = createOpencodeClient()\nawait client.global.ocRevive({\n  ...\n})"
           }
         ]
       }
@@ -24947,6 +25032,27 @@
           "name": {
             "type": "string",
             "enum": ["ServerLifecycleUnavailable"]
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": ["message"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["name", "data"],
+        "additionalProperties": false
+      },
+      "ServerBusy": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "enum": ["ServerBusy"]
           },
           "data": {
             "type": "object",

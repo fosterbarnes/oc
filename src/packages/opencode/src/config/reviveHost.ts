@@ -4,6 +4,7 @@ import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { InstallationSourceTree } from "@opencode-ai/core/installation/version"
 import { launchDetached } from "@opencode-ai/core/util/launchDetached"
+import { OcMirror } from "@opencode-ai/core/util/ocMirror"
 import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { ProcessDarwin } from "@opencode-ai/core/util/processDarwin"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
@@ -16,10 +17,14 @@ import {
   forceKill,
   isPidAlive,
   listOcProcesses,
+  ServerBusyError,
   serverStateDirectory,
+  serverVersion,
   shutdownAll,
   startServer,
+  stopServer,
   waitForExit,
+  waitForServerExit,
   withResidentLock,
 } from "./resident"
 import { closeOwnedPanes, oldPanes } from "./wezterm"
@@ -35,6 +40,13 @@ export async function revive(context: Revive.ReviveContext) {
     await revivePipeline(context)
   } catch (error) {
     await log.write(`Revive failed: ${error instanceof Error ? error.message : String(error)}`)
+    // A failed mirror revive tells the sender why, with the first line of the error.
+    if (context.mirror)
+      await OcMirror.writeStatus(context.mirror, {
+        state: "failed",
+        detail: (error instanceof Error ? error.message : String(error)).split(/\r?\n/)[0],
+        log: path.basename(log.file),
+      }).catch(() => undefined)
     // Before any reopen, so the reopened TUI restores the follow-up steps instead of sending them.
     if (context.resume) await ReviveResume.settle(context.resume, "failed")
     // Hosted revives recover in place. A native window has already exited.
@@ -105,6 +117,11 @@ async function revivePipeline(context: Revive.ReviveContext) {
         : undefined
     const keepPanes = tabs?.flatMap((tab) => (tab.paneID ? [tab.paneID] : []))
     const failure = await (async () => {
+      // A mirror revive's window already stopped the server if idle (`swap`); wait for it to exit.
+      if (context.mirror)
+        await log.step("Waiting for the server to exit", async () => {
+          if (!(await waitForServerExit())) throw new Error("The server did not exit")
+        })
       // A native TUI/worker already shut down before handoff; installs rename running files aside.
       if (!context.native) await log.step("Stopping oc", () => shutdownAll({ keepPanes }))
       const rollback = sources
@@ -136,6 +153,10 @@ async function revivePipeline(context: Revive.ReviveContext) {
   // still reopens the terminal on the old version before reporting.
   if (failure && (context.supervisorPid || context.native)) throw failure.error
   if (context.resume) await ReviveResume.settle(context.resume, failure ? "failed" : "ready")
+  if (context.mirror && !failure)
+    await OcMirror.writeStatus(context.mirror, { state: "revived", version: await serverVersion() }).catch(
+      () => undefined,
+    )
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(
       launchDetached(process.execPath, [
@@ -147,6 +168,149 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ),
   )
   if (failure) throw failure.error
+}
+
+/**
+ * Open oc windows: live oc TUIs in the ledger, plus running native opencode from this install, which
+ * never registers in the ledger (cli/tui/layer.ts). Null process list: fail closed.
+ */
+export async function openWindows(
+  processes: TuiLedger.Process[] | null,
+  directory = serverStateDirectory(),
+  executable = executablePath(),
+) {
+  if (processes === null) return Infinity
+  const root = path.join(directory, "oc-tuis")
+  const names = await fs.readdir(root).catch(() => [] as string[])
+  const identities = await Promise.all(
+    names
+      .filter((name) => /^\d+\.identity\.json$/.test(name))
+      .map((name) =>
+        Bun.file(path.join(root, name))
+          .json()
+          .catch(() => undefined),
+      ),
+  )
+  const ledger = identities.filter(
+    (identity: TuiLedger.Process | undefined) =>
+      identity && processes.some((live) => TuiLedger.sameIdentity(identity, live)),
+  ).length
+  // From source (Bun) there is no separate native executable to look for.
+  const native = Revive.nativeExecutable(executable)
+  if (native === executable) return ledger
+  const isNative = (item: TuiLedger.Process) => TuiLedger.sameExecutable(item.executable, native)
+  // One per window: a native child of a native process belongs to that window.
+  const windows = processes.filter(
+    (item) => isNative(item) && !processes.some((parent) => parent.pid === item.parentPid && isNative(parent)),
+  )
+  return ledger + windows.length
+}
+
+/**
+ * The resident server's `POST /global/oc/revive` (the server already checked it is idle): refuses
+ * when an oc window is open, else marks request `id` building and starts `oc oc --revive-headless`
+ * detached, so the helper runs in the server's desktop session rather than the ssh session.
+ */
+export async function startHeadless(
+  id: string,
+  from?: string,
+  list: () => Promise<TuiLedger.Process[]> = TuiLedger.listProcessesAsync,
+): Promise<{ state: "started" | "windows-open"; detail?: string }> {
+  const processes = await list().catch(() => null)
+  const windows = await openWindows(processes).catch(() => Infinity)
+  if (windows > 0)
+    return { state: "windows-open", detail: processes === null ? "process list unavailable" : `${windows} window(s)` }
+  await OcMirror.writeStatus(id, { state: "building", ...(from ? { detail: `from ${from}` } : {}) })
+  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+  await awaitLaunch(
+    launchDetached(executablePath(), [...(bun ? [process.argv[1]!] : []), "oc", "--revive-headless", id], {
+      cwd: os.homedir(),
+      // The server's own credentials stay with the server (util/agent-env.ts).
+      env: {
+        OPENCODE_SERVER_PASSWORD: undefined,
+        OPENCODE_SERVER_USERNAME: undefined,
+        OC_RESIDENT: undefined,
+        OC_FLAVOR: "oc",
+      },
+    }),
+  )
+  return { state: "started" }
+}
+
+/**
+ * `oc oc --revive-headless <id>`: a /mirror revive on a machine with no oc window open. Builds the
+ * mirrored source, then, only if the server is still idle, stops it, installs, and starts it again.
+ * Any failure after the stop still ends with a running server. Reports through the status file.
+ */
+export async function reviveHeadless(
+  id: string,
+  deps: {
+    prepare?: typeof prepare
+    install?: typeof Revive.install
+    installSources?: typeof Revive.installSources
+    stop?: () => Promise<unknown>
+    start?: () => Promise<unknown>
+    installDir?: string
+  } = {},
+) {
+  const log = reviveLog()
+  const status = (value: Omit<OcMirror.ReviveStatus, "at">) => OcMirror.writeStatus(id, { log: "revive.log", ...value })
+  const build = Revive.parseBuild((await read()).revive?.build)
+  if (!build) return status({ state: "failed", detail: `run /revive once on ${os.hostname()}` })
+  const result = await (async () => {
+    const output = await (deps.prepare ?? prepare)({ result: "" })
+    if (!output.length) return { state: "unchanged" as const }
+    if (!deps.installDir && /^bun(?:\.exe)?$/i.test(path.basename(process.execPath)))
+      throw new Error("Install revive needs an installed oc executable, not Bun")
+    const installDir = deps.installDir ?? path.dirname(executablePath())
+    const start = deps.start ?? startServer
+    return withInstallLock(installDir, async () => {
+      const sources = await log.step("Checking build output", () =>
+        (deps.installSources ?? Revive.installSources)(output),
+      )
+      const stopped = await log
+        .step("Stopping the server if idle", () =>
+          (deps.stop ?? (() => stopServer(undefined, { ifIdle: true, killTuis: false })))(),
+        )
+        .then(
+          () => undefined,
+          (error: unknown) => {
+            if (error instanceof ServerBusyError) return { state: "busy" as const, detail: error.message }
+            throw error
+          },
+        )
+      if (stopped) return stopped
+      // From here every path ends with a server running: the new one, the restored one, or the old one.
+      try {
+        const rollback = await log.step(`Installing into ${installDir}`, () =>
+          (deps.install ?? Revive.install)(sources, installDir),
+        )
+        await log
+          .step("Starting server", () => start())
+          .catch(async (error: unknown) => {
+            await log
+              .step("Stopping the new server", () => stopServer(undefined, { killTuis: false }))
+              .catch(() => undefined)
+            await log.step("Restoring the previous install", () => rollback(error))
+            throw error
+          })
+      } catch (error) {
+        await log.step("Starting server again", () => start()).catch(() => undefined)
+        throw error
+      }
+      // No restarter runs here, so the `.old-*` files of this install are removed now.
+      await Revive.removeLeftovers(installDir).catch(() => undefined)
+      return { state: "revived" as const, version: await serverVersion() }
+    })
+  })().catch(async (error: unknown) => {
+    await log.write(`Revive (no window) failed: ${error instanceof Error ? error.message : String(error)}`)
+    return {
+      state: "failed" as const,
+      detail: (error instanceof Error ? error.message : String(error)).split(/\r?\n/)[0],
+    }
+  })
+  await status(result)
+  return result
 }
 
 /**

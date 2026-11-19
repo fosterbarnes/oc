@@ -1,5 +1,6 @@
 import { ConfigV1 } from "@opencode-ai/core/v1/config/config"
 import { EventV2 } from "@opencode-ai/core/event"
+import { OcMirror } from "@opencode-ai/core/util/ocMirror"
 import { EventManifest } from "@/event-manifest"
 import { InstanceDisposed } from "@/server/event"
 import "@opencode-ai/core/account"
@@ -78,6 +79,30 @@ export class ServerLifecycleUnavailable extends Schema.ErrorClass<ServerLifecycl
   { httpApiStatus: 409 },
 ) {}
 
+// `shutdown?ifIdle=1` refused: sessions, shell jobs, or terminals are running (server/idle.ts).
+export class ServerBusy extends Schema.ErrorClass<ServerBusy>("ServerBusy")(
+  {
+    name: Schema.Literal("ServerBusy"),
+    data: Schema.Struct({ message: Schema.String }),
+  },
+  { httpApiStatus: 409 },
+) {}
+
+export const GlobalShutdownQuery = Schema.Struct({
+  /** "1": shut down only when nothing is running; otherwise answer 409 ServerBusy and keep serving. */
+  ifIdle: Schema.optional(Schema.String),
+})
+
+// No-window /mirror revive (`oc oc mirror revive` on this machine). `id` names the status file.
+export const OcReviveInput = Schema.Struct({
+  id: Schema.String.check(Schema.isPattern(OcMirror.REVIVE_ID)),
+  from: Schema.optional(Schema.String),
+})
+const OcReviveResult = Schema.Struct({
+  state: Schema.Literals(["started", "busy", "windows-open"]),
+  detail: Schema.optional(Schema.String),
+})
+
 export const GlobalPaths = {
   health: "/global/health",
   event: "/global/event",
@@ -86,6 +111,7 @@ export const GlobalPaths = {
   upgrade: "/global/upgrade",
   shutdown: "/global/shutdown",
   restart: "/global/restart",
+  ocRevive: "/global/oc/revive",
   warmup: "/global/claude/warmup",
   claudeAccounts: "/global/claude/accounts",
 } as const
@@ -268,13 +294,25 @@ export const GlobalApi = HttpApi.make("global").add(
         }),
       ),
       HttpApiEndpoint.post("shutdown", GlobalPaths.shutdown, {
+        query: GlobalShutdownQuery,
         success: described(Schema.Boolean, "Server shutdown scheduled"),
-        error: ServerLifecycleUnavailable,
+        error: [ServerLifecycleUnavailable, ServerBusy],
       }).annotateMerge(
         OpenApi.annotations({
           identifier: "global.shutdown",
           summary: "Shut down server",
           description: "Dispose OpenCode instances and stop a managed server.",
+        }),
+      ),
+      HttpApiEndpoint.post("ocRevive", GlobalPaths.ocRevive, {
+        payload: OcReviveInput,
+        success: described(OcReviveResult, "Whether the revive helper started"),
+      }).annotateMerge(
+        OpenApi.annotations({
+          identifier: "global.ocRevive",
+          summary: "Revive oc with no window open",
+          description:
+            "Starts the oc revive helper for a /mirror request when no oc window is open and nothing is running; otherwise says why not.",
         }),
       ),
       HttpApiEndpoint.post("restart", GlobalPaths.restart, {

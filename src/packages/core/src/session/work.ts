@@ -7,6 +7,13 @@ export interface Interface {
   readonly run: <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | BusyError, R>
   readonly maintain: <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | BusyError, R>
   readonly close: Effect.Effect<void>
+  /** Admitted runs plus running maintenance, across every key. */
+  readonly busy: () => number
+  /**
+   * Closes admission and runs `close` only when nothing is admitted or maintaining, checked in the
+   * same synchronous step that closes admission. False: busy, nothing changed.
+   */
+  readonly closeIfIdle: Effect.Effect<boolean>
 }
 
 /** Refused: the project is under maintenance, or (for `maintain`) its session work is active. */
@@ -26,6 +33,8 @@ export const layer = Layer.effect(
     // run synchronously, so no admission can slip between a maintenance check and its start.
     const active = new Map<string, number>()
     const maintaining = new Set<string>()
+    // Set by `closeIfIdle` before `close` runs, so no run is admitted in between.
+    let closing = false
 
     const release = (key: string) => {
       const count = (active.get(key) ?? 1) - 1
@@ -36,7 +45,7 @@ export const layer = Layer.effect(
     const run: Interface["run"] = (key, effect) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
-          if (scope.state._tag === "Closed") return yield* Effect.interrupt
+          if (closing || scope.state._tag === "Closed") return yield* Effect.interrupt
           // Refuses instead of waiting: a request admitted after maintenance would still hold the
           // instance it resolved before, which the maintenance may have replaced.
           if (maintaining.has(key)) return yield* Effect.fail(new BusyError())
@@ -54,16 +63,27 @@ export const layer = Layer.effect(
     const maintain = <A, E, R>(key: string, effect: Effect.Effect<A, E, R>) =>
       Effect.uninterruptibleMask((restore) =>
         Effect.suspend<A, E | BusyError, R>(() => {
-          if (active.has(key) || maintaining.has(key)) return Effect.fail(new BusyError())
+          if (closing || active.has(key) || maintaining.has(key)) return Effect.fail(new BusyError())
           maintaining.add(key)
           return restore(effect).pipe(Effect.ensuring(Effect.sync(() => maintaining.delete(key))))
         }),
       )
 
+    // `active` counts runs per key, so the total is the sum of its values.
+    const busy = () => [...active.values()].reduce((sum, count) => sum + count, 0) + maintaining.size
+
+    const closeIfIdle = Effect.suspend(() => {
+      if (busy() > 0) return Effect.succeed(false)
+      closing = true
+      return Effect.as(close, true)
+    })
+
     return Service.of({
       run,
       maintain,
       close,
+      busy,
+      closeIfIdle,
     })
   }),
 )

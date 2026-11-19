@@ -204,20 +204,32 @@ export async function readTail(file: string, lines: number, maxChars: number) {
   return rows.slice(-lines).join("\n").slice(-maxChars)
 }
 
+// Every loaded instance's live jobs, so the server's idle check (server/idle.ts) sees them all.
+const _allLive = new Set<Map<string, Job>>()
+
+/** Background shell jobs still running in any loaded instance of this process. */
+export function runningCount() {
+  let count = 0
+  for (const live of _allLive) for (const job of live.values()) if (job.info.status === "running") count++
+  return count
+}
+
 const make = Effect.fn("ShellJobs.make")(function* () {
   const scope = yield* Scope.Scope
   const spawner = yield* ChildProcessSpawner
   const live = new Map<string, Job>()
+  _allLive.add(live)
 
   yield* Effect.addFinalizer(() =>
     // Spawn finalizers killed the processes already; record that for jobs the scope cut off.
-    Effect.promise(() =>
-      Promise.all(
+    Effect.promise(() => {
+      _allLive.delete(live)
+      return Promise.all(
         [...live.values()]
           .filter((job) => job.info.status === "running")
           .map((job) => writeInfo({ ...job.info, status: "killed", endedAt: Date.now() })),
-      ),
-    ),
+      )
+    }),
   )
   yield* Effect.promise(() => recover())
 

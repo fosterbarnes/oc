@@ -156,6 +156,50 @@ describe("global HttpApi", () => {
     }),
   )
 
+  it.live("an ifIdle shutdown refuses with 409 while a session runs and keeps serving", () =>
+    Effect.gen(function* () {
+      const work = yield* SessionWork.Service
+      let scheduled = false
+      yield* Effect.acquireRelease(
+        Effect.sync(() =>
+          ServerLifecycle.setController({
+            shutdown: () => {
+              scheduled = true
+            },
+            restart: () => {
+              throw new Error("Unexpected restart")
+            },
+          }),
+        ),
+        (clear) => Effect.sync(clear),
+      )
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const active = yield* work
+        .run("global", Deferred.succeed(started, undefined).pipe(Effect.andThen(Deferred.await(finish))))
+        .pipe(Effect.forkChild)
+      yield* Deferred.await(started)
+      const response = yield* HttpClientRequest.post(`${GlobalPaths.shutdown}?ifIdle=1`).pipe(HttpClient.execute)
+      expect(response.status).toBe(409)
+      expect(yield* response.json).toMatchObject({ name: "ServerBusy", data: { message: "1 session run(s) running" } })
+      yield* Deferred.succeed(finish, undefined)
+      yield* Fiber.await(active)
+      expect(scheduled).toBeFalse()
+      expect(ServerLifecycle.isHealthy()).toBeTrue()
+      expect(yield* work.run("global", Effect.succeed("admitted"))).toBe("admitted")
+    }),
+  )
+
+  it.live("rejects a no-window revive request with an invalid id", () =>
+    Effect.gen(function* () {
+      const response = yield* HttpClientRequest.post(GlobalPaths.ocRevive).pipe(
+        HttpClientRequest.bodyJsonUnsafe({ id: "../x" }),
+        HttpClient.execute,
+      )
+      expect(response.status).toBe(400)
+    }),
+  )
+
   it.live("rejects lifecycle controls for an unmanaged server", () =>
     Effect.gen(function* () {
       const shutdown = yield* HttpClientRequest.post(GlobalPaths.shutdown).pipe(HttpClient.execute)

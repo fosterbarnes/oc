@@ -38,6 +38,8 @@ import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecy
 import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { ServerShutdown } from "@/server/shutdown"
+import { ServerIdle } from "@/server/idle"
+import { SessionWork } from "@opencode-ai/core/session/work"
 import { Cause, Effect, Layer, Queue, Result } from "effect"
 import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
@@ -45,7 +47,10 @@ import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { RootHttpApi } from "../api"
 import {
+  GlobalShutdownQuery,
   GlobalUpgradeInput,
+  OcReviveInput,
+  ServerBusy,
   ServerLifecycleUnavailable,
   ApiWarmupScheduleError,
   ApiWarmupStoreError,
@@ -161,7 +166,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       return true
     })
 
-    const shutdown = Effect.fn("GlobalHttpApi.shutdown")(function* () {
+    const shutdown = Effect.fn("GlobalHttpApi.shutdown")(function* (ctx: { query: typeof GlobalShutdownQuery.Type }) {
       const controller = ServerLifecycle.getController()
       if (!controller) {
         return yield* new ServerLifecycleUnavailable({
@@ -169,12 +174,37 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
           data: { message: "Server lifecycle control is only available for a headless server." },
         })
       }
-      // Explicit ordering: dispose first, then schedule process exit.
+      // `ifIdle`: shell jobs and terminals first, then `closeIfIdle` checks session work and closes
+      // admission in one step, so no prompt starts between the check and the stop.
+      if (ctx.query.ifIdle === "1") {
+        const report = yield* ServerIdle.report()
+        const work = yield* SessionWork.Service
+        const closed = !ServerIdle.isBusy(report) && (yield* work.closeIfIdle)
+        if (!closed) {
+          const message = ServerIdle.describe(ServerIdle.isBusy(report) ? report : yield* ServerIdle.report())
+          return yield* new ServerBusy({ name: "ServerBusy", data: { message } })
+        }
+      }
+      // Explicit ordering: dispose first, then schedule process exit. Once admission is closed the
+      // server must exit, so a failed dispose still ends in `controller.shutdown`.
       // HTTP 200 is not a replacement barrier; callers must not assume new server is ready.
-      yield* Effect.promise(() => ServerLifecycle.beginShutdown(false))
-      yield* prepareShutdown
-      yield* Effect.sync(() => setTimeout(controller.shutdown, 0))
+      yield* Effect.promise(() => ServerLifecycle.beginShutdown(false)).pipe(
+        Effect.andThen(prepareShutdown),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("shutdown cleanup failed; exiting anyway", { cause: String(cause) }),
+        ),
+        Effect.ensuring(Effect.sync(() => setTimeout(controller.shutdown, 0))),
+      )
       return true
+    })
+
+    // No-window /mirror revive. Refuses while anything runs or any oc window is open (that window
+    // would have claimed the request); otherwise starts the revive helper in this server's session.
+    const ocRevive = Effect.fn("GlobalHttpApi.ocRevive")(function* (ctx: { payload: typeof OcReviveInput.Type }) {
+      const report = yield* ServerIdle.report()
+      if (ServerIdle.isBusy(report)) return { state: "busy" as const, detail: ServerIdle.describe(report) }
+      const { ReviveHost } = yield* Effect.promise(() => import("@/config/reviveHost"))
+      return yield* Effect.promise(() => ReviveHost.startHeadless(ctx.payload.id, ctx.payload.from))
     })
 
     const restart = Effect.fn("GlobalHttpApi.restart")(function* () {
@@ -389,6 +419,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
       .handle("configUpdate", configUpdate)
       .handle("dispose", dispose)
       .handle("shutdown", shutdown)
+      .handle("ocRevive", ocRevive)
       .handle("restart", restart)
       .handle("upgrade", upgrade)
       .handle("claudeWarmup", claudeWarmup)

@@ -265,14 +265,41 @@ export function useRevive(toast: ToastContext) {
   // The swap: stops oc, installs `output` (if any), and reopens. Only this part closes the window.
   const swap = async (
     mode: "install" | "no-install",
-    options: { sessionID?: string; output?: string[]; resume?: string; next?: string[] } = {},
+    options: {
+      sessionID?: string
+      output?: string[]
+      resume?: string
+      next?: string[]
+      mirror?: OcMirror.ReviveRequest
+    } = {},
   ) => {
     // A reply started during the build finishes first.
     if (options.sessionID && (sync.data.session_status[options.sessionID]?.type ?? "idle") !== "idle") {
       toast.show({ message: "Build ready; restarting after this reply", variant: "info" })
       await idle(options.sessionID)
     }
-    await mark(options.sessionID, options.next)
+    const mirror = options.mirror
+    if (mirror) {
+      // Nobody here asked for this revive: stop the server only if nothing runs anywhere on it, and
+      // otherwise leave every window open. No revive divider, since the revive may not happen.
+      const stopped = await sdk.client.global.shutdown({ ifIdle: "1" }).catch((error: unknown) => ({ error }))
+      if (stopped.error) {
+        const body = stopped.error as { name?: string; data?: { message?: string } }
+        const busy = body?.name === "ServerBusy"
+        const detail =
+          stopped.error instanceof Error
+            ? stopped.error.message
+            : (body?.data?.message ?? (busy ? "server busy" : JSON.stringify(stopped.error)))
+        await OcMirror.writeStatus(mirror.id, { state: busy ? "busy" : "failed", detail }).catch(() => undefined)
+        toast.show({
+          message: busy
+            ? `Revive from ${mirror.from} skipped: ${detail}`
+            : `Revive from ${mirror.from} failed: ${detail}`,
+          variant: "warning",
+        })
+        return
+      }
+    } else await mark(options.sessionID, options.next)
     const base = baseContext(mode, options.sessionID, options.resume)
     // Read now: on macOS the window closes with this TUI, before the restarter reopens it.
     const window = base.paneID ? WeztermWindow.capture(base.paneID) : undefined
@@ -281,6 +308,7 @@ export function useRevive(toast: ToastContext) {
       ...(window ? { window } : {}),
       ...(Global.native ? { native: true, tuiPid: process.pid } : {}),
       ...(options.output ? { output: options.output } : {}),
+      ...(mirror ? { mirror: mirror.id } : {}),
     }
     // Hosted by an `oc`/`occ` launcher: hand off and exit, so it shows revive progress in this window
     // (Revive.handoffPath). Otherwise a hidden helper runs the same pipeline.
@@ -401,11 +429,22 @@ export function useMirrorRevive(toast: ToastContext) {
   if (Global.native) return
   const dir = OcMirror.reviveDir()
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
+  // Reports to the sender through the request's status file (`oc oc mirror status`).
   const check = async () => {
     const request = await OcMirror.takeRevive()
     if (!request) return
+    const status = (value: Omit<OcMirror.ReviveStatus, "at">) =>
+      OcMirror.writeStatus(request.id, value).catch(() => undefined)
+    await status({ state: "building" })
     toast.show({ message: `oc source mirrored from ${request.from}; reviving`, variant: "info" })
-    await revive.start("install", route.data.type === "session" ? route.data.sessionID : undefined)
+    const output = await revive.prepare({})
+    if (!output) return status({ state: "failed", detail: "build failed", log: "revive-build.log" })
+    if (!output.length) {
+      toast.show({ message: `oc source from ${request.from} matches this build; no revive needed`, variant: "info" })
+      return status({ state: "unchanged" })
+    }
+    const sessionID = route.data.type === "session" ? route.data.sessionID : undefined
+    await revive.swap("install", { sessionID, output, mirror: request })
   }
   // The request is renamed into place; some platforms report the temporary name.
   const watcher = fs.watch(dir, (_event, name) => {

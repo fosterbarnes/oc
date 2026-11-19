@@ -436,12 +436,29 @@ const MirrorCommand = cmd({
       })
       .command({
         command: "revive",
-        describe: "ask an open oc window to revive",
+        describe: "revive oc: an open window, else the resident server when nothing runs",
         builder: (nested) => nested.option("from", { type: "string" }),
         handler: async (args) => {
           if (await mirrorRefused()) return
           const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
-          console.log(JSON.stringify({ claimed: await OcMirror.requestRevive(args.from ?? "peer") }))
+          const request = await OcMirror.requestRevive(args.from ?? "peer")
+          if (request.claimed) {
+            console.log(JSON.stringify({ id: request.id, state: "window" }))
+            return
+          }
+          // No window took it, and this call holds its claim: the resident server may revive.
+          const started = await Resident.requestMirrorRevive(request.id, request.from)
+          console.log(JSON.stringify({ id: request.id, ...started }))
+        },
+      })
+      .command({
+        command: "status",
+        describe: "print a revive request's status",
+        builder: (nested) => nested.option("id", { type: "string", demandOption: true }),
+        handler: async (args) => {
+          if (await mirrorRefused()) return
+          const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+          console.log(JSON.stringify({ status: (await OcMirror.readStatus(args.id)) ?? null }))
         },
       })
       .demandCommand(),
@@ -500,6 +517,11 @@ export const OcCommand = cmd({
         hidden: true,
         describe: "Build or download what an encoded /revive request installs, before oc stops",
       })
+      .option("revive-headless", {
+        type: "string",
+        hidden: true,
+        describe: "Revive for a /mirror request with no oc window open (started by the resident server)",
+      })
       .option("revive-terminal", {
         type: "string",
         hidden: true,
@@ -528,6 +550,7 @@ export const OcCommand = cmd({
           Boolean(argv["shutdown-all"]),
           argv.revive !== undefined,
           argv["revive-prepare"] !== undefined,
+          argv["revive-headless"] !== undefined,
           argv["revive-terminal"] !== undefined,
         ].filter(Boolean).length
         if (selected > 0 && argv._.length > 1)
@@ -551,6 +574,13 @@ export const OcCommand = cmd({
       })
       await fs.mkdir(path.dirname(request.result), { recursive: true })
       await fs.writeFile(request.result, JSON.stringify({ output }))
+      return
+    }
+    if (args["revive-headless"] !== undefined) {
+      const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+      const id = String(args["revive-headless"])
+      if (!OcMirror.REVIVE_ID.test(id)) throw new CliError({ message: `Invalid revive id: ${id}` })
+      await ReviveHost.reviveHeadless(id)
       return
     }
     if (args["revive-terminal"] !== undefined) {

@@ -86,14 +86,49 @@ export function DialogMirror() {
     if (mode === "ask" && !(await DialogConfirm.show(dialog, "Revive", `Revive oc on ${probe.host}?`, "Revive")))
       return reopen()
     if (mode === "ask") reopen()
-    const claimed = await OcMirror.revive(probe).catch((error: unknown) => {
+    const started = await OcMirror.revive(probe).catch((error: unknown) => {
       toast.show({ variant: "error", message: `Revive on ${probe.host} failed: ${errorMessage(error)}` })
     })
-    if (claimed === undefined) return
-    toast.show({
-      variant: claimed ? "success" : "warning",
-      message: claimed ? `oc on ${probe.host} is reviving` : `No oc window open on ${probe.host}; revive skipped`,
-    })
+    if (!started) return
+    const host = probe.host
+    const ended: Partial<Record<OcMirror.ReviveStart, string>> = {
+      busy: `${host} is busy; revive skipped${started.detail ? ` (${started.detail})` : ""}`,
+      "windows-open": `An oc window on ${host} didn't respond; revive skipped`,
+      "no-server": `Mirrored; oc isn't running on ${host}`,
+      "too-old": `Revive skipped: oc on ${host} is too old for no-window revive`,
+      unclaimed: `No oc window open on ${host}; revive skipped`,
+    }
+    const message = ended[started.state]
+    if (message) return toast.show({ variant: started.state === "no-server" ? "info" : "warning", message })
+    // An older target that a window claimed reports nothing more.
+    if (!started.id) return toast.show({ variant: "success", message: `oc on ${host} is reviving` })
+    void followRevive(probe, started.id)
+  }
+
+  // Polls the target's revive status in the background (the dialog may close) until it ends.
+  async function followRevive(probe: OcMirror.Probe, id: string) {
+    const host = probe.host
+    toast.show({ variant: "info", message: `Reviving ${host}…`, duration: 20 * 60_000 })
+    const until = Date.now() + 20 * 60_000
+    while (Date.now() < until) {
+      await Bun.sleep(5_000)
+      // The target's ssh or oc may be restarting: a failed poll just tries again.
+      const status = await OcMirror.status(probe, id).catch(() => undefined)
+      if (!status || status.state === "building") continue
+      const log = status.log ? `; log on ${host}: ${status.log}` : ""
+      const final: Record<
+        Exclude<OcMirror.ReviveState, "building">,
+        [string, "success" | "info" | "warning" | "error"]
+      > = {
+        revived: [`${host} revived${status.version ? ` to v${status.version.split("-")[0]}` : ""}`, "success"],
+        busy: [`${host} is busy; revive skipped${status.detail ? ` (${status.detail})` : ""}`, "warning"],
+        unchanged: [`${host} already runs this build; no revive needed`, "info"],
+        failed: [`Revive on ${host} failed: ${status.detail ?? "unknown error"}${log}`, "error"],
+      }
+      const [text, variant] = final[status.state]
+      return toast.show({ variant, message: text, duration: variant === "error" ? 20_000 : undefined })
+    }
+    toast.show({ variant: "warning", message: `No revive result from ${host} after 20 minutes` })
   }
 
   // What to do with the target's own changes. Undefined: cancelled.
