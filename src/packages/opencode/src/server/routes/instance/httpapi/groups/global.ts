@@ -14,8 +14,6 @@ import { ApiNotFoundError, InvalidRequestError } from "../errors"
 const GlobalHealth = Schema.Struct({
   healthy: Schema.Literal(true),
   version: Schema.String,
-  // oc's own version (`.version/version`); `version` stays the upstream OpenCode version.
-  displayVersion: Schema.String,
 })
 
 const SyncEventSchemas = EventManifest.Latest.values()

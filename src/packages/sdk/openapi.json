@@ -405,12 +405,9 @@
                     },
                     "version": {
                       "type": "string"
-                    },
-                    "displayVersion": {
-                      "type": "string"
                     }
                   },
-                  "required": ["healthy", "version", "displayVersion"],
+                  "required": ["healthy", "version"],
                   "additionalProperties": false,
                   "description": "Health information"
                 }

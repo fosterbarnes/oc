@@ -35,7 +35,7 @@ import {
 } from "@/provider/claude-code/warmup/store"
 import { emailKey, readClaudeAccounts, saveWarmup } from "@/provider/claude-code/warmup/synced"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "@/server/global-lifecycle"
-import { InstallationDisplayVersion, InstallationVersion } from "@opencode-ai/core/installation/version"
+import { InstallationVersion } from "@opencode-ai/core/installation/version"
 import { ServerLifecycle } from "@/server/lifecycle"
 import { ServerShutdown } from "@/server/shutdown"
 import { ServerIdle } from "@/server/idle"
@@ -142,7 +142,7 @@ export const globalHandlers = HttpApiBuilder.group(RootHttpApi, "global", (handl
 
     const health = Effect.fn("GlobalHttpApi.health")(function* () {
       if (!ServerLifecycle.isHealthy()) return yield* Effect.die(new Error("Server is draining"))
-      return { healthy: true as const, version: InstallationVersion, displayVersion: InstallationDisplayVersion }
+      return { healthy: true as const, version: InstallationVersion }
     })
 
     const event = Effect.fn("GlobalHttpApi.event")(function* () {

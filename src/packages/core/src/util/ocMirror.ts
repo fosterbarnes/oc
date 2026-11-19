@@ -432,7 +432,10 @@ export async function writeStatus(id: string, status: Omit<ReviveStatus, "at">) 
 export async function readStatus(id: string) {
   if (!REVIVE_ID.test(id)) throw new Error(`Invalid revive id: ${id}`)
   const text = await fs.readFile(path.join(reviveDir(), `status-${id}.json`), "utf8").catch(() => undefined)
-  return text === undefined ? undefined : parseStatus(JSON.parse(text))
+  const status = text === undefined ? undefined : parseStatus(JSON.parse(text))
+  // The writer is the binary the revive replaced; this reader (`oc oc mirror status`) is the newly
+  // installed one, so its own version is the version the machine revived to.
+  return status?.state === "revived" ? { ...status, version: InstallationDisplayVersion } : status
 }
 
 function parseStatus(raw: unknown): ReviveStatus | undefined {
@@ -442,7 +445,6 @@ function parseStatus(raw: unknown): ReviveStatus | undefined {
   return {
     state: value.state as ReviveState,
     detail: text(value.detail),
-    version: text(value.version),
     log: text(value.log),
     at: typeof value.at === "number" ? value.at : 0,
   }

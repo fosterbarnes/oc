@@ -729,18 +729,6 @@ export async function startServer() {
   return withResidentLock(() => startServerUnlocked())
 }
 
-/** The running resident server's oc version (`/global/health`), or undefined when it does not answer. */
-export async function serverVersion() {
-  const state = await readResidentState().catch(() => undefined)
-  if (!state?.hostname || !state.port) return
-  const response = await fetch(`${residentUrl(state.hostname, state.port)}/global/health`, {
-    headers: { authorization: basicAuth(await serverSecret()) },
-    signal: AbortSignal.timeout(5_000),
-  }).catch(() => undefined)
-  if (!response?.ok) return
-  return ((await response.json().catch(() => ({}))) as { displayVersion?: string }).displayVersion
-}
-
 /** Waits up to 35 s for the recorded resident server to exit; true when none is left running. */
 export async function waitForServerExit() {
   const state = await readResidentState()

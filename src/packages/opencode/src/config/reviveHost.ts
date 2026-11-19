@@ -19,7 +19,6 @@ import {
   listOcProcesses,
   ServerBusyError,
   serverStateDirectory,
-  serverVersion,
   shutdownAll,
   startServer,
   stopServer,
@@ -154,9 +153,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
   if (failure && (context.supervisorPid || context.native)) throw failure.error
   if (context.resume) await ReviveResume.settle(context.resume, failure ? "failed" : "ready")
   if (context.mirror && !failure)
-    await OcMirror.writeStatus(context.mirror, { state: "revived", version: await serverVersion() }).catch(
-      () => undefined,
-    )
+    await OcMirror.writeStatus(context.mirror, { state: "revived" }).catch(() => undefined)
   await log.step(`Handing off to the terminal restarter (log: ${log.file})`, () =>
     awaitLaunch(
       launchDetached(process.execPath, [
@@ -300,7 +297,7 @@ export async function reviveHeadless(
       }
       // No restarter runs here, so the `.old-*` files of this install are removed now.
       await Revive.removeLeftovers(installDir).catch(() => undefined)
-      return { state: "revived" as const, version: await serverVersion() }
+      return { state: "revived" as const }
     })
   })().catch(async (error: unknown) => {
     await log.write(`Revive (no window) failed: ${error instanceof Error ? error.message : String(error)}`)

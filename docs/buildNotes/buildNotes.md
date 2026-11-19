@@ -131,6 +131,22 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-19 (~04:58) - v0.2.397 zeWorth - Mirror revive version from the new binary - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation (/imp after /debug); completed
+- Version: 0.2.397
+- Fixed: v0.2.396 still toasted "revived to v1.19.3" because the status writer is the pre-revive binary (headless helper launched by the old resident server, `startHeadless` in `reviveHost.ts`), so a version change in the writer lags one revive. Debug notes: `~/.config/opencode/plans/2026-11-19-debug-mirrorReviveVersion.md`.
+- Changed `OcMirror.readStatus` (`core/src/util/ocMirror.ts`) to stamp its own `InstallationDisplayVersion` on a `revived` status; the reader is `oc oc mirror status`, run by the newly installed binary. `parseStatus` no longer reads `version`.
+- Removed `serverVersion()` (`config/resident.ts`) and the writers' `version` (`reviveHost.ts`). Reverted the v0.2.396 `/global/health` `displayVersion` field (no other user); SDK regenerated.
+- Verification: core and opencode typecheck pass; `test/config/revive.test.ts` 0 fail (11 skip); scratch probe of write/read: revived -> own version (also overrides an old-writer file with "1.19.3"), busy -> no version. Not run: live mirror revive. First revive after this still uses the target's 0.2.396 helper, but the 0.2.397 reader on the target sets the version, so it shows correctly right away.
+
+### User
+Mirror
+- After a mirror revive, the sending machine shows the oc version the other machine revived to, starting with the very next revive.
+
+---
+
 ## 2026-11-19 (~04:52) - v0.2.396 deltronCitzen - Mirror revive toast shows oc version - Claude Opus 5.5, low; Build
 
 ### Agent
