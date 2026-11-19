@@ -131,6 +131,26 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~22:08) - v0.2.391 gotttaAvarice - buildNotes.txt moves to the repo root, git-ignored - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed. Plan: `~/.config/opencode/plans/2026-11-18-agentPush-buildNotes-root.md`, from debug notes `2026-11-18-debug-agentPush-buildNotes-path.md`.
+- Version: 0.2.391 gotttaAvarice
+- Moved `$buildNotes` to the repo root (`.scripts/scriptHelper.ps1`), added `/buildNotes.txt` to `.gitignore`, and `git rm`'d the tracked `docs/buildNotes/buildNotes.txt`. Every other repo (flashCK, rustitles, ...) already keeps it at root; agent-push agents wrote it there and failed.
+- Rewrote `testBuildNotesChanged` (flashCK rule): new message = line 1 non-empty and different from `git log -1 %s`; missing/empty = false; no commits = true; git failure throws. Callers `agentPush.ps1` and `push.ps1` unchanged apart from comments and errors.
+- Added `$commitSubjectLimit` (72) and `getSubjectBudget`; `agentPush.ps1 -Context`/`-SetTag` print `(inside [ ]: max N chars)`, and `-Context` prints the message file location (small deviation from the plan, which skipped it).
+- Updated `AGENTS.md`, `SCRIPTS.md`, `docs/dev/commitMessage.md` for the root path and the new change rule.
+- Verification: `.scripts/tests/buildNotesChanged.tests.ps1` ("buildNotes change checks passed.", rewritten cases) and `commitSubject.tests.ps1` ("Commit subject checks passed (3 good, 15 bad)." plus exact-budget/over-budget case) pass on macOS; probes: `-Context` shows "max 50 chars" and the file line; `push.ps1 -DryRun` with no root file throws the new error; with a probe root file it uses its subject; `git check-ignore -v buildNotes.txt` -> `.gitignore:49`. Probe file deleted.
+- MISTAKE: appending to `.gitignore` with printf joined its last line (file had no trailing newline) and briefly un-ignored `.installer/ocSetup/obj/`; repaired. Prevention: check the trailing newline before appending.
+- Fixed `buildNotesChanged.tests.ps1` to use `Join-Path` (old `"$temp\file"` paths were wrong outside Windows).
+
+### User
+Scripts
+- agent-push now writes the commit message to `buildNotes.txt` at the repo root, like the other repos, and git ignores it.
+- agent-push shows how many characters the commit summary may use before writing it.
+
+---
+
 ## 2026-11-18 (~21:57) - v0.2.390 fawstaLily - Claude chat cost is the real turn cost and shows sub-cent amounts - Claude Opus 5.5, low; Imp
 
 ### Agent

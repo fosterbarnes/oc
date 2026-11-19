@@ -30,7 +30,7 @@ These rules apply to one activity each, so they live outside this file. Read the
 
 ## Build notes
 
-- Session history lives in `docs/buildNotes/buildNotes.md` (`# Historical entries (newest first)`, newest-first), not the repo root. Archives (`buildNotes.archiveN.md`) and `buildNotes.txt` live in the same folder. For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`, with this folder in place of the repo root.
+- Session history lives in `docs/buildNotes/buildNotes.md` (`# Historical entries (newest first)`, newest-first), not the repo root. Archives (`buildNotes.archiveN.md`) live in the same folder; `buildNotes.txt` (next commit message) stays at the repo root, git-ignored. For insert/rotate procedure use skills `base/build-notes` and `base/build-notes-archive`, with this folder in place of the repo root.
 - Summary budget: at rotation, the fresh file's cumulative summary is at most 80 lines and 12 KB, lines of at most 300 characters. Keep invariants true in the current code, standing rules not already in `AGENTS.md` or `principles.md`, and `MISTAKE`/`ERROR` rules that still apply. Drop removed or replaced features, per-version history, and anything `AGENTS.md`, `FORK.md`, or `principles.md` already states; the archives keep the full text. This narrows the skill's "no fixed max".
 - Do not create notes under `.md/`.
 

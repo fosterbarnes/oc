@@ -39,7 +39,8 @@ $versionFolder = Join-Path $srcRoot '.version'
 $version = Join-Path $versionFolder 'version'
 $versionTag = Join-Path $versionFolder 'versionTag'
 $yapWords = Join-Path $repoRoot '.res' 'yapBot.json'
-$buildNotes = Join-Path $repoRoot 'docs' 'buildNotes' 'buildNotes.txt'
+$buildNotes = Join-Path $repoRoot 'buildNotes.txt'
+$commitSubjectLimit = 72
 $ghRepo = 'fosterbarnes/oc'
 # Commit subject labels in decision order; docs/dev/commitMessage.md defines each.
 $commitLabels = 'sync', 'fix', 'feat.', 'patch', 'perf.', 'deps.', 'scripts', 'cleanup', 'docs', 'misc.'
@@ -54,18 +55,19 @@ function runNativeCommand {
     if ($LASTEXITCODE) { throw "$Name failed (exit $LASTEXITCODE)." }
 }
 
-# True when buildNotes.txt differs from HEAD or is not tracked yet. git diff --quiet exits 1 for
-# a difference; any other nonzero exit is a git failure, not a changed file.
+# buildNotes.txt is git-ignored, so it holds a new message when line 1 is non-empty and differs
+# from the last commit subject. Missing or empty: false. No commits yet: true. Git failure: throws.
 function testBuildNotesChanged {
-    $tracked = @(& git ls-files -- $buildNotes)
-    if ($LASTEXITCODE) { throw "git ls-files failed (exit $LASTEXITCODE)." }
-    if (-not $tracked) { return $true }
-    & git diff --quiet HEAD -- $buildNotes
-    switch ($LASTEXITCODE) {
-        0 { return $false }
-        1 { return $true }
-        default { throw "git diff failed (exit $LASTEXITCODE)." }
-    }
+    if (-not (Test-Path -LiteralPath $buildNotes)) { return $false }
+    $title = "$(@([IO.File]::ReadAllLines($buildNotes))[0])".Trim()
+    if (-not $title) { return $false }
+    & git rev-parse --git-dir *> $null
+    if ($LASTEXITCODE) { throw "git rev-parse failed (exit $LASTEXITCODE)." }
+    & git rev-parse -q --verify HEAD *> $null
+    if ($LASTEXITCODE) { return $true }
+    $head = & git log -1 --format=%s
+    if ($LASTEXITCODE) { throw "git log failed (exit $LASTEXITCODE)." }
+    $title -ne "$head".Trim()
 }
 
 function getBunVersion {
@@ -242,7 +244,15 @@ function assertCommitSubject {
     if ($second -and $first -eq $second) { throw "Line 1 repeats label '$first'; merge the segments." }
     if ($second -and 'misc.' -in $first, $second) { throw "'misc.' must be the only segment." }
     if ($Subject -match '[^\x20-\x7E]') { throw 'Line 1 must be plain ASCII.' }
-    if ($Subject.Length -gt 72) { throw "Line 1 is $($Subject.Length) characters; the limit is 72." }
+    if ($Subject.Length -gt $commitSubjectLimit) {
+        throw "Line 1 is $($Subject.Length) characters; the limit is $commitSubjectLimit."
+    }
+}
+
+# Characters left for the "<label> > <summary>" part after "<Prefix> [" and before "]".
+function getSubjectBudget {
+    param([Parameter(Mandatory)][string]$Prefix)
+    $commitSubjectLimit - "$Prefix [".Length - 1
 }
 
 function writeClearedLine {

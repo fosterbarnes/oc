@@ -10,7 +10,7 @@ $current = requireVersion
 if ($Tags) { getVersionTags 10; return }
 if ($SetTag) {
     $set = setVersionTag $SetTag
-    Write-Host "line 1: v$current $set [<label> > <summary>]"
+    Write-Host "line 1: v$current $set [<label> > <summary>]  (inside [ ]: max $(getSubjectBudget "v$current $set") chars)"
     return
 }
 $tagWord = requireVersionTag
@@ -22,7 +22,8 @@ $bumpFix = "Code changed but the version is still $current. Run .scripts\bumpVer
 
 if ($Context) {
     Write-Host "branch: $(git branch --show-current)  version: $current $tagWord"
-    Write-Host "line 1: v$current $tagWord [<label> > <summary>]"
+    Write-Host "line 1: v$current $tagWord [<label> > <summary>]  (inside [ ]: max $(getSubjectBudget "v$current $tagWord") chars)"
+    Write-Host 'message file: buildNotes.txt at the repo root (git-ignored)'
     Write-Host "labels (decision order; rules in docs/dev/commitMessage.md): $($commitLabels -join ' ')"
     Write-Host '--- status'
     git status --short 2>$null
@@ -32,14 +33,14 @@ if ($Context) {
     git log -10 --format=%s
     Write-Host '--- last commit message (style sample)'
     git log -1 --format=%B
-    if ($notesChanged) { Write-Host 'WARN: buildNotes.txt already changed since HEAD; overwrite it.' }
+    if ($notesChanged) { Write-Host 'WARN: buildNotes.txt already holds a new message; overwrite it.' }
     if ($unbumped) { Write-Host "ACTION: $bumpFix" }
     return
 }
 
 # Fail on a bad message before the slow checks run.
 if ($unbumped) { throw "$bumpFix Changed: $($unbumped -join ', ')" }
-if (-not $notesChanged) { throw 'buildNotes.txt is unchanged since the last commit; write the new message first.' }
+if (-not $notesChanged) { throw 'buildNotes.txt (repo root) has no new message: missing, empty, or line 1 matches the last commit; write the new message first.' }
 $lines = @([IO.File]::ReadAllLines($buildNotes))
 assertCommitSubject $lines[0].Trim() "v$current $tagWord"
 if ($lines.Count -lt 3 -or $lines[1].Trim() -or -not ($lines[2..($lines.Count - 1)] -join '').Trim()) {

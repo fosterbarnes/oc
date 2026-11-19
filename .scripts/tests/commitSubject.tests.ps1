@@ -33,4 +33,12 @@ foreach ($subject in $fail) {
     try { assertCommitSubject $subject $prefix } catch { $threw = $true }
     if (-not $threw) { throw "Accepted a bad subject: $subject" }
 }
+# The budget from getSubjectBudget fits exactly; one more character fails.
+$budget = getSubjectBudget $prefix
+$fit = "$prefix [fix > $('x' * ($budget - 6))]"
+assertCommitSubject $fit $prefix
+if ($fit.Length -ne $commitSubjectLimit) { throw "Budget subject is $($fit.Length) chars, expected $commitSubjectLimit." }
+$threw = $false
+try { assertCommitSubject "$prefix [fix > $('x' * ($budget - 5))]" $prefix } catch { $threw = $true }
+if (-not $threw) { throw 'Accepted a subject one character over the budget.' }
 Write-Host "Commit subject checks passed ($($pass.Count) good, $($fail.Count) bad)."
