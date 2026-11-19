@@ -131,6 +131,21 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-19 (~04:52) - v0.2.396 deltronCitzen - Mirror revive toast shows oc version - Claude Opus 5.5, low; Build
+
+### Agent
+- Meta: Claude Opus 5.5; low; Build; completed
+- Version: 0.2.396
+- Fixed `serverVersion()` (`config/resident.ts`) returning upstream `InstallationVersion` (1.19.3) from `/global/health`, so the mirror "revived to vX" toast showed the OpenCode version. Added `displayVersion` (`InstallationDisplayVersion`) to `GlobalHealth` (`groups/global.ts`, `handlers/global.ts`); `serverVersion()` reads it. `version` stays upstream for client compat.
+- Regenerated legacy JS SDK (`types.gen.ts`). openapi.json regenerates on prePush.
+- Verification: opencode typecheck pass; `httpapi-sdk.test.ts` 19 pass; scratch probe of `sdk.global.health()` returned `displayVersion` ("local" in source runs, no build defines). Not run: live mirror revive between machines.
+
+### User
+Mirror
+- A mirror revive now reports the oc version it revived to (for example v0.2.396) instead of the OpenCode version.
+
+---
+
 ## 2026-11-19 (~04:19) - v0.2.395 autopaidCheese - Mirror revive with no window open, and only when the target is idle - Claude Opus 5.5, low; Imp
 
 ### Agent
