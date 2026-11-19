@@ -12562,6 +12562,7 @@ export type SessionClaudeAccountStateResponses = {
       current: boolean
       pinned?: boolean
       limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      kind?: "api"
     }>
   }
 }
@@ -12602,6 +12603,7 @@ export type SessionClaudeAccountSetResponses = {
       current: boolean
       pinned?: boolean
       limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      kind?: "api"
     }>
   }
 }

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { copyCommand } from "@opencode-ai/core/util/clipboard"
+import { PasteEvent } from "@opentui/core"
 import { read } from "../src/clipboard"
 import { existsSync } from "node:fs"
 import { rm, writeFile } from "node:fs/promises"
@@ -24,13 +25,15 @@ test("returns undefined when native clipboard is unavailable", () => {
 })
 
 const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+// Reads need the user's paste as their trigger (an empty bracketed paste, as Windows Terminal <1.25 sends).
+const paste = new PasteEvent(new Uint8Array())
 
 test("returns the image file dropped on the Windows clipboard as image data", async () => {
   const file = path.join(tmpdir(), `clipboard-drop-${process.pid}.png`)
   await writeFile(file, pngBytes)
   let script = ""
   try {
-    const result = await read({
+    const result = await read(paste, {
       os: "win32",
       host: async () => undefined,
       command: async (_command, args) => {
@@ -53,7 +56,7 @@ test("returns and removes the temporary image for image-only Windows clipboard d
   const outputPath = path.join(tmpdir(), `opencode-clipboard-${process.pid}.png`)
   const escapedOutputPath = outputPath.replace(/'/g, "''")
   await writeFile(outputPath, pngBytes)
-  const result = await read({
+  const result = await read(paste, {
     os: "win32",
     host: async () => undefined,
     command: async (_command, args) => {
@@ -70,7 +73,7 @@ test("returns and removes the temporary image for image-only Windows clipboard d
 })
 
 test("keeps ordinary Windows clipboard text as the fallback", async () => {
-  const result = await read({
+  const result = await read(paste, {
     os: "win32",
     host: async () => undefined,
     command: async () => Buffer.alloc(0),
@@ -82,7 +85,7 @@ test("keeps ordinary Windows clipboard text as the fallback", async () => {
 
 test("skips the PowerShell read when the native Windows clipboard has content", async () => {
   let ran = false
-  const result = await read({
+  const result = await read(paste, {
     os: "win32",
     host: async () => ({ data: "clipboard text", mime: "text/plain" }),
     command: async () => {
@@ -97,7 +100,7 @@ test("skips the PowerShell read when the native Windows clipboard has content", 
 
 test("skips osascript when the native macOS clipboard has content", async () => {
   let ran = false
-  const result = await read({
+  const result = await read(paste, {
     os: "darwin",
     host: async () => ({ data: "clipboard text", mime: "text/plain" }),
     command: async () => {
@@ -111,7 +114,7 @@ test("skips osascript when the native macOS clipboard has content", async () => 
 })
 
 test("falls back to osascript when the native macOS clipboard is empty", async () => {
-  const result = await read({
+  const result = await read(paste, {
     os: "darwin",
     host: async () => undefined,
     command: async (command, args) => {

@@ -17,7 +17,7 @@ import {
   retireOtherAccount,
   workingAccount,
 } from "./sessionManager.js"
-import { apiAccountId, poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
+import { apiAccountId, apiKeyReady, poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { setProxyDeadlineGuard } from "./proxyDeadline.js"
@@ -139,6 +139,8 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     const hasPriorConversation = options.prompt.some((m) => m.role === "assistant")
     resetStaleSession(turn, hasPriorConversation)
     const accountIds = poolAccountIds(this.config.accounts)
+    // A keychain API key still loading would leave an API-pinned chat to fall back to a login.
+    await apiKeyReady()
     // Running work (turn or CLI tasks) finishes on its account; a palette switch applies after it.
     const working = workingAccount(turn.sessionKey)
     const keepWorking = working !== undefined && (accountIds.includes(working) || working === apiAccountId())

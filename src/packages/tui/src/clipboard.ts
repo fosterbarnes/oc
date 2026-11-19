@@ -2,8 +2,9 @@ import { spawn } from "node:child_process"
 import { readFile, rm } from "node:fs/promises"
 import { platform, release, tmpdir } from "node:os"
 import path from "node:path"
-import type { HostClipboardService } from "@opentui/core"
+import type { HostClipboardService, KeyEvent, PasteEvent } from "@opentui/core"
 
+export type ReadTrigger = KeyEvent | PasteEvent
 type Command = (command: string, args?: string[], input?: string) => Promise<Buffer>
 type ClipboardContent = { data: string; mime: string; filepath?: string }
 type ReadOptions = Readonly<{
@@ -35,7 +36,14 @@ export function writeOsc52(text: string) {
   process.stdout.write(process.env.TMUX ? sequence + passthrough : process.env.STY ? passthrough : sequence)
 }
 
-export async function read(options: ReadOptions = {}): Promise<ClipboardContent | undefined> {
+// The only OS clipboard read in oc (test/clipboardReadGuard.test.ts enforces that). It runs only for the
+// user's own paste: a real key press or bracketed paste. Server, agent and plugin requests reach commands
+// through keymap.dispatchCommand, which carries a synthetic event and reads nothing.
+export async function read(trigger: ReadTrigger, options: ReadOptions = {}): Promise<ClipboardContent | undefined> {
+  if (isSyntheticTrigger(trigger)) {
+    console.warn("[clipboard] read ignored: not triggered by a key press or paste")
+    return
+  }
   const os = options.os ?? platform()
   const run = options.command ?? command
 
@@ -86,6 +94,14 @@ export async function read(options: ReadOptions = {}): Promise<ClipboardContent 
 
   const text = await (options.text ?? readText)()
   if (text) return { data: text, mime: "text/plain" }
+}
+
+// A command run by name gets @opentui/keymap's `createSyntheticCommandEvent` (keymap 0.5.14:
+// name "command", empty raw). Untyped callers may pass nothing.
+export function isSyntheticTrigger(trigger: ReadTrigger | undefined) {
+  if (!trigger) return true
+  if ("bytes" in trigger) return false
+  return trigger.name === "command" && trigger.raw === ""
 }
 
 let hostClipboard: HostClipboardService | undefined

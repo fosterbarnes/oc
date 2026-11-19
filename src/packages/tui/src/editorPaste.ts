@@ -1,4 +1,5 @@
-import { TextareaRenderable } from "@opentui/core"
+import { TextareaRenderable, type KeyEvent, type Renderable } from "@opentui/core"
+import type { CommandContext } from "@opentui/keymap"
 import { useRenderer } from "@opentui/solid"
 import { useTuiConfig } from "./config"
 import { useClipboard } from "./context/clipboard"
@@ -19,9 +20,9 @@ export function useEditorPaste() {
     bindings: tuiConfig.keybinds.get("prompt.paste").map((binding) => ({
       ...binding,
       preventDefault: true,
-      cmd: async () => {
+      cmd: async (ctx: CommandContext<Renderable, KeyEvent>) => {
         const editor = renderer.currentFocusedEditor
-        const content = await clipboard.read?.()
+        const content = await clipboard.read?.(ctx.event)
         if (content?.mime !== "text/plain" || !content.data) return
         if (!(editor instanceof TextareaRenderable) || editor.isDestroyed) return
         // InputRenderable.insertText strips newlines and enforces maxLength for single-line fields.

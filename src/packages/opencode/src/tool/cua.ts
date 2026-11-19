@@ -20,11 +20,12 @@ const DENIED = new Set([
   "stop_recording",
   "replay_trajectory",
   "escalate_session",
+  // oc reads the clipboard only on the user's own paste (tui/src/clipboard.ts).
+  "clipboard_read",
 ])
 const SENSITIVE: Record<string, string> = {
   browser_set_input_files: "Upload local files to a web page",
   browser_download: "Download a file from a web page",
-  clipboard_read: "Read your clipboard",
   get_desktop_state: "Capture your whole screen",
 }
 // run_script is a program whose delivery modes oc cannot inspect.
@@ -55,7 +56,8 @@ function foregroundMarker(value: unknown): boolean {
 
 const gate = Effect.fn("Cua.gate")(function* (ctx: Tool.Context, tool: string, args: Args) {
   const kind = policy(tool, args, launched)
-  if (kind === "deny") return yield* Effect.die(new Error(`${tool} is blocked in oc (config, install, and recording).`))
+  if (kind === "deny")
+    return yield* Effect.die(new Error(`${tool} is blocked in oc (config, install, recording, and clipboard reads).`))
   // An approved takeover is the user's consent to foreground input until it ends.
   const pattern = kind === "plain" || (kind === "foreground" && Date.now() < takeoverUntil) ? "background" : kind
   yield* ctx.ask({
@@ -329,7 +331,7 @@ export const CuaRawTool = Tool.define(
       "Call any other cua-driver tool: browser, clipboard, menus, window frames, sessions, cursor, diagnostics. " +
       "No tool: list them. help: true: that tool's description and argument schema, without calling it. " +
       "Prefer the typed cua_* tools. Your session label is added for you. Foreground input, file transfer, " +
-      "clipboard reads, and full-screen capture ask the user; config, install, and recording tools are blocked.",
+      "and full-screen capture ask the user; config, install, recording, and clipboard_read are blocked.",
     parameters: RawParameters,
     execute: (params: Schema.Schema.Type<typeof RawParameters>, ctx: Tool.Context) =>
       Effect.gen(function* () {

@@ -1,5 +1,7 @@
 import { useRenderer } from "@opentui/solid"
 import { createSignal, onMount } from "solid-js"
+import { DialogApiKey } from "./component/dialogApiKey"
+import { useClipboard } from "./context/clipboard"
 import { useRoute } from "./context/route"
 import { useSDK, type ClaudeAccountAction, type ClaudeManagedAccount, type ClaudeManagedAccounts } from "./context/sdk"
 import { useSync } from "./context/sync"
@@ -11,6 +13,9 @@ import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { useToast } from "./ui/toast"
 import { Locale } from "./util/locale"
+
+// Same entry as the server's `API_KEY_SECRET` (provider/claude-code/accounts.ts).
+const API_KEY_SECRET = { service: "oc", name: "claudeCredit" } as const
 
 // Home pick for the next session the Home prompt creates; pinned on create, then cleared.
 const [nextSessionAccount, setNextSessionAccount] = createSignal<{ id: string; label: string }>()
@@ -29,6 +34,7 @@ export function createClaudeAccountCommands() {
   const dialog = useDialog()
   const toast = useToast()
   const renderer = useRenderer()
+  const clipboard = useClipboard()
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
   const [failoverMode, setFailoverMode] = createSignal(readOcConfig().claudeFailover)
   const [rolloverMode, setRolloverMode] = createSignal(readOcConfig().claudeApiRollover)
@@ -40,8 +46,13 @@ export function createClaudeAccountCommands() {
       .catch(() => {})
   })
 
-  const accountDescription = (account: { limitedUntil?: number }) =>
-    account.limitedUntil ? `limited until ${Locale.datetime(account.limitedUntil)}` : undefined
+  const accountDescription = (account: { limitedUntil?: number; kind?: "api" }) =>
+    [
+      account.kind === "api" ? "bills API credits" : undefined,
+      account.limitedUntil ? `limited until ${Locale.datetime(account.limitedUntil)}` : undefined,
+    ]
+      .filter(Boolean)
+      .join(", ") || undefined
 
   const switchAccount = {
     name: "claude.account",
@@ -51,11 +62,13 @@ export function createClaudeAccountCommands() {
     category: "oc",
     group: "Claude",
     run: async () => {
-      const accounts = await sdk.claudeAccount.state().catch((error) => {
+      const all = await sdk.claudeAccount.state().catch((error) => {
         toast.error(error)
         return undefined
       })
-      if (!accounts) return
+      if (!all) return
+      // API credits are per session or agent only, never the global account.
+      const accounts = all.filter((account) => account.kind !== "api")
       dialog.replace(() => (
         <DialogSelect
           title="Switch Claude account (busy sessions switch after their running work)"
@@ -348,6 +361,33 @@ export function createClaudeAccountCommands() {
     },
   }
 
+  // The key goes from the user's paste to the OS keychain, never through a prompt field or a file.
+  async function saveApiKey(key: string) {
+    try {
+      const replaced = !!(await Bun.secrets.get(API_KEY_SECRET))
+      await Bun.secrets.set({ ...API_KEY_SECRET, value: key })
+      // The server reads a missing key again on its next account read.
+      void sdk.claudeAccount.state().catch(() => {})
+      // The clipboard held the key moments ago. History (Win+V, clipboard managers) may still keep it.
+      await clipboard.write?.("").catch(() => {})
+      toast.show({
+        message: `Claude API key saved (...${key.slice(-4)}). ${replaced ? "Restart oc to use the new key. " : ""}Clipboard cleared (clipboard history may still hold it).`,
+        variant: "success",
+      })
+    } catch (error) {
+      toast.error(error)
+    }
+  }
+
+  const setApiKey = {
+    name: "claude.apiKey",
+    title: "Set Claude API key",
+    desc: "Store a pasted Console key in the OS keychain",
+    category: "oc",
+    group: "Claude",
+    run: () => dialog.replace(() => <DialogApiKey onSave={saveApiKey} />),
+  }
+
   const apiRollover = {
     name: "claude.apiRollover",
     title: "Claude API credit rollover",
@@ -436,17 +476,21 @@ export function createClaudeAccountCommands() {
     },
   }
 
-  // Reactive: account entries appear only with 2+ configured accounts, the session one only in a session
-  // or on Home (for the next session), the rollover one only with an `apiAccount`.
+  // Reactive: global switch and failover entries appear only with 2+ configured accounts; the session
+  // one with 2+ profiles counting API credits, in a session or on Home (for the next session); the
+  // rollover one only with an `apiAccount`.
   return () => {
     const options = sync.data.config.provider?.["claude-code"]?.options
-    const multi = ((options?.accounts as unknown[] | undefined)?.length ?? 0) > 1
+    const logins = (options?.accounts as unknown[] | undefined)?.length ?? 0
+    const multi = logins > 1
+    const profiles = Math.max(logins, 1) + (options?.apiAccount ? 1 : 0)
     return [
       manageAccounts,
       ...(multi ? [switchAccount] : []),
-      ...(multi && (route.data.type === "session" || route.data.type === "home") ? [switchSessionAccount] : []),
+      ...(profiles > 1 && (route.data.type === "session" || route.data.type === "home") ? [switchSessionAccount] : []),
       ...(multi ? [failover] : []),
       ...(options?.apiAccount ? [apiRollover] : []),
+      ...((options?.apiAccount as { keychain?: unknown } | undefined)?.keychain === true ? [setApiKey] : []),
       autoResume,
     ]
   }

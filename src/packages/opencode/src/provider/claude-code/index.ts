@@ -133,7 +133,7 @@ export function createClaudeCode(settings: ClaudeCodeProviderSettings = {}): Cla
     })
   }
   warnIfAnthropicApiKey(settings.ignoreAnthropicApiKey)
-  configureApiAccount(settings.apiAccount)
+  configureApiAccount(settings.apiAccount, settings.accounts)
   const preset = applyPermissionPreset(settings, DEFAULT_PROXY_TOOL_NAMES)
   // A preset drops any configured `permissionMode`, so the plan-mode warning
   // would be about a mode this provider is not running in.

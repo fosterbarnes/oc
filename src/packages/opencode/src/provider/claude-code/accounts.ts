@@ -7,6 +7,7 @@ import { emailOf } from "./warmup/identities"
 import { materializeAccountId } from "./warmup/identity"
 import { saveName } from "./warmup/synced"
 import { log } from "./logger.js"
+import { createAccountDir } from "./accountManage.js"
 
 export const DEFAULT_ACCOUNT = "default"
 
@@ -44,8 +45,14 @@ const DEFAULT_USAGE_CACHE_DIR = path.join(expandHome("~/.cache"), "opencode")
 const IN_TEST = process.env.BUN_TEST != null
 
 const limitedUntil = new Map<string, number>()
-/** opencode session id -> pool account id. A pinned chat ignores the global current account. */
+/**
+ * opencode session id -> pinned account id (a pool account or the API account), or `UNPINNED` once the
+ * operator chose the global account, so an agent's `claudeAccount` does not pin the chat again.
+ */
 const sessionAccounts = new Map<string, string>()
+/** Sessions on API credits only because every pool account was limited (`pinApiRollover`). */
+const apiRollover = new Set<string>()
+const UNPINNED = "global"
 /** `claudeAccount` dirs already warned about as missing from the pool. */
 const unknownPreferred = new Set<string>()
 let currentAccount: string | undefined
@@ -99,12 +106,14 @@ function readPersist(now: number): void {
   if (!poolFile) return
   limitedUntil.clear()
   sessionAccounts.clear()
+  apiRollover.clear()
   currentAccount = undefined
   try {
     const raw = JSON.parse(readFileSync(poolFile, "utf8")) as {
       currentAccount?: unknown
       limitedUntil?: unknown
       sessionAccounts?: unknown
+      apiRollover?: unknown
     }
     if (typeof raw.currentAccount === "string" && raw.currentAccount) currentAccount = raw.currentAccount
     if (raw.sessionAccounts && typeof raw.sessionAccounts === "object") {
@@ -112,6 +121,8 @@ function readPersist(now: number): void {
         if (typeof id === "string" && id) sessionAccounts.set(session, id)
       }
     }
+    if (Array.isArray(raw.apiRollover))
+      for (const session of raw.apiRollover) if (typeof session === "string") apiRollover.add(session)
     if (!raw.limitedUntil || typeof raw.limitedUntil !== "object") return
     for (const [id, until] of Object.entries(raw.limitedUntil as Record<string, unknown>)) {
       if (typeof until !== "number" || !Number.isFinite(until) || until <= now) continue
@@ -136,6 +147,7 @@ function persistPool(now = Date.now()): void {
         ...(currentAccount ? { currentAccount } : {}),
         limitedUntil: limited,
         ...(sessionAccounts.size ? { sessionAccounts: Object.fromEntries(sessionAccounts) } : {}),
+        ...(apiRollover.size ? { apiRollover: [...apiRollover] } : {}),
       }),
       { encoding: "utf8", mode: 0o600 },
     )
@@ -248,15 +260,20 @@ export function poolAccount(ids: string[], now = Date.now()): string {
   return nextUsableAccount(ids, now) ?? (currentAccount && ids.includes(currentAccount) ? currentAccount : ids[0]!)
 }
 
-/** The account a session is pinned to, when it is still in the pool. Outside oc the session is "default": never pinned. */
+/** A pool account, or the API account: the ids a manual or agent pin may name. Automatic picks use `ids` only. */
+function known(id: string, ids: string[]): boolean {
+  return ids.includes(id) || (!!apiAccount && id === apiAccount.id)
+}
+
+/** The account a session is pinned to, when it still exists. Outside oc the session is "default": never pinned. */
 export function sessionPin(sessionID: string | undefined, ids: string[], now = Date.now()): string | undefined {
   if (!sessionID || sessionID === "default") return undefined
   ensureLoaded(now)
   const id = sessionAccounts.get(sessionID)
-  return id && ids.includes(id) ? id : undefined
+  return id && known(id, ids) ? id : undefined
 }
 
-/** The pool id for a config dir as written in `accounts` (`~/.claude4`), while it is usable. */
+/** The account id for a config dir as written in `accounts` (`~/.claude4`) or the API account's dir, while usable. */
 export function preferredAccount(dir: string, ids: string[], now = Date.now()): string | undefined {
   ensureLoaded(now)
   const wanted = canonicalAccountId(path.resolve(expandHome(dir)))
@@ -264,7 +281,7 @@ export function preferredAccount(dir: string, ids: string[], now = Date.now()): 
     process.platform === "win32"
       ? canonicalAccountId(id).toLowerCase() === wanted.toLowerCase()
       : canonicalAccountId(id) === wanted
-  const id = ids.find(same)
+  const id = [...ids, ...(apiAccount ? [apiAccount.id] : [])].find(same)
   if (!id) {
     if (!unknownPreferred.has(dir)) {
       unknownPreferred.add(dir)
@@ -276,8 +293,9 @@ export function preferredAccount(dir: string, ids: string[], now = Date.now()): 
 }
 
 /**
- * The account a turn runs on: the session's pin, else the agent's preferred account (`claudeAccount`)
- * when usable, pinned so failover can move the session off it, else the pool's pick.
+ * The account a turn runs on: API credits while a rolled-over chat's pool is limited, else the
+ * session's pin, else the agent's preferred account (`claudeAccount`) when usable, pinned so failover
+ * can move the session off it, unless the operator unpinned the chat, else the pool's pick.
  */
 export function turnAccount(
   sessionID: string | undefined,
@@ -289,8 +307,11 @@ export function turnAccount(
   if (rollover) return rollover
   const pin = sessionPin(sessionID, ids, now)
   if (pin) return pin
+  const unpinned = !!sessionID && sessionAccounts.get(sessionID) === UNPINNED
   const preferred =
-    sessionID && sessionID !== "default" && preferredDir ? preferredAccount(preferredDir, ids, now) : undefined
+    sessionID && sessionID !== "default" && preferredDir && !unpinned
+      ? preferredAccount(preferredDir, ids, now)
+      : undefined
   if (!preferred) return poolAccount(ids, now)
   pinSessionAccount(sessionID!, preferred, ids, now)
   return preferred
@@ -310,12 +331,18 @@ export function applyFailoverChoice(sessionID: string | undefined, id: string, i
   else setCurrentAccount(id, ids, now)
 }
 
-/** Pin a session to a pool account, or clear its pin with `undefined`. The global current account is untouched. */
+/**
+ * Pin a session to a pool account or the API account, or with `undefined` put it on the global account
+ * for good (an agent's `claudeAccount` no longer pins it). Any pick ends an API rollover. A pick of the
+ * API account clears its limit mark: an empty balance fails fast and costs nothing. The global current
+ * account is untouched.
+ */
 export function pinSessionAccount(sessionID: string, id: string | undefined, ids: string[], now = Date.now()): boolean {
-  if (id !== undefined && !ids.includes(id)) return false
+  if (id !== undefined && !known(id, ids)) return false
   ensureLoaded(now)
-  if (id === undefined) sessionAccounts.delete(sessionID)
-  else sessionAccounts.set(sessionID, id)
+  sessionAccounts.set(sessionID, id ?? UNPINNED)
+  apiRollover.delete(sessionID)
+  if (id !== undefined && id === apiAccount?.id) limitedUntil.delete(id)
   persistPool(now)
   return true
 }
@@ -323,18 +350,27 @@ export function pinSessionAccount(sessionID: string, id: string | undefined, ids
 /** Drop a deleted session's pin so `sessionAccounts` does not grow for the life of the pool file. */
 export function forgetSessionPin(sessionID: string, now = Date.now()): void {
   ensureLoaded(now)
-  if (sessionAccounts.delete(sessionID)) persistPool(now)
+  const pinned = sessionAccounts.delete(sessionID)
+  if (apiRollover.delete(sessionID) || pinned) persistPool(now)
 }
 
 /**
- * Pool accounts with the active one flagged and any live limit. Selection mirrors `poolAccount`;
- * with a session it is that session's pin when set (`pinned`), else the global pick. `running`,
- * the account the session's work is still on (`sessionWorkingAccount`), wins until that work ends.
+ * Pool accounts with the active one flagged and any live limit. Selection mirrors `turnAccount`;
+ * with a session it is its API rollover, else its pin when set (`pinned`), else the global pick.
+ * `running`, the account the session's work is still on (`sessionWorkingAccount`), wins until that
+ * work ends. `withApi` appends the API account as a `kind: "api"` row for the session pickers.
  */
-export function poolState(ids: string[], now = Date.now(), sessionID?: string, running?: string) {
+export function poolState(
+  ids: string[],
+  now = Date.now(),
+  sessionID?: string,
+  running?: string,
+  options?: { withApi?: boolean },
+) {
   const pin = sessionPin(sessionID, ids, now)
-  const active = running && ids.includes(running) ? running : (pin ?? poolAccount(ids, now))
-  return ids.map((id) => {
+  const active =
+    running && known(running, ids) ? running : (apiRolloverTurn(sessionID, ids, now) ?? pin ?? poolAccount(ids, now))
+  const row = (id: string) => {
     const until = limitedUntil.get(id) ?? 0
     return {
       id,
@@ -343,7 +379,10 @@ export function poolState(ids: string[], now = Date.now(), sessionID?: string, r
       ...(id === pin ? { pinned: true } : {}),
       ...(until > now ? { limitedUntil: until } : {}),
     }
-  })
+  }
+  const rows: (ReturnType<typeof row> & { kind?: "api" })[] = ids.map(row)
+  if (options?.withApi && apiAccount) rows.push({ ...row(apiAccount.id), kind: "api" })
+  return rows
 }
 
 /**
@@ -413,27 +452,103 @@ export function earliestLimitedUntil(ids?: string[], now = Date.now()): number |
 }
 
 // ---------------------------------------------------------------------------
-// API-credit rollover
+// API-credit profile
 //
-// The `apiAccount` provider option (`{ dir, apiKey }`) adds a Console API key as a last resort.
-// It is not a pool member: rotation, failover ranking, the sidebar and the account manager never
-// see it. A chat moves onto it only once every pool account is limited and the operator agrees
-// (turnStream.ts), stays pinned there while they are, and returns to the pool once one is usable.
+// The `apiAccount` provider option (`{ dir, apiKey }` or `{ dir, keychain: true }`) adds a Console
+// API key as one more Claude profile. It is not a pool member: rotation, the global current account, failover ranking, warm-up
+// and the account manager never pick it. A chat runs on it only when pinned there (a session pick,
+// Home's next-session pick, or an agent's `claudeAccount`), or as a last resort once every pool
+// account is limited and the operator agrees (turnStream.ts). A rolled-over chat (`apiRollover`)
+// returns to the pool once one account is usable; a pinned one stays until its credits run out.
 // ---------------------------------------------------------------------------
 
-const API_ACCOUNT_DIR = "~/.claudeApi"
+export const API_ACCOUNT_DIR = "~/.claudeApi"
 let apiAccount: { id: string; apiKey: string } | undefined
 let warnedApiKeyMissing = false
+let warnedApiOverlap = false
+/** The API account dir already given its shared links by this process. */
+let preparedDir: string | undefined
 
-/** Set from the provider options. A blank key (an unset `{env:...}` resolves to "") leaves rollover off. */
-export function configureApiAccount(option: { dir?: unknown; apiKey?: unknown } | undefined): void {
-  const key = typeof option?.apiKey === "string" ? option.apiKey.trim() : ""
-  if (option && !key && !warnedApiKeyMissing) {
+/** Where `apiAccount.keychain` keeps the key: macOS Keychain, Windows Credential Manager, or libsecret. */
+export const API_KEY_SECRET = { service: "oc", name: "claudeCredit" } as const
+let readKeychain = (): Promise<string | null> => Bun.secrets.get(API_KEY_SECRET)
+/** The key read from the keychain; once found it stays for the life of the process. */
+let keychainKey: string | undefined
+let keychainRead: Promise<void> | undefined
+let warnedKeychain = false
+let lastApiOption: Parameters<typeof configureApiAccount> | undefined
+
+/** Read the keychain key unless it is known or a read is running. A miss lets a later call try again. */
+function loadKeychainKey(): void {
+  if (keychainKey !== undefined || keychainRead) return
+  const warn = (reason: string) => {
+    if (warnedKeychain) return
+    warnedKeychain = true
+    log.warn(`claude-code apiAccount keychain key ${reason}; API credits are off until it is set`, API_KEY_SECRET)
+  }
+  keychainRead = readKeychain()
+    .then(
+      (value) => {
+        const key = value?.trim()
+        if (!key) return warn("is not set (palette: Set Claude API key)")
+        keychainKey = key
+        if (lastApiOption) configureApiAccount(...lastApiOption)
+      },
+      (error) => warn(`cannot be read (${String(error)})`),
+    )
+    .finally(() => {
+      keychainRead = undefined
+    })
+}
+
+/** Settles once a running keychain read has finished, so a turn or picker sees the API profile. */
+export function apiKeyReady(): Promise<void> {
+  return keychainRead ?? Promise.resolve()
+}
+
+/**
+ * Set from the provider options; cheap to call on every read. A non-blank `apiKey` wins; with
+ * `keychain: true` the key comes from the OS keychain (`API_KEY_SECRET`), read in the background.
+ * No key (an unset `{env:...}` resolves to "", or the keychain read has not found one yet) leaves the
+ * profile off. So does a dir that is also a pool account, which would hand the key to automatic
+ * picks. The dir gets its shared links (`projects` above all) once per process, before any switch
+ * checks `sharesTranscripts`.
+ */
+export function configureApiAccount(
+  option: { dir?: unknown; apiKey?: unknown; keychain?: unknown } | undefined,
+  accounts: string[] | undefined,
+): void {
+  lastApiOption = [option, accounts]
+  const fromKeychain = option?.keychain === true
+  const explicit = typeof option?.apiKey === "string" ? option.apiKey.trim() : ""
+  if (fromKeychain && !explicit) loadKeychainKey()
+  const key = explicit || (fromKeychain ? (keychainKey ?? "") : "")
+  if (option && !fromKeychain && !key && !warnedApiKeyMissing) {
     warnedApiKeyMissing = true
-    log.warn("claude-code apiAccount has no apiKey (is its env var set for this process?); API rollover is off")
+    log.warn("claude-code apiAccount has no apiKey (is its env var set for this process?); API credits are off")
   }
   const dir = typeof option?.dir === "string" && option.dir.trim() ? option.dir.trim() : API_ACCOUNT_DIR
-  apiAccount = key ? { id: path.resolve(expandHome(dir)), apiKey: key } : undefined
+  const id = path.resolve(expandHome(dir))
+  const sameDir = (a: string, b: string) =>
+    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
+  const asPool = poolAccountIds([id])[0]!
+  if (key && poolAccountIds(accounts).some((pool) => sameDir(pool, asPool))) {
+    if (!warnedApiOverlap) {
+      warnedApiOverlap = true
+      log.warn("claude-code apiAccount dir is also in accounts; API credits are off", { dir })
+    }
+    apiAccount = undefined
+    return
+  }
+  apiAccount = key ? { id, apiKey: key } : undefined
+  // No pool file means disk is off (tests): leave folders alone too.
+  if (!apiAccount || !poolFile || preparedDir === id) return
+  preparedDir = id
+  try {
+    createAccountDir(id)
+  } catch (error) {
+    log.warn("cannot prepare the claude-code apiAccount dir", { dir: id, error: String(error) })
+  }
 }
 
 export function apiAccountId(): string | undefined {
@@ -452,22 +567,42 @@ export function apiRolloverCandidate(now = Date.now()): string | undefined {
   return (limitedUntil.get(apiAccount.id) ?? 0) <= now ? apiAccount.id : undefined
 }
 
-/** Keep a chat on API credits for its next turns; `apiRolloverTurn` lets it go. */
+/** Keep a chat on API credits for its next turns; `apiRolloverTurn` lets it go. Its pin stays underneath. */
 export function pinApiRollover(sessionID: string | undefined, now = Date.now()): void {
   if (!apiAccount || !sessionID || sessionID === "default") return
   ensureLoaded(now)
-  sessionAccounts.set(sessionID, apiAccount.id)
+  apiRollover.add(sessionID)
   persistPool(now)
 }
 
-/** A chat pinned to API credits stays while every pool account is limited; otherwise its pin clears. */
+/** True while a chat is on API credits by rollover rather than a pin. */
+export function isApiRollover(sessionID: string | undefined, now = Date.now()): boolean {
+  if (!sessionID) return false
+  ensureLoaded(now)
+  return apiRollover.has(sessionID)
+}
+
+/**
+ * A pinned chat's API credits ran out: unless a newer pick replaced the API pin, put the chat on the
+ * global account. True when it was unpinned.
+ */
+export function releaseApiPin(sessionID: string | undefined, now = Date.now()): boolean {
+  if (!apiAccount || !sessionID || sessionID === "default") return false
+  ensureLoaded(now)
+  if (sessionAccounts.get(sessionID) !== apiAccount.id) return false
+  sessionAccounts.set(sessionID, UNPINNED)
+  persistPool(now)
+  return true
+}
+
+/** A rolled-over chat stays on API credits while every pool account is limited; otherwise it leaves the rollover. */
 function apiRolloverTurn(sessionID: string | undefined, ids: string[], now: number): string | undefined {
   if (!apiAccount || !sessionID || sessionID === "default") return undefined
   ensureLoaded(now)
-  if (sessionAccounts.get(sessionID) !== apiAccount.id) return undefined
+  if (!apiRollover.has(sessionID)) return undefined
   const usable = (id: string) => (limitedUntil.get(id) ?? 0) <= now
   if (usable(apiAccount.id) && !ids.some(usable)) return apiAccount.id
-  sessionAccounts.delete(sessionID)
+  apiRollover.delete(sessionID)
   persistPool(now)
   return undefined
 }
@@ -591,9 +726,9 @@ export async function projectAccountNames(dirs: string[], syncedName: (dir: stri
 
 /** The account's name, else its shell launcher name: `~/.claude` is `claude1`, `~/.claudeN` is `claudeN`. */
 export function poolAccountLabel(id: string): string {
-  if (id === apiAccount?.id) return "API credits"
   const name = accountName(id)
   if (name) return name
+  if (id === apiAccount?.id) return "API credits"
   const base = id === DEFAULT_ACCOUNT ? ".claude" : path.basename(id)
   return base === ".claude" ? "claude1" : base.replace(/^\./, "")
 }
@@ -625,11 +760,21 @@ export function forgetAccount(id: string, now = Date.now()): void {
 export function _resetAccountPool(): void {
   limitedUntil.clear()
   sessionAccounts.clear()
+  apiRollover.clear()
   currentAccount = undefined
   poolStamp = undefined
   poolFile = null
   cacheDir = null
   apiAccount = undefined
+  keychainKey = undefined
+  keychainRead = undefined
+  lastApiOption = undefined
+  readKeychain = () => Promise.resolve(null)
+}
+
+/** Test-only. Replaces the OS keychain read. */
+export function _setKeychainReader(read: () => Promise<string | null>): void {
+  readKeychain = read
 }
 
 /** Test-only. */

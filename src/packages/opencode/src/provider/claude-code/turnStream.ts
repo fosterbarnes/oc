@@ -43,7 +43,6 @@ import {
   toQuotaWindows,
   type AccountBlockKind,
 } from "./cliEvents.js"
-import { createAccountDir } from "./accountManage.js"
 import {
   apiAccountId,
   apiRolloverCandidate,
@@ -51,11 +50,14 @@ import {
   canonicalAccountId,
   earliestLimitedUntil,
   failoverCandidates,
+  isApiRollover,
   markAccountLimited,
   type FailoverCandidate,
+  poolAccount,
   poolAccountIds,
   poolAccountLabel,
   poolConfigDir,
+  releaseApiPin,
 } from "./accounts.js"
 import { extractTurnStats, formatTurnStatsBlock, turnStatsLogPayload } from "./turnStats.js"
 import {
@@ -544,6 +546,9 @@ class ClaudeTurn {
   }
 
   private queueAccountSwitch(resetsAtMs: number | undefined, rateLimitType: string | undefined): boolean {
+    // API credits are not a usage window: a 429 there is transient (the CLI retries), and an empty
+    // balance is handled at the result. Neither may mark the profile limited or move its pin to a login.
+    if (this.account === apiAccountId()) return false
     markAccountLimited(this.account, resetsAtMs)
     if (this.turn.compactionMode) return false
     const pool = this.failoverDeclined ? [] : failoverCandidates(this.account, poolAccountIds(this.config.accounts))
@@ -603,8 +608,6 @@ class ClaudeTurn {
       if (this.activeProcess) this.attach(this.activeProcess)
       return resume()
     }
-    // The API account's folder shares `projects` with the pool, so the conversation follows it.
-    if (next === apiAccountId()) createAccountDir(next)
     applyFailoverChoice(this.turn.affinity, next, poolAccountIds(this.config.accounts))
     this.allLimited = false
     const progress = this.progressSummary()
@@ -1308,12 +1311,24 @@ class ClaudeTurn {
     // Name the account and what to run; the CLI's own message names neither.
     // The CLI labels this result `success` with `is_error: true`, so this is
     // also what marks the turn failed.
-    // API credits used up: sit the API account out until a pool account resets, which takes the chat back.
+    // API credits used up: sit the API account out for an hour. A rolled-over chat waits for a pool
+    // account to reset, which takes it back; a pinned chat goes back to the global account at once.
     if (msg.is_error && this.account === apiAccountId() && this.apiCreditsExhausted(msg)) {
-      markAccountLimited(this.account, earliestLimitedUntil(poolAccountIds(this.config.accounts)))
+      markAccountLimited(this.account, undefined)
       this.resultFailure ??= "billing_error"
-      this.allLimited = true
-      this.out.note("\n> **API credits used up:** waiting for a Claude account to reset.\n")
+      if (isApiRollover(this.turn.affinity)) {
+        this.allLimited = true
+        this.out.note("\n> **API credits used up:** waiting for a Claude account to reset.\n")
+      } else {
+        this.allLimited = false
+        const unpinned = releaseApiPin(this.turn.affinity)
+        const global = poolAccountLabel(poolAccount(poolAccountIds(this.config.accounts)))
+        this.out.note(
+          unpinned
+            ? `\n> **API credits used up:** this chat is unpinned and runs on ${global} when you send again.\n`
+            : "\n> **API credits used up.**\n",
+        )
+      }
       log.warn("claude API credits exhausted", { sessionKey: this.sk })
     } else if (this.accountBlock && msg.is_error) {
       const configDir = poolConfigDir(this.account)

@@ -40,8 +40,10 @@ import {
   turnAccount,
 } from "@/provider/claude-code/accounts.js"
 import {
+  _setKeychainReader,
   apiAccountId,
   apiAccountKey,
+  apiKeyReady,
   apiRolloverCandidate,
   configureApiAccount,
 } from "@/provider/claude-code/accounts.js"
@@ -85,7 +87,7 @@ function withConfigDir(value: string | undefined, fn: () => void) {
 test("API rollover: offered only once every pool account is limited, never as a pool member", () => {
   const ids = ["C:/acct/a", "C:/acct/b"]
   const now = 1_000_000
-  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
   const api = apiAccountId()!
   expect(apiAccountKey(api)).toBe("sk-credit")
   expect(apiAccountKey(ids[0])).toBeUndefined()
@@ -96,7 +98,7 @@ test("API rollover: offered only once every pool account is limited, never as a 
   expect(failoverCandidates(ids[1]!, ids, now)).toEqual([])
   expect(apiRolloverCandidate(now)).toBe(api)
   // A blank key (unset env var) turns rollover off.
-  configureApiAccount({ apiKey: "" })
+  configureApiAccount({ apiKey: "" }, ids)
   expect(apiRolloverCandidate(now)).toBeUndefined()
   expect(apiAccountKey(api)).toBeUndefined()
 })
@@ -104,7 +106,7 @@ test("API rollover: offered only once every pool account is limited, never as a 
 test("API rollover: a chat stays on credits while the pool is limited, then returns to the pool", () => {
   const ids = ["C:/acct/a", "C:/acct/b"]
   const now = 1_000_000
-  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
   const api = apiAccountId()!
   markAccountLimited(ids[0]!, now + 60_000, now)
   markAccountLimited(ids[1]!, now + 120_000, now)
@@ -118,12 +120,142 @@ test("API rollover: a chat stays on credits while the pool is limited, then retu
 })
 
 test("API rollover: the ask is consent to spend, and only its yes label picks the API account", () => {
-  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" })
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, undefined)
   const api = apiAccountId()!
   const question = failoverQuestion("claude2", [{ id: api }])
   expect(question.pick(API_ROLLOVER_LABEL)).toBe(api)
   expect(question.pick("Stop")).toBeUndefined()
   expect(question.pick("API credits")).toBeUndefined()
+})
+
+test("API profile: a dir that is also a pool account turns it off, the default dir however cased on Windows", () => {
+  configureApiAccount({ apiKey: "sk-credit", dir: "~/.claude2" }, ["~/.claude", "~/.claude2"])
+  expect(apiAccountId()).toBeUndefined()
+  const platform = Object.getOwnPropertyDescriptor(process, "platform")!
+  Object.defineProperty(process, "platform", { value: "win32" })
+  try {
+    withConfigDir(undefined, () => {
+      configureApiAccount({ apiKey: "sk-credit", dir: expandHome("~/.claude").toUpperCase() }, undefined)
+      expect(apiAccountId()).toBeUndefined()
+      configureApiAccount({ apiKey: "sk-credit", dir: "~/.claudeApi" }, undefined)
+      expect(apiAccountId()).toBe(path.resolve(expandHome("~/.claudeApi")))
+    })
+  } finally {
+    Object.defineProperty(process, "platform", platform)
+  }
+})
+
+test("API profile: automatic picks never choose it; pins and agents can", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  expect(setCurrentAccount(api, ids, now)).toBe(false)
+  expect(nextUsableAccount(ids, now)).not.toBe(api)
+  expect(failoverCandidates(ids[0]!, ids, now).map((c) => c.id)).not.toContain(api)
+  expect(pinSessionAccount("ses_1", api, ids, now)).toBe(true)
+  expect(turnAccount("ses_1", undefined, ids, now)).toBe(api)
+  expect(turnAccount("ses_2", "C:/acct/api", ids, now)).toBe(api)
+  expect(sessionPin("ses_2", ids, now)).toBe(api)
+  // A manual pin is not a rollover: it stays while pool accounts are usable.
+  expect(turnAccount("ses_1", undefined, ids, now + 1)).toBe(api)
+})
+
+test("API profile: a manual pick clears its limit mark", () => {
+  const ids = ["C:/acct/a"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  markAccountLimited(api, now + 60_000, now)
+  expect(preferredAccount("C:/acct/api", ids, now)).toBeUndefined()
+  pinSessionAccount("ses_1", api, ids, now)
+  expect(
+    poolState(ids, now, "ses_1", undefined, { withApi: true }).find((a) => a.id === api)?.limitedUntil,
+  ).toBeUndefined()
+})
+
+test("API profile: Use global sticks, so an agent preference does not pin the chat again", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  expect(turnAccount("ses_1", "C:/acct/api", ids, now)).toBe(api)
+  pinSessionAccount("ses_1", undefined, ids, now)
+  expect(sessionPin("ses_1", ids, now)).toBeUndefined()
+  expect(turnAccount("ses_1", "C:/acct/api", ids, now)).toBe(ids[0])
+})
+
+test("API profile: one current row whether the chat is on credits by pin, rollover, or running work", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  const current = (sessionID: string, running?: string) =>
+    poolState(ids, now, sessionID, running, { withApi: true })
+      .filter((a) => a.current)
+      .map((a) => a.id)
+  pinSessionAccount("ses_pin", api, ids, now)
+  expect(current("ses_pin")).toEqual([api])
+  expect(current("ses_run", api)).toEqual([api])
+  markAccountLimited(ids[0]!, now + 60_000, now)
+  markAccountLimited(ids[1]!, now + 60_000, now)
+  applyFailoverChoice("ses_roll", api, ids, now)
+  expect(current("ses_roll")).toEqual([api])
+  // The manager's call has no API row.
+  expect(poolState(ids, now).some((a) => a.id === api)).toBe(false)
+  expect(poolState(ids, now, "ses_pin", undefined, { withApi: true }).find((a) => a.id === api)).toMatchObject({
+    kind: "api",
+    pinned: true,
+  })
+})
+
+test("API profile: rollover leaves a chat's own pin in place underneath", () => {
+  const ids = ["C:/acct/a", "C:/acct/b"]
+  const now = 1_000_000
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  pinSessionAccount("ses_1", ids[1], ids, now)
+  markAccountLimited(ids[0]!, now + 60_000, now)
+  markAccountLimited(ids[1]!, now + 120_000, now)
+  applyFailoverChoice("ses_1", api, ids, now)
+  expect(turnAccount("ses_1", undefined, ids, now + 1)).toBe(api)
+  expect(turnAccount("ses_1", undefined, ids, now + 60_001)).toBe(ids[1])
+})
+
+test("API profile: keychain mode turns on once the key is read, and retries after a miss", async () => {
+  const ids = ["C:/acct/a"]
+  let stored: string | null = null
+  let reads = 0
+  _setKeychainReader(async () => {
+    reads++
+    return stored
+  })
+  configureApiAccount({ keychain: true, dir: "C:/acct/api" }, ids)
+  await apiKeyReady()
+  expect(apiAccountId()).toBeUndefined()
+  stored = " sk-ant-keychain "
+  configureApiAccount({ keychain: true, dir: "C:/acct/api" }, ids)
+  await apiKeyReady()
+  expect(apiAccountKey(apiAccountId())).toBe("sk-ant-keychain")
+  // Found once: later reads of the config do not hit the keychain again.
+  configureApiAccount({ keychain: true, dir: "C:/acct/api" }, ids)
+  await apiKeyReady()
+  expect(reads).toBe(2)
+})
+
+test("API profile: a set apiKey wins over the keychain, and the overlap guard still applies", async () => {
+  let reads = 0
+  _setKeychainReader(async () => {
+    reads++
+    return "sk-ant-keychain"
+  })
+  configureApiAccount({ keychain: true, apiKey: "sk-file", dir: "C:/acct/api" }, ["C:/acct/a"])
+  await apiKeyReady()
+  expect(apiAccountKey(apiAccountId())).toBe("sk-file")
+  expect(reads).toBe(0)
+  configureApiAccount({ keychain: true, dir: "C:/acct/a" }, ["C:/acct/a"])
+  await apiKeyReady()
+  expect(apiAccountId()).toBeUndefined()
 })
 
 test("pool ids: with no inherited config dir, ~/.claude is default and no option means one default account", () => {

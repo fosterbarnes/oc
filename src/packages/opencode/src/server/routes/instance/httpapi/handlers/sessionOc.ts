@@ -3,7 +3,14 @@
 // the scheduled-resume poll loop.
 import { Config } from "@/config/config"
 import { InstanceStore } from "@/project/instance-store"
-import { pinSessionAccount, poolAccountIds, poolState, setCurrentAccount } from "@/provider/claude-code/accounts"
+import {
+  apiKeyReady,
+  configureApiAccount,
+  pinSessionAccount,
+  poolAccountIds,
+  poolState,
+  setCurrentAccount,
+} from "@/provider/claude-code/accounts"
 import { sessionWorkingAccount } from "@/provider/claude-code/sessionManager"
 import { SessionPrompt } from "@/session/prompt"
 import { ScheduledDelivery } from "@/session/scheduledDelivery"
@@ -179,14 +186,23 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
     return { payload: yield* promptSvc.queue.takeChain(ctx.params.sessionID) }
   })
 
+  // Also sets up the API-credit profile, so Home and the pickers list it before the first Claude turn.
   const claudePool = Effect.fnUntraced(function* () {
-    const accounts = (yield* configSvc.get()).provider?.["claude-code"]?.options?.accounts
-    return poolAccountIds(Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined)
+    const options = (yield* configSvc.get()).provider?.["claude-code"]?.options
+    const accounts = Array.isArray(options?.accounts)
+      ? options.accounts.filter((dir): dir is string => typeof dir === "string")
+      : undefined
+    configureApiAccount(options?.apiAccount, accounts)
+    // A keychain key read re-configures the profile when it lands; wait so pickers list it.
+    yield* Effect.promise(apiKeyReady)
+    return poolAccountIds(accounts)
   })
 
   // A session still working keeps its account until the work ends, so it is reported as current.
   const claudeState = (ids: string[], sessionID: string | undefined) =>
-    poolState(ids, Date.now(), sessionID, sessionID ? sessionWorkingAccount(sessionID) : undefined)
+    poolState(ids, Date.now(), sessionID, sessionID ? sessionWorkingAccount(sessionID) : undefined, {
+      withApi: true,
+    })
 
   const claudeAccountState = Effect.fn("SessionHttpApi.claudeAccountState")(function* (ctx: {
     query: typeof ClaudeAccountQuery.Type
@@ -199,6 +215,7 @@ export const makeOcSessionHandlers = Effect.fnUntraced(function* ({
   }) {
     const ids = yield* claudePool()
     const { id, sessionID } = ctx.payload
+    // Without a session this sets the global account, which `setCurrentAccount` keeps to the pool.
     const ok = sessionID ? pinSessionAccount(sessionID, id, ids) : id !== undefined && setCurrentAccount(id, ids)
     if (!ok) return yield* new HttpApiError.BadRequest({})
     return { accounts: claudeState(ids, sessionID) }

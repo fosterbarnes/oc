@@ -32,6 +32,8 @@ export interface ClaudeAccountOption {
   current: boolean
   pinned?: boolean
   limitedUntil?: number
+  /** The API-credit profile: pickable per session or agent, never as the global account. */
+  kind?: "api"
 }
 
 /** A pool account in the `Claude accounts` manager (`/global/claude/accounts`). */

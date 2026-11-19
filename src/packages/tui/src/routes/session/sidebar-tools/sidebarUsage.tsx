@@ -5,7 +5,7 @@ import path from "node:path"
 import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
 import { useSync } from "../../../context/sync"
 import { useEvent } from "../../../context/event"
-import { useSDK } from "../../../context/sdk"
+import { useSDK, type ClaudeAccountOption } from "../../../context/sdk"
 import { useKV } from "../../../context/kv"
 import { useTheme } from "../../../context/theme"
 import { useLocal } from "../../../context/local"
@@ -132,6 +132,8 @@ export function createSidebarUsage(input: {
   const [claudeCodeUsage, setClaudeCodeUsage] = keptUsageSignal<UsageSnapshot<ClaudeCodeUsage>>("claude-code")
   // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
   const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
+  // Label of the API-credit profile when this session runs on it; it has no usage meter.
+  const [activeClaudeApi, setActiveClaudeApi] = createSignal<string>()
   // oc.json `claudeAccountNames`; reread when an account changes (the account manager renames through it).
   const [claudeNames, setClaudeNames] = createSignal(readOcConfig().claudeAccountNames)
   // Sidebar usage shows used or remaining percent for every provider; toggled from the Usage menu.
@@ -188,13 +190,11 @@ export function createSidebarUsage(input: {
         : {}),
     }
   }
-  const refreshActiveClaudeAccount = async () => {
-    const selectedSession = input.sessionID()
-    const pool = await sdk.claudeAccount.state(selectedSession).catch(() => undefined)
-    if (usageAbort.signal.aborted || selectedSession !== input.sessionID()) return
+  const showActiveClaudeAccount = (pool: ClaudeAccountOption[] | undefined) => {
     const current = pool?.find((account) => account.current)
+    setActiveClaudeApi(current?.kind === "api" ? current.label : undefined)
     setActiveClaudeAccount(
-      current
+      current && current.kind !== "api"
         ? claudeConfigDirId(
             current.id === "default"
               ? (process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"))
@@ -202,6 +202,15 @@ export function createSidebarUsage(input: {
           )
         : undefined,
     )
+  }
+  // The pool state matters with 2+ accounts (the `«` mark) or an API profile (its line).
+  const claudeStateWanted = () =>
+    claudeDirectories().length > 1 || !!sync.data.config.provider?.["claude-code"]?.options?.apiAccount
+  const refreshActiveClaudeAccount = async () => {
+    const selectedSession = input.sessionID()
+    const pool = await sdk.claudeAccount.state(selectedSession).catch(() => undefined)
+    if (usageAbort.signal.aborted || selectedSession !== input.sessionID()) return
+    showActiveClaudeAccount(pool)
   }
   const observeUsage = (observation: ProviderUsage.Info, fromSnapshot = false) => {
     const key = `${observation.providerID}:${observation.accountID}`
@@ -271,7 +280,7 @@ export function createSidebarUsage(input: {
               ...options,
               claudeCredentialsPath: path.join(dirs[0], ".credentials.json"),
             }),
-        dirs.length > 1 ? sdk.claudeAccount.state(selectedSession).catch(() => undefined) : undefined,
+        claudeStateWanted() ? sdk.claudeAccount.state(selectedSession).catch(() => undefined) : undefined,
       ])
       if (!usageAbort.signal.aborted && JSON.stringify(dirs) === JSON.stringify(claudeDirectories())) {
         setClaudeCodeUsage((previous) => {
@@ -281,18 +290,7 @@ export function createSidebarUsage(input: {
             return observation ? applyClaudeObservation(snapshot.ok ? snapshot : claudeSeed(), observation) : snapshot
           }, merged)
         })
-        if (input.sessionID() === selectedSession) {
-          const current = pool?.find((account) => account.current)
-          setActiveClaudeAccount(
-            current
-              ? claudeConfigDirId(
-                  current.id === "default"
-                    ? (process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude"))
-                    : current.id,
-                )
-              : undefined,
-          )
-        }
+        if (input.sessionID() === selectedSession) showActiveClaudeAccount(pool)
       }
       return {
         ok: next.ok && next.source === "live" && !next.metadata?.status,
@@ -461,18 +459,27 @@ export function createSidebarUsage(input: {
       const accounts = claudeProjected.accounts?.flatMap((account) =>
         account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
       )
-      return (
-        accounts?.length ? accounts : [{ id: claudeProjected.accountID, name: "Claude", usage: claudeProjected }]
-      ).map((account) => ({
-        name: account.name,
-        active: claudePooled && (account.id ?? account.name) === activeClaudeAccount(),
-        table: true,
-        windows: [
-          window("5h", account.usage.fiveHour, account.usage),
-          window("wk", account.usage.weekly, account.usage),
-        ],
-        plan: claudePooled ? plan("claude-code", account.id) : plan("claude-code"),
-      }))
+      // No meter for API credits: the footer shows each turn's cost and the Console the balance.
+      const api = activeClaudeApi()
+      const apiLine: UsageEntry[] = api
+        ? [{ name: `Claude: ${api}`, active: true, windows: [], note: "API credits" }]
+        : []
+      return [
+        ...apiLine,
+        ...(accounts?.length
+          ? accounts
+          : [{ id: claudeProjected.accountID, name: "Claude", usage: claudeProjected }]
+        ).map((account) => ({
+          name: account.name,
+          active: claudePooled && (account.id ?? account.name) === activeClaudeAccount(),
+          table: true,
+          windows: [
+            window("5h", account.usage.fiveHour, account.usage),
+            window("wk", account.usage.weekly, account.usage),
+          ],
+          plan: claudePooled ? plan("claude-code", account.id) : plan("claude-code"),
+        })),
+      ]
     }
     const entries: UsageEntry[] = [
       ...(providers.includes("claude-code") ? claude() : []),

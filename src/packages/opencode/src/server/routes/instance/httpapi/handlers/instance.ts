@@ -1,6 +1,6 @@
 import { Agent } from "@/agent/agent"
 import { SubagentFile } from "@/agent/subagentFile"
-import { accountConfigEntry } from "@/provider/claude-code/accounts"
+import { accountConfigEntry, API_ACCOUNT_DIR, apiAccountId } from "@/provider/claude-code/accounts"
 import { Command } from "@/command"
 import { Config } from "@/config/config"
 import * as InstanceState from "@/effect/instance-state"
@@ -139,14 +139,21 @@ export const instanceHandlers = HttpApiBuilder.group(InstanceHttpApi, "instance"
       const cfg = yield* config.get()
       const file = cfg.subagentFile ?? SubagentFile.defaultFile()
       const { claudeAccount, ...input } = ctx.payload
-      const accounts = cfg.provider?.["claude-code"]?.options?.accounts
+      const options = cfg.provider?.["claude-code"]?.options
+      const accounts = options?.accounts
+      const apiDir = options?.apiAccount?.dir
+      // The API-credit profile is written as its dir, like a pool entry.
       const entry =
         claudeAccount === undefined
           ? undefined
-          : accountConfigEntry(
-              claudeAccount,
-              Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined,
-            )
+          : claudeAccount === apiAccountId()
+            ? typeof apiDir === "string" && apiDir.trim()
+              ? apiDir.trim()
+              : API_ACCOUNT_DIR
+            : accountConfigEntry(
+                claudeAccount,
+                Array.isArray(accounts) ? accounts.filter((dir) => typeof dir === "string") : undefined,
+              )
       if (claudeAccount !== undefined && entry === undefined)
         return yield* Effect.die(new Error(`Claude account is not in claude-code accounts: ${claudeAccount}`))
       yield* Effect.promise(() => SubagentFile.upsert({ ...input, claudeAccount: entry }, file))

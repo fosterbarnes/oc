@@ -571,23 +571,7 @@ export function Prompt(props: PromptProps) {
         run: (ctx: CommandContext<Renderable, KeyEvent>) => {
           ctx.event.preventDefault()
           ctx.event.stopPropagation()
-          const run = trackPaste(async () => {
-            const content = await clipboard.read?.()
-            if (content?.mime.startsWith("image/")) {
-              await pasteAttachment({
-                filename: content.filepath ? path.basename(content.filepath) : "clipboard",
-                filepath: content.filepath,
-                mime: content.mime,
-                content: content.data,
-              })
-              return
-            }
-            if (content?.mime === "text/plain") {
-              await pasteInputText(content.data)
-            }
-          })
-          startPasteGrace()
-          return run
+          return pasteFromClipboard(ctx.event)
         },
       },
       {
@@ -1483,6 +1467,27 @@ export function Prompt(props: PromptProps) {
     return run
   }
 
+  // The trigger is the user's key press or bracketed paste; a command dispatched by name reads nothing.
+  function pasteFromClipboard(trigger: KeyEvent | PasteEvent) {
+    const run = trackPaste(async () => {
+      const content = await clipboard.read?.(trigger)
+      if (content?.mime.startsWith("image/")) {
+        await pasteAttachment({
+          filename: content.filepath ? path.basename(content.filepath) : "clipboard",
+          filepath: content.filepath,
+          mime: content.mime,
+          content: content.data,
+        })
+        return
+      }
+      if (content?.mime === "text/plain") {
+        await pasteInputText(content.data)
+      }
+    })
+    startPasteGrace()
+    return run
+  }
+
   let submitting = false
   async function submit(stayHome = false) {
     // Prevent overlapping invocations (e.g. a double-pressed Enter, or the
@@ -2111,7 +2116,7 @@ export function Prompt(props: PromptProps) {
                 // Windows Terminal <1.25 can surface image-only clipboard as an
                 // empty bracketed paste. Windows Terminal 1.25+ does not.
                 if (!pastedContent) {
-                  keymap.dispatchCommand("prompt.paste")
+                  await pasteFromClipboard(event)
                   return
                 }
 

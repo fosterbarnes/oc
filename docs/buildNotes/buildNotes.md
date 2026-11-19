@@ -131,6 +131,75 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~19:30) - v0.2.388 squiggleEndevors - Clipboard read only on paste, API key dialog - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed per `~/.config/opencode/plans/clipboardReadGuard.md` (iteration 6)
+- Version: 0.2.388 squiggleEndevors (not bumped: already changed since the last commit)
+- Changed `tui/src/clipboard.ts` `read(trigger: KeyEvent | PasteEvent, options)`: returns undefined + console.warn when `isSyntheticTrigger` (missing, or keymap `createSyntheticCommandEvent` shape: name "command", raw ""; `@opentui/keymap` 0.5.14 `src/opentui.js:6`). Covers every `keymap.dispatchCommand` path (remote `tui.command.execute`/targeted, `--palette`, plugin shim, sidebar). No app.tsx blocklist. `ClipboardService.read` takes the trigger.
+- Changed `prompt/index.tsx`: paste body moved to `pasteFromClipboard(trigger)`; `prompt.paste` passes `ctx.event`; empty bracketed-paste fallback calls it with the `PasteEvent` (dispatching `prompt.paste` would now be rejected). `editorPaste.ts` passes the binding's `ctx.event`.
+- Added `component/dialogApiKey.tsx`: no text field; bracketed paste (`usePaste`) or `prompt.paste` keys (read with the key event); shows `Key sk-ant-…abcd` / `none`, inline error on non-`sk-ant-` paste, Enter saves. `claudeCommands.tsx` `claude.apiKey` renamed **Set Claude API key**, opens it; `saveApiKey` keeps the keychain logic, then `clipboard.write("")`, toast "Clipboard cleared (clipboard history may still hold it)". Note: plan's empty-state hint text replaced by `none` per principles (no usage hints).
+- Moved cua `clipboard_read` from `SENSITIVE` to `DENIED` (`tool/cua.ts`), deny message and `cua_raw` description updated. Note: `run_steps` steps and `run_script` `cua.call` are limited by the driver to input/read tools without `clipboard_read`, so no bypass.
+- Added `tui/test/clipboardReadGuard.test.ts`: scans tui/opencode/core src for read forms (`pbpaste`, `Get-Clipboard`, `GetText(`, `GetImage(`, `GetFileDropList`, `wl-paste`, `xclip ... "-o"`, `the clipboard as`, `clipboardy.read`, `navigator.clipboard.read`, `createHostClipboard`) outside `tui/src/clipboard.ts`; plus synthetic vs real trigger cases. `test/clipboard.test.ts` passes a `PasteEvent`.
+- Docs: FORK.md new row "Clipboard reads only on paste", pool row palette name, cua row; wiki `Agents-and-Skills.md` cua bullet; setup guide `~/.config/opencode/mockups/claudeApiProfileSetup.html` step 6.
+- Verification: `tsgo --noEmit` clean in tui and opencode; tui clipboardReadGuard + clipboard + dialog-prompt + promptPasteSubmit 21 pass 2 skip (win32-only) 0 fail; cua 5 pass. Probes (deleted): real `createDefaultOpenTuiKeymap` `dispatchCommand` -> read undefined, mock Ctrl+V -> read text; temp `pbpaste` file under tui/src -> guard test fails; macOS `write("")` after `pbcopy` -> `pbpaste` 0 bytes (user clipboard text saved and restored). Not run: Windows `Set-Clipboard ""` (PS 5.1), WezTerm OSC 52 empty payload, live paste and dialog in WezTerm/Windows Terminal.
+
+### User
+Clipboard
+- oc now reads your clipboard only when you paste; the server, agents and remote commands can no longer make it read.
+- Agents' cua `clipboard_read` is blocked instead of asking.
+
+Claude accounts
+- **Set Claude API key** opens a dialog: paste the key, check its last 4 characters, press Enter. oc then clears the clipboard; clipboard history may still hold the key.
+
+---
+
+## 2026-11-18 (~18:53) - v0.2.388 squiggleEndevors - Claude API key from the OS keychain - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed per `~/.config/opencode/plans/claudeApiKeychain.md`
+- Version: 0.2.388 squiggleEndevors (not bumped: already changed since the last commit by the entry below)
+- Added `apiAccount.keychain: true` in `accounts.ts`: `API_KEY_SECRET` (`oc`/`claudeCredit`), `loadKeychainKey` reads `Bun.secrets.get` in the background, re-runs `configureApiAccount` with the last args when found, retries on a later call after a miss, warns once without key text. A non-blank `apiKey` wins. `apiKeyReady()` exposes the pending read; `_setKeychainReader` for tests, and `_resetAccountPool` stubs the reader to null.
+- `claudeCodeLanguageModel.ts` doStream and `sessionOc.ts` `claudePool` await `apiKeyReady()`, so a pinned API chat and the pickers see the profile on first use.
+- Added TUI palette entry **Set Claude API key (from clipboard)** in `claudeCommands.tsx` (shown with `apiAccount.keychain`): requires `sk-ant-`, stores with `Bun.secrets.set`, toasts the last 4 characters, says restart when replacing a key, and nudges the server with a state read.
+- Docs: `types.ts` option doc, FORK.md pool row, setup guide `~/.config/opencode/mockups/claudeApiProfileSetup.html` (steps 4, 6, 8).
+- Verification: 2 new accountPool tests (miss then retry turns on; read once found; `apiKey` wins with 0 keychain reads; overlap guard still applies); accountPool 39 pass 0 fail; `tsgo --noEmit` clean in opencode and tui. Probe: real `Bun.secrets` set/get/delete round-trip on macOS with a throwaway `oc-probe` entry (deleted). Palette entry and Windows Credential Manager not run live.
+
+### User
+Claude accounts
+- The Team API key can live in the macOS Keychain or Windows Credential Manager instead of a file: set `"apiAccount": { "keychain": true }`.
+- New palette entry **Set Claude API key (from clipboard)** stores a copied Console key there and shows only its last 4 characters.
+
+---
+
+## 2026-11-18 (~18:24) - v0.2.388 squiggleEndevors - Team API credit as a fourth Claude profile - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed per `~/.config/opencode/plans/claudeApiProfile.md`
+- Version: 0.2.388 squiggleEndevors
+- Changed `accounts.ts`: `configureApiAccount(option, accounts)` disables the API profile when its dir overlaps a pool id (win32 case-insensitive, default dir included) and runs `createAccountDir` once per dir per process (skipped when `poolFile` is null, i.e. tests).
+- Added private `known()` so `sessionPin`, `pinSessionAccount`, `preferredAccount` and `poolState` accept the API id; `rankUsable`, `nextUsableAccount`, `poolAccount`, `setCurrentAccount` stay pool-only.
+- Moved rollover to its own pool-file set `apiRollover` (`pinApiRollover`, `apiRolloverTurn`, new `isApiRollover`); pins stay in `sessionAccounts`. Any pick or `forgetSessionPin` clears rollover. Manual API pick clears its limit mark.
+- Added `"global"` sentinel (`UNPINNED`): unpin stores it and `turnAccount` skips `preferredAccount`, so an agent `claudeAccount` cannot re-pin. New `releaseApiPin` swaps an API pin for it.
+- `poolState(..., { withApi })` computes one active id over pool plus API (running, rollover, pin) and appends a `kind: "api"` row; only `sessionOc.ts` passes it. `poolAccountLabel` checks `claudeAccountNames` before "API credits". Exported `API_ACCOUNT_DIR`.
+- `turnStream.ts`: `queueAccountSwitch` returns false on the API account (covers `beginTextAccountSwitch`); credits-exhausted marks API limited one hour, rollover chats wait (`allLimited`), pinned chats unpin with a note naming the global login; dropped the `createAccountDir` call at failover.
+- Server: `ClaudeAccount.kind` in `groups/session.ts`; `sessionOc.ts` `claudePool` calls `configureApiAccount`; `instance.ts` subagent add maps the API id to its dir (plan gap: it rejected non-pool ids). SDK `types.gen.ts` regenerated; `openapi.json` left to prePush.
+- TUI: `ClaudeAccountOption.kind`; global switch filters API; session switch shows with logins+API >= 2; "bills API credits" description in pickers and `dialog-subagents.tsx`; `sidebarUsage.tsx` fetches state with an `apiAccount` and shows a "Claude: <name>" / "API credits" line instead of marking a login row.
+- Docs: `types.ts` apiAccount doc, accounts.ts section header, FORK.md pool row.
+- Verification: 6 new accountPool tests (overlap incl. win32 case, no automatic pick, limit clear on pick, Use global sticks, one current row, rollover keeps pin underneath); `bun test test/provider/claude-code/` 763 pass 0 fail; tui usage tests 33 pass; `tsgo --noEmit` clean in opencode and tui. Throwaway fake-CLI probe (deleted) confirmed: pinned exhausted -> "unpinned and runs on first", no switch, pin cleared; rollover exhausted -> "waiting for a Claude account to reset"; rejected rate_limit_event on API -> no switch, no limit mark. Live checks not run.
+- MISTAKE: first eager-dir version gated on `IN_TEST` and created `src/packages/opencode/C:/acct/api` with links to `~/.claude` during tests. Bun 1.4 does not set `BUN_TEST` (it sets `NODE_ENV=test`). Removed the stray dir; gate on `poolFile` instead. Rule: never trust `BUN_TEST`; check `git status` for strays after tests that touch disk.
+- ERROR: `IN_TEST` (`BUN_TEST`) is false under bun 1.4 in accounts.ts, warmup/identities.ts, warmup/store.ts and scheduledResume.ts, so tests not calling `_resetAccountPool` may touch live files. Not fixed here.
+
+### User
+Claude accounts
+- Team plan API credit is now a Claude profile you can pick for one chat, for the next chat from Home, or for an agent; pickers mark it "bills API credits".
+- It is never chosen automatically and never appears in the global account switch; the last-resort rollover still asks per `claudeApiRollover`.
+- When its credits run out, a chat you pinned to it goes back to the global account; a rolled-over chat waits for a login reset.
+- "Use global account" now sticks, so an agent's preferred account no longer re-pins the chat.
+- The sidebar shows "Claude: <name>" with "API credits" while a chat runs on it.
+
+---
+
 ## 2026-11-18 (~04:11) - v0.2.387 ummTension - Typed command aliases run outside the slash menu - Claude Opus 5.5, low; Imp
 
 ### Agent

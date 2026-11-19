@@ -97,14 +97,17 @@ export interface ClaudeCodeProviderSettings {
    */
   accounts?: string[]
   /**
-   * A Claude Console API key as a last resort once every `accounts` entry is
-   * usage-limited: `{ apiKey: "{file:~/.config/opencode/secrets/claudeCredit.key}", dir?: "~/.claudeApi" }`.
+   * A Claude Console API key as one more Claude profile:
+   * `{ apiKey: "{file:~/.config/opencode/secrets/claudeCredit.key}", dir?: "~/.claudeApi" }`.
+   * `keychain: true` instead reads the key from the OS keychain (service `oc`, name `claudeCredit`;
+   * stored with the palette's "Set Claude API key"), so it is in no file. A non-blank `apiKey` wins.
    * A `{file:...}` key beats `{env:...}`: revive and the resident server keep their old environment.
-   * Same CLI, tools and settings as the pool; only the auth differs. A chat
-   * moves onto it only when oc.json `claudeApiRollover` allows (default `ask`).
-   * See "API-credit rollover" in accounts.ts.
+   * Same CLI, tools and settings as the pool; only the auth differs. It spends only when picked for a
+   * chat or an agent (`claudeAccount`), or as a last resort once every `accounts` entry is limited
+   * and oc.json `claudeApiRollover` allows (default `ask`). Never list its dir in `accounts`.
+   * See "API-credit profile" in accounts.ts.
    */
-  apiAccount?: { apiKey?: string; dir?: string }
+  apiAccount?: { apiKey?: string; dir?: string; keychain?: boolean }
   /**
    * Model that subagents run on when their own definition pins nothing.
    * Unset means no implicit override at all, so an agent keeps inheriting the

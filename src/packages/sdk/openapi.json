@@ -11367,6 +11367,10 @@
                                 "enum": ["Infinity", "-Infinity", "NaN"]
                               }
                             ]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["api"]
                           }
                         },
                         "required": ["id", "label", "current"],
@@ -11476,6 +11480,10 @@
                                 "enum": ["Infinity", "-Infinity", "NaN"]
                               }
                             ]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["api"]
                           }
                         },
                         "required": ["id", "label", "current"],

@@ -292,7 +292,11 @@ export function DialogSubagents(props: { highlight?: string }) {
           current=""
           options={[
             { title: "No preference", value: "" },
-            ...accounts.map((account) => ({ title: account.label, value: account.id })),
+            ...accounts.map((account) => ({
+              title: account.label,
+              description: account.kind === "api" ? "bills API credits" : undefined,
+              value: account.id,
+            })),
           ]}
           onSelect={(option) =>
             void continueAdd(

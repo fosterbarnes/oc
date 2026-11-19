@@ -5,9 +5,16 @@ import { policy } from "../../src/tool/cua"
 const none = new Set<number>()
 
 describe("cua policy", () => {
-  test("config, install, and recording tools never run", () => {
-    for (const tool of ["set_config", "install_extension", "install_ffmpeg", "start_recording", "replay_trajectory"])
-      expect(policy(tool, {}, none)).toBe("deny")
+  test("config, install, recording, and clipboard read tools never run", () => {
+    const denied = [
+      "set_config",
+      "install_extension",
+      "install_ffmpeg",
+      "start_recording",
+      "replay_trajectory",
+      "clipboard_read",
+    ]
+    for (const tool of denied) expect(policy(tool, {}, none)).toBe("deny")
   })
 
   test("foreground input asks, wherever it hides in the arguments", () => {
@@ -24,8 +31,8 @@ describe("cua policy", () => {
     for (const [tool, args] of foreground) expect(policy(tool, args, none)).toBe("foreground")
   })
 
-  test("file transfer, clipboard reads, and full-screen capture ask", () => {
-    for (const tool of ["browser_set_input_files", "browser_download", "clipboard_read", "get_desktop_state"])
+  test("file transfer and full-screen capture ask", () => {
+    for (const tool of ["browser_set_input_files", "browser_download", "get_desktop_state"])
       expect(policy(tool, {}, none)).toBe("sensitive")
   })
 
