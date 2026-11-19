@@ -30,7 +30,7 @@ export function DialogMirror() {
 
   const cycle = <T extends string>(values: readonly T[], current: T) =>
     values[(values.indexOf(current) + 1) % values.length]!
-  const save = (key: "dirty" | "revive", value: string) => {
+  const save = (key: "dirty" | "revive" | "accept", value: string | boolean) => {
     setSettings({ ...settings(), [key]: value })
     persistOcPath(["mirror", key], value).catch((error) =>
       toast.show({ variant: "error", message: `Mirror setting not saved: ${errorMessage(error)}` }),
@@ -160,6 +160,13 @@ export function DialogMirror() {
       ...machineRows(),
       { title: "Their own changes", value: "setting:dirty", category: "Settings", footer: current.dirty },
       { title: "Revive after mirror", value: "setting:revive", category: "Settings", footer: current.revive },
+      // Receiving side: another machine's /mirror works here only when this is on (OcMirror.refusal).
+      {
+        title: "Accept mirrors here",
+        value: "setting:accept",
+        category: "Settings",
+        footer: current.accept ? "on" : "off",
+      },
     ]
   })
 
@@ -182,6 +189,7 @@ export function DialogMirror() {
       onSelect={(option) => {
         if (option.value === "setting:dirty") return save("dirty", cycle(OcMirror.DIRTY, settings().dirty))
         if (option.value === "setting:revive") return save("revive", cycle(OcMirror.REVIVE, settings().revive))
+        if (option.value === "setting:accept") return save("accept", !settings().accept)
         const result = scan.latest
         const probe = result?.probes.find((item) => option.value === `mirror:${item.host}`)
         if (probe && result) void mirror(probe, result.local)

@@ -131,6 +131,31 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-19 (~03:47) - v0.2.394 rominaJeff - Mirror hardening: opt-in per machine, own Tailscale devices only, no ssh option injection - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed (Phase 1 of `~/.config/opencode/plans/mirrorHeadlessRevive.md`; review in `mirrorHeadlessRevive.secondOpinion.md`)
+- Version: 0.2.394
+- Added `"mirror"` to `_MACHINE_OC_KEYS` (`core/src/util/ocItems.ts`): a synced `mirror.hosts.*.ssh` reached every peer's ssh argv, so one synced device could run `-oProxyCommand=...` on all others.
+- `OcMirror.connect` is now exported and validates the destination (`_DESTINATION`, no leading `-`); OpenSSH gets `--` before it. `tailscale ssh` gets the validated host without `--` (no peer runs Tailscale SSH to test `--` live). An invalid destination becomes a per-target `error` instead of failing the whole list.
+- `OcSync.tailscaleStatus` reads `Tags`; new `OcSync.isOwnPeer` (same user, `selfUser > 0`, neither side tagged) now gates mirror targets, `peersOf`, and `syncPeer.allowed`.
+- Receiving side (`opencode/src/cli/cmd/oc.ts` mirror info/receive/revive): `OcMirror.refusal()` runs first and answers `{ refused }`: `mirror-disabled` unless oc.json `mirror.accept === true`; `caller-not-allowed` when `SSH_CONNECTION`'s client IP is not an own peer. Sender maps it to "mirrors off there" / "not from your devices" (`answer()`).
+- Ids from the other machine: `_HASH` check on `remote.head`/`tree` (sender, `remoteInfo`) and `--head`/`--snapshot` (receiver, `receive`); `branch` re-checked with `_SAFE_ARG`; `from` sanitized for the stash message and revive request.
+- Temp files: bundle and temp index now live in `OcMirror.withTempDir` (mkdtemp under `Global.Path.state/mirror`, 0700) instead of predictable names in `os.tmpdir()`; the mirror folder is created 0700.
+- Revive requests: `takeRevive` requires `^\d+-\d+$` ids and a numeric `at`; `requestRevive` takes the claim itself (`wx`) when no window did, so a late window cannot revive an abandoned request.
+- `Revive.buildSteps` runs `bun install --frozen-lockfile` (tests updated).
+- Mirror dialog: new Settings row "Accept mirrors here" (on/off, saves `mirror.accept`).
+- Verification: new `core/test/util/ocMirror.test.ts` (connect, isOwnPeer, refusal) plus ocItems/ocSync tests: 19 pass. `opencode/test/config/revive.test.ts`: 19 pass, 11 skip (Windows-only). Typecheck core, opencode, tui clean. Probes: `ssh -o BatchMode=yes -- goonstation echo` works; `bun install --frozen-lockfile` in `src` is a no-op; `oc oc mirror info` and `revive` from source print `{"refused":"mirror-disabled"}`. Not run: a live mirror between two machines.
+
+### User
+Mirror
+- A machine now accepts mirrors only after you turn on "Accept mirrors here" in its own Mirror dialog; until then other machines show "mirrors off there".
+- Mirrors are accepted only from your own Tailscale devices; tagged or other users' devices are ignored, also by settings sync.
+- Mirror settings no longer sync between machines, so each machine keeps its own ssh and accept choices.
+- Revive builds install exactly the dependency versions in bun.lock.
+
+---
+
 ## 2026-11-19 (~03:02) - v0.2.393 surstrommingEarthquake - Mirror dialog loading spinner keeps the cursor off Settings - Claude Opus 5.5, low; Imp
 
 ### Agent

@@ -173,13 +173,13 @@ async function respond(request: Request, self: ReturnType<typeof Bun.serve>) {
   return new Response("Not found", { status: 404 })
 }
 
-// The caller must be a machine signed in to the same Tailscale account as this one.
+// The caller must be one of this user's own machines (`OcSync.isOwnPeer`).
 async function allowed(address: string | undefined) {
   if (!address) return false
   const ip = address.replace(/^::ffff:/, "")
   const current = await tailscaleStatus().catch(() => undefined)
   if (!current) return false
-  return current.peers.some((peer) => peer.user === current.selfUser && peer.ips.includes(ip))
+  return current.peers.some((peer) => OcSync.isOwnPeer(current, peer) && peer.ips.includes(ip))
 }
 
 function tailscaleStatus() {

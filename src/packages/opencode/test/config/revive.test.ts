@@ -277,7 +277,7 @@ test("build steps skip the cross-platform installs and build into the staging fo
   const steps = Revive.buildSteps({ source }, { outdir })
   expect(steps.cwd).toBe(path.join(source, "src"))
   expect(steps.commands).toEqual([
-    ["bun", "install"],
+    ["bun", "install", "--frozen-lockfile"],
     ["bun", "run", "packages/opencode/script/build.ts", "--single", "--skip-install", "--outdir", outdir],
   ])
   const platform = process.platform === "win32" ? "windows" : process.platform
@@ -577,7 +577,7 @@ windowsTest("build steps run build.ts in the source folder", () => {
   const release = Revive.buildSteps({ source: "C:\\src\\oc" })
   expect(release.cwd).toBe("C:\\src\\oc\\src")
   expect(release.commands).toEqual([
-    ["bun", "install"],
+    ["bun", "install", "--frozen-lockfile"],
     ["bun", "run", "packages/opencode/script/build.ts", "--single", "--skip-install"],
   ])
   const native = `${dist}\\opencode-native-windows-${process.arch}\\bin\\opencode.exe`

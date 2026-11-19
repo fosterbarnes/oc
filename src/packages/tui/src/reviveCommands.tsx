@@ -400,7 +400,7 @@ export function useMirrorRevive(toast: ToastContext) {
   const route = useRoute()
   if (Global.native) return
   const dir = OcMirror.reviveDir()
-  fs.mkdirSync(dir, { recursive: true })
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
   const check = async () => {
     const request = await OcMirror.takeRevive()
     if (!request) return

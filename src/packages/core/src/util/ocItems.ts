@@ -87,6 +87,9 @@ const _MACHINE_OC_KEYS = new Set([
   "allowImport",
   "sync",
   "claudeAccountNames",
+  // /mirror: ssh destinations and accept/revive choices are per machine; a synced ssh value
+  // would reach every peer's ssh command line (core util/ocMirror.ts).
+  "mirror",
 ])
 
 // Every read-modify-write of oc.json (server settings writes and sync applies) holds this lock.

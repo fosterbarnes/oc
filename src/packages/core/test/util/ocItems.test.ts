@@ -82,6 +82,8 @@ describe("exclude tree", () => {
 describe("machine-only oc keys", () => {
   test("machineOnly holds for claudeAccountNames and not for synced keys", () => {
     expect(OcItems.machineOnly("oc:claudeAccountNames")).toBe(true)
+    expect(OcItems.machineOnly("oc:mirror")).toBe(true)
+    expect(OcItems.machineOnly("oc:mirror.hosts")).toBe(true)
     expect(OcItems.machineOnly("oc:claudeAccounts")).toBe(false)
     expect(OcItems.machineOnly("opencode:provider.x")).toBe(false)
   })

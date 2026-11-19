@@ -328,8 +328,18 @@ export type TailscaleStatus = {
   /** This machine's tailnet host name (DNS label), or "" when Tailscale reports none. */
   selfHost: string
   selfIps: string[]
+  /** Tagged nodes all share one Tailscale user, so a tagged machine has no "own" peers. */
+  selfTagged: boolean
   // `ssh`: the peer runs the Tailscale SSH server (core util/ocMirror.ts).
-  peers: { host: string; ips: string[]; online: boolean; user: number; ssh: boolean }[]
+  peers: { host: string; ips: string[]; online: boolean; user: number; ssh: boolean; tagged: boolean }[]
+}
+
+/**
+ * One of this user's own machines: same Tailscale user, and neither side tagged. Sync and /mirror
+ * trust only these (tagged nodes share one user across owners).
+ */
+export function isOwnPeer(status: TailscaleStatus, peer: TailscaleStatus["peers"][number]) {
+  return status.selfUser > 0 && !status.selfTagged && !peer.tagged && peer.user === status.selfUser
 }
 
 export async function tailscaleStatus(): Promise<TailscaleStatus> {
@@ -338,7 +348,7 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
   const output = await run(binary, ["status", "--json"])
   const status = JSON.parse(output) as {
     BackendState?: string
-    Self?: { UserID?: number; TailscaleIPs?: string[]; HostName?: string; DNSName?: string }
+    Self?: { UserID?: number; TailscaleIPs?: string[]; HostName?: string; DNSName?: string; Tags?: string[] }
     Peer?: Record<
       string,
       {
@@ -347,6 +357,7 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
         TailscaleIPs?: string[]
         Online?: boolean
         UserID?: number
+        Tags?: string[]
         sshHostKeys?: string[]
       }
     >
@@ -356,20 +367,22 @@ export async function tailscaleStatus(): Promise<TailscaleStatus> {
     selfUser: status.Self?.UserID ?? -1,
     selfHost: status.Self?.DNSName?.split(".")[0] || status.Self?.HostName || "",
     selfIps: status.Self?.TailscaleIPs ?? [],
+    selfTagged: (status.Self?.Tags?.length ?? 0) > 0,
     peers: Object.values(status.Peer ?? {}).map((peer) => ({
       host: peer.DNSName?.split(".")[0] || peer.HostName || "",
       ips: peer.TailscaleIPs ?? [],
       online: peer.Online === true,
       user: peer.UserID ?? -2,
       ssh: (peer.sshHostKeys?.length ?? 0) > 0,
+      tagged: (peer.Tags?.length ?? 0) > 0,
     })),
   }
 }
 
-// Online machines signed in to the same Tailscale account, by IPv4.
+// This user's own online machines (`isOwnPeer`), by IPv4.
 export function peersOf(status: TailscaleStatus): Peer[] {
   return status.peers
-    .filter((peer) => peer.online && peer.user === status.selfUser)
+    .filter((peer) => peer.online && isOwnPeer(status, peer))
     .flatMap((peer) => {
       const ip = peer.ips.find((item) => !item.includes(":"))
       return ip ? [{ ip, name: peer.host || ip }] : []

@@ -377,7 +377,16 @@ const DepsCommand = cmd({
 })
 
 // Hidden: the target side of /mirror, run over ssh by another machine's TUI (core util/ocMirror.ts).
-// Each prints one JSON line; errors go to stderr with exit 1.
+// Each prints one JSON line; errors go to stderr with exit 1. Every command first checks
+// `OcMirror.refusal` (mirrors turned on here, caller is one of the user's devices) and answers
+// `{ refused }` without acting when it refuses.
+async function mirrorRefused() {
+  const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
+  const refused = await OcMirror.refusal()
+  if (refused) console.log(JSON.stringify({ refused }))
+  return refused !== undefined
+}
+
 const MirrorCommand = cmd({
   command: "mirror",
   describe: false,
@@ -387,6 +396,7 @@ const MirrorCommand = cmd({
         command: "info",
         describe: "print this machine's oc source state",
         handler: async () => {
+          if (await mirrorRefused()) return
           const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
           console.log(JSON.stringify(await OcMirror.info()))
         },
@@ -407,11 +417,12 @@ const MirrorCommand = cmd({
             .option("from", { type: "string" })
             .option("allow-extra", { type: "boolean", default: false }),
         handler: async (args) => {
+          if (await mirrorRefused()) return
           const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
-          const bundle = path.join(os.tmpdir(), `oc-mirror-in-${process.pid}-${Date.now()}.bundle`)
-          try {
+          const result = await OcMirror.withTempDir(async (dir) => {
+            const bundle = path.join(dir, "mirror.bundle")
             await Bun.write(bundle, Bun.stdin)
-            const result = await OcMirror.receive(bundle, {
+            return OcMirror.receive(bundle, {
               head: args.head,
               snapshot: args.snapshot,
               branch: args.branch,
@@ -419,10 +430,8 @@ const MirrorCommand = cmd({
               from: args.from,
               allowExtra: args["allow-extra"],
             })
-            console.log(JSON.stringify(result))
-          } finally {
-            await fs.rm(bundle, { force: true })
-          }
+          })
+          console.log(JSON.stringify(result))
         },
       })
       .command({
@@ -430,6 +439,7 @@ const MirrorCommand = cmd({
         describe: "ask an open oc window to revive",
         builder: (nested) => nested.option("from", { type: "string" }),
         handler: async (args) => {
+          if (await mirrorRefused()) return
           const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
           console.log(JSON.stringify({ claimed: await OcMirror.requestRevive(args.from ?? "peer") }))
         },

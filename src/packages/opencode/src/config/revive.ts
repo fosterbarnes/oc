@@ -263,6 +263,9 @@ export function parseBuild(input: unknown): BuildConfig | undefined {
  */
 export function buildSteps(build: BuildConfig, options: { variant?: "native"; outdir?: string } = {}) {
   const platform = process.platform === "win32" ? "windows" : process.platform
+  // Only the versions pinned in bun.lock: a revive (also one a /mirror started) never resolves new
+  // registry packages that nobody installed and ran on purpose.
+  const install = ["bun", "install", "--frozen-lockfile"]
   const cwd = path.join(build.source, WORKSPACE)
   const dist = options.outdir ?? path.join(cwd, "packages", "opencode", "dist")
   const outdir = options.outdir ? ["--outdir", options.outdir] : []
@@ -270,18 +273,12 @@ export function buildSteps(build: BuildConfig, options: { variant?: "native"; ou
   if (options.variant === "native")
     return {
       cwd,
-      commands: [
-        ["bun", "install"],
-        ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", "--native-only", ...outdir],
-      ],
+      commands: [install, ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", "--native-only", ...outdir]],
       output: [native],
     }
   return {
     cwd,
-    commands: [
-      ["bun", "install"],
-      ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", ...outdir],
-    ],
+    commands: [install, ["bun", "run", BUILD_SCRIPT, "--single", "--skip-install", ...outdir]],
     // The native build ships only its executable; it shares the oc build's support files.
     output: [path.join(dist, `opencode-${platform}-${process.arch}`, "bin"), native],
   }

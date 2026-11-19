@@ -17,14 +17,24 @@ export type Dirty = (typeof DIRTY)[number]
 export type ReviveMode = (typeof REVIVE)[number]
 // `ssh` per tailnet host: `auto` (Tailscale SSH when the peer runs it, else `ssh <host>`),
 // `tailscale`, or an ssh destination (`goon`, `user@host`).
-export type Settings = { dirty: Dirty; revive: ReviveMode; hosts: Record<string, { ssh?: string }> }
+// `accept`: this machine takes mirrors (and their revives) from the user's own devices. Off until
+// turned on here; `mirror` never syncs (core util/ocItems.ts), so each machine opts in itself.
+export type Settings = {
+  dirty: Dirty
+  revive: ReviveMode
+  accept: boolean
+  hosts: Record<string, { ssh?: string }>
+}
 // One uncommitted change: blob at HEAD (`before`) and in the work tree (`after`); null = absent.
 // `untracked`: new and not in the index, so a mirror that lacks it leaves it in place.
 export type Change = { path: string; before: string | null; after: string | null; untracked?: true }
 // `tree`: the work tree (tracked + untracked, not ignored) as a git tree id. Tree ids are
 // deterministic, so equal `head` + `tree` means identical sources.
 export type Info = { version: string; source: string; branch: string; head: string; tree: string; changes: Change[] }
-export type Target = { host: string; command: string[] }
+// `error`: the target cannot be reached as configured (an invalid ssh destination); `command` is empty.
+export type Target = { host: string; command: string[]; error?: string }
+// A target that refuses: mirrors are off there, or the caller is not one of the user's devices.
+export type Refusal = "mirror-disabled" | "caller-not-allowed"
 // `missing`: sender commits the target lacks. `extra`: target commits the sender lacks; -1 when the
 // sender does not have the target's HEAD at all (so it has commits of its own). `lost`: target
 // changes a mirror would overwrite or delete. `inSync`: the target already equals this machine.
@@ -44,6 +54,12 @@ const _REVIVE_FRESH = 30_000
 const _REF = { head: "refs/oc-mirror/head", snapshot: "refs/oc-mirror/snapshot" }
 // Every argument is passed through the remote shell (zsh, bash, cmd, or pwsh): allow no quoting.
 const _SAFE_ARG = /^[A-Za-z0-9._/-]+$/
+// Full git object ids (SHA-1 or SHA-256). Ids from the other machine must match before reaching git.
+const _HASH = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/
+// An ssh destination: optional `user@`, then a host name. No leading `-`, so it is never an option.
+const _DESTINATION = /^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9][A-Za-z0-9.-]*$/
+// `requestRevive` ids (`<ms>-<pid>`); they name claim files.
+const _REVIVE_ID = /^\d+-\d+$/
 // Temporary commit identity: the snapshot commit never lands on a branch.
 const _GIT_IDENTITY = {
   GIT_AUTHOR_NAME: "oc mirror",
@@ -54,12 +70,50 @@ const _GIT_IDENTITY = {
 
 // A missing or unparsable oc.json means defaults, as `OcSync.settings` treats it.
 export function settings(): Settings {
-  const parsed = readOcJson().mirror as { dirty?: unknown; revive?: unknown; hosts?: unknown } | undefined
+  const parsed = readOcJson().mirror as
+    | { dirty?: unknown; revive?: unknown; accept?: unknown; hosts?: unknown }
+    | undefined
   const hosts = parsed?.hosts && typeof parsed.hosts === "object" ? (parsed.hosts as Settings["hosts"]) : {}
   return {
     dirty: DIRTY.find((value) => value === parsed?.dirty) ?? "ask",
     revive: REVIVE.find((value) => value === parsed?.revive) ?? "ask",
+    accept: parsed?.accept === true,
     hosts,
+  }
+}
+
+/**
+ * Why this machine refuses a mirror command, or undefined when it accepts. Run first by the hidden
+ * `oc oc mirror` commands: mirrors must be turned on here, and an ssh caller (`SSH_CONNECTION`)
+ * must come from one of the user's own Tailscale devices. Without `SSH_CONNECTION` the caller is a
+ * local process of this user.
+ */
+export async function refusal(): Promise<Refusal | undefined> {
+  if (!settings().accept) return "mirror-disabled"
+  const client = process.env.SSH_CONNECTION?.trim()
+    .split(/\s+/)[0]
+    ?.replace(/^::ffff:/, "")
+  if (!client) return
+  const tail = await OcSync.tailscaleStatus().catch(() => undefined)
+  if (!tail?.peers.some((peer) => OcSync.isOwnPeer(tail, peer) && peer.ips.includes(client)))
+    return "caller-not-allowed"
+}
+
+/** What the sender shows for a target's refusal. */
+export function refusalMessage(refused: Refusal) {
+  return refused === "mirror-disabled" ? "mirrors off there" : "not from your devices"
+}
+
+/** Runs `action` in a fresh owner-only folder under this machine's state, removed afterwards. */
+export async function withTempDir<T>(action: (dir: string) => Promise<T>) {
+  const root = path.join(Global.Path.state, "mirror")
+  await fs.mkdir(root, { recursive: true, mode: 0o700 })
+  // mkdtemp creates the folder 0700 and with a name no other process can predict.
+  const dir = await fs.mkdtemp(path.join(root, "tmp-"))
+  try {
+    return await action(dir)
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true })
   }
 }
 
@@ -102,19 +156,26 @@ export function lost(list: readonly Change[], sender: ReadonlyMap<string, string
 
 // --- Sender ---
 
-/** Online same-account tailnet peers and the command prefix that reaches each one. */
+/** This user's own online tailnet machines (`OcSync.isOwnPeer`) and the command that reaches each one. */
 export async function targets(current = settings()): Promise<Target[]> {
   const tail = await OcSync.tailscaleStatus()
   return tail.peers
-    .filter((peer) => peer.online && peer.user === tail.selfUser && peer.host)
-    .map((peer) => ({ host: peer.host, command: connect(peer.host, peer.ssh, current.hosts[peer.host]?.ssh) }))
+    .filter((peer) => peer.online && OcSync.isOwnPeer(tail, peer) && peer.host)
+    .map((peer): Target => {
+      try {
+        return { host: peer.host, command: connect(peer.host, peer.ssh, current.hosts[peer.host]?.ssh) }
+      } catch (error) {
+        return { host: peer.host, command: [], error: firstLine(error) }
+      }
+    })
     .sort((a, b) => a.host.localeCompare(b.host))
 }
 
 /** Runs `oc oc mirror info` on the target and compares its HEAD with `local`. Never throws. */
 export async function probe(target: Target, local: Info): Promise<Probe> {
+  if (target.error) return target
   const result = await run([...target.command, "oc", "oc", "mirror", "info"], { timeout: _PROBE_TIMEOUT })
-    .then((output) => ({ info: remoteInfo(lastJson(output)) }))
+    .then((output) => ({ info: remoteInfo(answer(lastJson(output))) }))
     .catch((error: unknown) => ({ error: firstLine(error) }))
   if (!("info" in result)) return { ...target, ...result }
   const remote = result.info
@@ -138,11 +199,21 @@ export async function probe(target: Target, local: Info): Promise<Probe> {
 }
 
 // TODO: drop once no machine runs v0.2.382 (sent `dirty: string[]`, no `tree`/`changes`).
+// Ids from the other machine reach git argv here (`cat-file`, `rev-list`, bundle basis): only full hashes.
 function remoteInfo(raw: unknown): Info {
   const value = raw as Info & { dirty?: string[] }
+  if (typeof value.head !== "string" || !_HASH.test(value.head) || (value.tree && !_HASH.test(value.tree)))
+    throw new Error("Invalid reply from the other machine")
   if (Array.isArray(value.changes)) return value
   const dirty = Array.isArray(value.dirty) ? value.dirty : []
   return { ...value, tree: "", changes: dirty.map((file) => ({ path: file, before: null, after: null })) }
+}
+
+// A target that refuses answers `{ refused }` instead of its result.
+function answer(raw: unknown) {
+  const refused = (raw as { refused?: unknown } | null)?.refused
+  if (refused === "mirror-disabled" || refused === "caller-not-allowed") throw new Error(refusalMessage(refused))
+  return raw
 }
 
 /**
@@ -159,18 +230,16 @@ export async function push(
   if (local.branch !== remote.branch)
     throw new Error(`${target.host} is on ${remote.branch}, this machine on ${local.branch}`)
   const snapshot = await snapshotCommit(local.source, local.head, local.tree)
-  const bundle = path.join(os.tmpdir(), `oc-mirror-${process.pid}-${Date.now()}.bundle`)
-  try {
+  return withTempDir(async (dir) => {
+    const bundle = path.join(dir, "mirror.bundle")
     await writeBundle(local.source, bundle, local.head, snapshot, remote.head)
     const args = ["--head", local.head, "--snapshot", snapshot, "--branch", local.branch, "--dirty", options.dirty]
     const from = senderName()
     if (_SAFE_ARG.test(from)) args.push("--from", from)
     if (options.allowExtra) args.push("--allow-extra")
     const output = await run([...target.command, "oc", "oc", "mirror", "receive", ...args], { stdin: bundle })
-    return lastJson(output) as Received
-  } finally {
-    await fs.rm(bundle, { force: true })
-  }
+    return answer(lastJson(output)) as Received
+  })
 }
 
 /** Asks the target's open oc window to revive. False when no window took it. */
@@ -178,7 +247,7 @@ export async function revive(target: Target) {
   const from = senderName()
   const args = _SAFE_ARG.test(from) ? ["--from", from] : []
   const output = await run([...target.command, "oc", "oc", "mirror", "revive", ...args], { timeout: _PROBE_TIMEOUT })
-  return (lastJson(output) as { claimed: boolean }).claimed
+  return (answer(lastJson(output)) as { claimed: boolean }).claimed
 }
 
 // Commit of the work tree `tree` (from `worktreeTree`) on top of HEAD; HEAD itself when clean.
@@ -190,17 +259,15 @@ async function snapshotCommit(dir: string, head: string, tree: string) {
 // The work tree (tracked + untracked, not ignored) as a tree id, built in a temporary index so the
 // real index and work tree stay untouched. `git stash create` would miss untracked files.
 async function worktreeTree(dir: string) {
-  const index = path.join(os.tmpdir(), `oc-mirror-index-${process.pid}-${Date.now()}-${Math.random()}`)
   // Starting from the real index keeps its stat data, so `add -A` only hashes changed files.
   const real = path.resolve(dir, (await git(dir, ["rev-parse", "--git-path", "index"])).trim())
-  await fs.copyFile(real, index).catch(() => undefined)
-  const env = { GIT_INDEX_FILE: index }
-  try {
+  return withTempDir(async (temp) => {
+    const index = path.join(temp, "index")
+    await fs.copyFile(real, index).catch(() => undefined)
+    const env = { GIT_INDEX_FILE: index }
     await git(dir, ["add", "-A"], env)
     return (await git(dir, ["write-tree"], env)).trim()
-  } finally {
-    await fs.rm(index, { force: true })
-  }
+  })
 }
 
 // Uncommitted changes as blob pairs (`diff-tree -z`: ":<modes> <old> <new> <status>\0<path>\0").
@@ -264,6 +331,9 @@ export async function receive(
     allowExtra?: boolean
   },
 ): Promise<Received> {
+  // The sender's ids reach git argv below (`cat-file`, `rev-list`, `reset`, `restore`): full hashes only.
+  if (!_HASH.test(options.head) || !_HASH.test(options.snapshot)) throw new Error("Invalid commit id from the sender")
+  if (!_SAFE_ARG.test(options.branch)) throw new Error(`Branch name not supported by /mirror: ${options.branch}`)
   const dir = sourceDir()
   if (!dir) throw new Error("No oc source folder saved on this machine; run /revive once to choose one")
   const branch = (await git(dir, ["rev-parse", "--abbrev-ref", "HEAD"])).trim()
@@ -289,7 +359,7 @@ export async function receive(
         "push",
         "--include-untracked",
         "-m",
-        `oc mirror backup before ${options.from ?? "peer"} ${stamp}`,
+        `oc mirror backup before ${options.from && _SAFE_ARG.test(options.from) ? options.from : "peer"} ${stamp}`,
       ])
     }
     await git(dir, ["reset", "--hard", "--quiet", options.head])
@@ -319,8 +389,12 @@ export function reviveDir() {
  */
 export async function requestRevive(from: string) {
   const dir = reviveDir()
-  await fs.mkdir(dir, { recursive: true })
-  const request: ReviveRequest = { id: `${Date.now()}-${process.pid}`, from, at: Date.now() }
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 })
+  const request: ReviveRequest = {
+    id: `${Date.now()}-${process.pid}`,
+    from: _SAFE_ARG.test(from) ? from : "peer",
+    at: Date.now(),
+  }
   const file = path.join(dir, "revive.json")
   await fs.writeFile(`${file}.tmp`, JSON.stringify(request))
   await fs.rename(`${file}.tmp`, file)
@@ -330,8 +404,12 @@ export async function requestRevive(from: string) {
     if (await Bun.file(claim).exists()) break
     await Bun.sleep(250)
   }
-  const claimed = await Bun.file(claim).exists()
-  // A window that wakes up later must not revive for a request nobody waits on anymore.
+  // Claimed by nobody: take the claim ourselves, so a window that wakes up later cannot revive for a
+  // request nobody waits on anymore. An existing claim means a window won the race after all.
+  const claimed = await fs.writeFile(claim, String(process.pid), { flag: "wx" }).then(
+    () => false,
+    () => true,
+  )
   if (!claimed) await fs.rm(file, { force: true })
   await removeOldClaims(dir)
   return claimed
@@ -344,7 +422,15 @@ export async function takeRevive(): Promise<ReviveRequest | undefined> {
     .readFile(path.join(dir, "revive.json"), "utf8")
     .then((text) => JSON.parse(text) as ReviveRequest)
     .catch(() => undefined)
-  if (!request || typeof request.id !== "string" || Date.now() - request.at > _REVIVE_FRESH) return
+  // The id names the claim file: digits and one dash only.
+  if (
+    !request ||
+    typeof request.id !== "string" ||
+    !_REVIVE_ID.test(request.id) ||
+    typeof request.at !== "number" ||
+    Date.now() - request.at > _REVIVE_FRESH
+  )
+    return
   const claimed = await fs.writeFile(path.join(dir, `claim-${request.id}`), String(process.pid), { flag: "wx" }).then(
     () => true,
     () => false,
@@ -365,13 +451,18 @@ async function removeOldClaims(dir: string) {
 
 // --- Helpers ---
 
-function connect(host: string, tailscaleSsh: boolean, configured = "auto") {
+// The destination is checked (`_DESTINATION`: no leading `-`), and OpenSSH also gets `--`, so neither
+// a host name nor a configured value can become an ssh option such as `-oProxyCommand=...`.
+export function connect(host: string, tailscaleSsh: boolean, configured = "auto") {
   if (configured === "tailscale" || (configured === "auto" && tailscaleSsh)) {
+    if (!_DESTINATION.test(host)) throw new Error(`Invalid host name: ${host}`)
     const binary = OcSync.tailscaleBinary()
     if (!binary) throw new Error("Tailscale CLI not found")
     return [binary, "ssh", host]
   }
-  return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", configured === "auto" ? host : configured]
+  const destination = configured === "auto" ? host : configured
+  if (!_DESTINATION.test(destination)) throw new Error(`Invalid ssh destination: ${destination}`)
+  return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "--", destination]
 }
 
 function senderName() {
