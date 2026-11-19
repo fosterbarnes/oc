@@ -131,6 +131,24 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~22:26) - v0.2.392 donutsShitass - Mac builds keep one code signature so the Keychain stops asking on every revive - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp (after /debug, /spit, /think); completed, not committed. Plan: `~/.config/opencode/plans/2026-11-18-keychain-stable-signing.md`; debug notes `2026-11-18-debug-keychain-prompt-on-revive.md`.
+- Version: 0.2.392 donutsShitass
+- Root cause: Bun signs compiled binaries ad hoc, so the designated requirement is `cdhash H"..."`; the `oc`/`claudeCredit` Keychain item (Bun.secrets, `provider/claude-code/accounts.ts`) trusted only that one build, and its ACL had 7 stale `oc`/`occ` cdhash entries.
+- Added to `packages/opencode/script/build.ts`: on a macOS host building darwin targets, find identity `oc local signing` (`security find-identity -v -p codesigning`, SHA-1 hash) and `codesign --force --sign <hash> --identifier oc` the compiled binary before the native copy is cloned, so `oc`, `occ`, and `opencode` share one stable requirement. No identity: keep ad hoc with one hint line. Failed signing: keep going if `codesign --verify` still passes, else exit 1. No hardened runtime (Bun's JIT would need entitlements).
+- `/revive` copies with `fsp.cp` and never signs (`config/revive.ts`), which is why signing lives in build.ts; `install.ps1`'s `assertSigned` passes a valid signature through unchanged.
+- Docs: `docs/dev/macos.md` "Stable signing" (one-time cert setup, check, stale-grant cleanup); `SCRIPTS.md` install.ps1 row.
+- User setup done this session: cert created with Certificate Assistant (Keychain Access from Spotlight closed itself on this Mac), trusted via `security add-trusted-cert -r trustRoot -p codeSign -k login.keychain-db`, valid until 2036-11-16; `codesign` key access granted.
+- Verification: opencode typecheck passed; probe on a /tmp copy: failed signing with a missing identity kept a valid ad hoc signature and the binary ran; real signing gave `designated => identifier oc and certificate leaf = H"277eb442..."` and `--version` ran. Installed: the 22:16 revive built before the cert existed and the 22:26 revive skipped the build (source tree unchanged); the 22:27 revive (v0.2.392) installed `oc` and `opencode` with `identifier oc and certificate leaf = H"277eb442..."`, the user clicked Always Allow, and the `oc` Keychain item now holds a certificate-leaf entry. Noted as macOS-only, once per Mac, in `docs/dev/macos.md` and wiki `Install.md` (macOS section, unpushed).
+
+### User
+macOS
+- After a one-time certificate setup (docs/dev/macos.md), Mac builds keep the same signature, so the Keychain prompt for the API credit key no longer returns after every revive.
+
+---
+
 ## 2026-11-18 (~22:08) - v0.2.391 gotttaAvarice - buildNotes.txt moves to the repo root, git-ignored - Claude Opus 5.5, low; Imp
 
 ### Agent

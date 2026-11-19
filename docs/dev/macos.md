@@ -20,6 +20,25 @@ helpers with a `win32` and a `darwin` branch; callers stay platform-neutral.
   PC from the Mac (`node_modules` holds per-OS native packages).
 - Build and install on the Mac: `pwsh -NoProfile -File ./.scripts/build.ps1`, then
   `pwsh -NoProfile -File ./.scripts/install.ps1 -NoBuild` (installs to `~/.local/bin`).
+- Stable signing (macOS only; do the setup once on every Mac that builds oc, Windows needs
+  nothing): Bun signs ad hoc, so a Keychain "Always Allow" (the `oc`/`claudeCredit` API key)
+  is tied to one build's cdhash and every rebuild prompts again. `script/build.ts` re-signs Mac
+  binaries with the code signing identity `oc local signing` (identifier `oc`, no hardened runtime)
+  when `security find-identity -v -p codesigning` lists it; otherwise it keeps the ad hoc signature
+  and says so. A failed signing (locked keychain over SSH, denied key prompt) keeps the ad hoc one.
+  One-time setup, by hand: `open "/System/Library/CoreServices/Certificate Assistant.app"` (Keychain
+  Access from Spotlight may close itself) > Create a certificate for yourself, name
+  `oc local signing`, Self Signed Root, Code Signing, "Let me override defaults" with validity 3650
+  days (expiry silently brings prompts back), other fields blank (they show in every signed
+  binary), defaults elsewhere, keychain login. Then trust it for code signing (password dialog):
+  `security find-certificate -c "oc local signing" -p > /tmp/oc-signing.pem && security
+  add-trusted-cert -r trustRoot -p codeSign -k ~/Library/Keychains/login.keychain-db
+  /tmp/oc-signing.pem; rm -f /tmp/oc-signing.pem`. `security find-identity -v -p codesigning`
+  must then list it.
+  The first signed build asks to let `codesign` use the key and the first launch asks for the `oc`
+  item: Always Allow both. Check: `codesign -d -r- ~/.local/bin/oc` shows `certificate leaf`, not
+  `cdhash`. Stale grants from ad hoc builds are harmless; to drop them, delete the item and use
+  palette **Set Claude API key** again.
 - macOS has no `timeout`; long ssh runs go in the background tool instead. A probe that leaves child
   processes holding the ssh session's stderr keeps the session open: kill them (`pkill -x sleep`).
 

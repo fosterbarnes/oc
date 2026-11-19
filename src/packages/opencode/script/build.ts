@@ -172,6 +172,32 @@ if (!skipInstall) {
     await $`bun install --os="*" --cpu="*" @ff-labs/fff-bun@${pkg.dependencies["@ff-labs/fff-bun"]}`
   })
 }
+// Bun signs ad hoc, which pins Keychain "Always Allow" grants to one build's cdhash, so every
+// rebuild asked again for the API key. A stable local identity keeps the grant across builds
+// (docs/dev/macos.md). Without it the binary keeps Bun's ad hoc signature.
+const SIGNING_NAME = "oc local signing"
+const signsHere = process.platform === "darwin" && targets.some((item) => item.os === "darwin")
+const signingIdentity = signsHere
+  ? new RegExp(`\\b([0-9A-F]{40})\\s+"${SIGNING_NAME}"`).exec(
+      await $`security find-identity -v -p codesigning`.nothrow().quiet().text(),
+    )?.[1]
+  : undefined
+if (signsHere && !signingIdentity)
+  console.log(`No "${SIGNING_NAME}" code signing identity; keeping the ad hoc signature (docs/dev/macos.md).`)
+
+// A failed signing (locked keychain over SSH, a denied key prompt) keeps Bun's signature when it is
+// still valid; a binary left with a broken signature stops the build.
+async function signBinary(file: string, identity: string) {
+  const signed = await $`codesign --force --sign ${identity} --identifier oc ${file}`.nothrow().quiet()
+  if (signed.exitCode === 0) return
+  const reason = signed.stderr.toString().trim()
+  if ((await $`codesign --verify ${file}`.nothrow().quiet()).exitCode !== 0) {
+    console.error(`codesign failed and left ${file} unsigned: ${reason}`)
+    process.exit(1)
+  }
+  console.warn(`codesign with "${SIGNING_NAME}" failed; keeping the ad hoc signature: ${reason}`)
+}
+
 // The runtime's tests stay out of the binaries' folder (and so out of the setup and zips).
 const cursorRuntimeFiles = (
   await Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: cursorRuntimeSource, onlyFiles: true }))
@@ -260,6 +286,9 @@ for (const item of targets) {
           },
         }),
       )
+      // Before the native copy is cloned, so both flavors carry the same signature.
+      if (item.os === "darwin" && signingIdentity)
+        await timed(`sign ${name}`, () => signBinary(binaryPath, signingIdentity))
       compiled = binaryPath
     }
 
