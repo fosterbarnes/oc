@@ -1,12 +1,17 @@
 // Palette Mirror: make another tailnet machine's oc source equal to this machine's, then optionally
 // revive oc there. Probes and pushes run here over ssh (core `util/ocMirror.ts`); the other machine
 // runs the hidden `oc oc mirror` commands. Settings: oc.json `mirror` (`dirty`, `revive`, `hosts`).
-import { createMemo, createResource, createSignal } from "solid-js"
+import { createMemo, createResource, createSignal, Show } from "solid-js"
+import { TextAttributes } from "@opentui/core"
+import type { JSX } from "@opentui/solid"
 import { OcMirror } from "@opencode-ai/core/util/ocMirror"
+import { Spinner } from "./spinner"
 import { DialogSelect, type DialogSelectOption } from "../ui/dialog-select"
 import { DialogConfirm } from "../ui/dialog-confirm"
 import { useDialog } from "../ui/dialog"
 import { useToast } from "../ui/toast"
+import { useTheme } from "../context/theme"
+import { Locale } from "../util/locale"
 import { errorMessage } from "../util/error"
 import { persistOcPath } from "../ocSettings"
 
@@ -15,6 +20,7 @@ type Scan = { local: OcMirror.Info; probes: OcMirror.Probe[] }
 export function DialogMirror() {
   const dialog = useDialog()
   const toast = useToast()
+  const { theme } = useTheme()
   const [settings, setSettings] = createSignal(OcMirror.settings())
   const [scan, { refetch }] = createResource(async (): Promise<Scan> => {
     const local = await OcMirror.info()
@@ -114,46 +120,69 @@ export function DialogMirror() {
     )
   }
 
-  const options = createMemo<DialogSelectOption<string>[]>(() => {
-    const current = settings()
-    const header: DialogSelectOption<string>[] = [
-      { title: `If the other machine has changes: ${current.dirty}`, value: "setting:dirty", category: "Settings" },
-      { title: `Revive after mirror: ${current.revive}`, value: "setting:revive", category: "Settings" },
-    ]
-    if (scan.loading) return [...header, { title: "Finding machines", value: "", inert: true, category: "Machines" }]
-    if (scan.error)
-      return [...header, { title: errorMessage(scan.error), value: "", inert: true, category: "Machines" }]
-    const result = scan()
-    if (!result) return header
+  // Machines first (DialogSelect keeps categories in first-seen order), settings last.
+  // Refreshes keep the previous rows (`scan.latest`) so the cursor does not drop onto a setting.
+  const note = (title: string, footer?: JSX.Element) => [
+    { title, value: "", inert: true, category: "Machines", footer },
+  ]
+  const machineRows = (): DialogSelectOption<string>[] => {
+    if (scan.error) return note(errorMessage(scan.error))
+    const result = scan.latest
+    if (!result) return []
     const local = result.local
     const self: DialogSelectOption<string> = {
-      title: `This machine: ${local.branch} ${local.head.slice(0, 7)}`,
+      title: "This machine",
+      titleView: <span style={{ fg: theme.textMuted }}>This machine</span>,
       value: "",
       inert: true,
       category: "Machines",
-      description: local.changes.length ? `${local.changes.length} changed` : "clean",
+      footer: `${local.branch} ${local.head.slice(0, 7)} · ${local.changes.length ? `${local.changes.length} changed` : "clean"}`,
     }
     const machines = result.probes.map((probe) => ({
       title: probe.host,
       value: probe.info ? `mirror:${probe.host}` : "",
       inert: !probe.info,
       category: "Machines",
-      description: probe.info ? describe(probe, probe.info, local) : probe.error,
+      footer: probe.info ? (
+        describe(probe, probe.info, local)
+      ) : (
+        <span style={{ fg: theme.error }}>{Locale.truncate((probe.error ?? "unreachable").split(":")[0]!, 32)}</span>
+      ),
     }))
-    if (machines.length === 0)
-      return [...header, self, { title: "No other machines online", value: "", inert: true, category: "Machines" }]
-    return [...header, self, ...machines]
+    return [self, ...(machines.length ? machines : note("No other machines online"))]
+  }
+
+  const options = createMemo<DialogSelectOption<string>[]>(() => {
+    const current = settings()
+    // First scan: no selectable rows yet, so the cursor lands on the first machine once they arrive.
+    if (scan.loading && !scan.error && !scan.latest) return note("Finding machines", <Spinner />)
+    return [
+      ...machineRows(),
+      { title: "Their own changes", value: "setting:dirty", category: "Settings", footer: current.dirty },
+      { title: "Revive after mirror", value: "setting:revive", category: "Settings", footer: current.revive },
+    ]
   })
 
   return (
     <DialogSelect
       title="Mirror oc source"
+      titleView={
+        <box flexDirection="row" gap={1}>
+          <text fg={theme.text} attributes={TextAttributes.BOLD}>
+            Mirror oc source
+          </text>
+          <Show when={scan.loading && !scan.error && scan.latest}>
+            <Spinner />
+          </Show>
+        </box>
+      }
       options={options()}
+      renderFilter={false}
       preserveSelection
       onSelect={(option) => {
         if (option.value === "setting:dirty") return save("dirty", cycle(OcMirror.DIRTY, settings().dirty))
         if (option.value === "setting:revive") return save("revive", cycle(OcMirror.REVIVE, settings().revive))
-        const result = scan()
+        const result = scan.latest
         const probe = result?.probes.find((item) => option.value === `mirror:${item.host}`)
         if (probe && result) void mirror(probe, result.local)
       }}
@@ -172,7 +201,7 @@ export function DialogMirror() {
 
 function describe(probe: OcMirror.Probe, info: OcMirror.Info, local: OcMirror.Info) {
   const version = `v${info.version.split("-")[0]}`
-  if (probe.inSync) return `${version} . in sync`
+  if (probe.inSync) return `${version} · in sync`
   const lost = probe.lost?.length ?? 0
   const state = [
     version,
@@ -182,5 +211,5 @@ function describe(probe: OcMirror.Probe, info: OcMirror.Info, local: OcMirror.In
     probe.extra === -1 ? "has other commits" : probe.extra ? `${probe.extra} ahead` : "",
     info.head === local.head && !probe.missing && !probe.extra ? "same commit, other files" : "",
   ]
-  return state.filter(Boolean).join(" . ")
+  return state.filter(Boolean).join(" · ")
 }

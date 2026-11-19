@@ -131,6 +131,42 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-19 (~03:02) - v0.2.393 surstrommingEarthquake - Mirror dialog loading spinner keeps the cursor off Settings - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed
+- Version: 0.2.393 (already bumped this uncommitted session; no second bump)
+- Fixed `DialogMirror` in `src/packages/tui/src/component/dialog-mirror.tsx`: during the first scan the options are only an inert `Finding machines` row with a `Spinner` footer, so no row is selectable and DialogSelect picks the first reachable machine when results arrive (previously the cursor parked on the first setting and `preserveSelection` kept it there).
+- Machine rows and `onSelect` now read `scan.latest`, so ctrl+r keeps the old rows (cursor stays put); a `Spinner` beside the title (`titleView`) shows the refresh.
+- Verification: `bun run typecheck` in `src/packages/tui` passed. Not run in the live TUI.
+
+### User
+Mirror
+- Opening Mirror shows a spinner until machines are found, then the cursor starts on the first machine instead of a setting.
+- Refreshing with ctrl+r keeps the list in place and shows a spinner next to the title.
+
+---
+
+## 2026-11-19 (~02:37) - v0.2.393 surstrommingEarthquake - Mirror dialog lists machines first with a right-aligned status column - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed
+- Version: 0.2.393
+- Reworked `DialogMirror` options in `src/packages/tui/src/component/dialog-mirror.tsx` (plan `~/.config/opencode/plans/mirrorDialogLayout.md`, mockup option B): Machines category built first, Settings last (DialogSelect keeps first-seen category order), `renderFilter={false}`.
+- Moved per-row status from `description` to `footer` so it right-aligns; settings now `Their own changes` / `Revive after mirror` with the value as footer; "This machine" is a muted inert row with `branch head · clean|N changed`.
+- Unreachable machines show the error text before the first `:` in red, truncated to 32 chars; the full ssh error is no longer shown in the dialog.
+- `describe()` separator changed from ` . ` to ` · `.
+- Verification: `bun run typecheck` in `src/packages/tui` passed (tsgo, no errors). Not run in the live TUI.
+
+### User
+Mirror
+- The Mirror oc source dialog now lists machines at the top and its two settings at the bottom.
+- The search box is gone from the Mirror dialog.
+- Each machine's status (version, behind/ahead, in sync) sits right-aligned, and failed connections show a short red reason.
+- The settings read "Their own changes" and "Revive after mirror" with their current value on the right.
+
+---
+
 ## 2026-11-18 (~22:26) - v0.2.392 donutsShitass - Mac builds keep one code signature so the Keychain stops asking on every revive - Claude Opus 5.5, low; Imp
 
 ### Agent
