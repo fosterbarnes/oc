@@ -400,8 +400,8 @@ export function commandToolPlan(user: SessionV1.User): CommandToolPlan | undefin
  * The command's edit rules as Claude Code `Edit(...)` deny rules, or undefined when only oc can
  * enforce them. Claude applies these to Edit and Write even with `--dangerously-skip-permissions`
  * (checked on CLI 2.1.322), but a Claude deny always wins while oc's last matching rule wins, so
- * this holds only when every edit rule after the first path rule is a deny. Paths must be POSIX
- * absolute (`~` is already expanded) with no wildcard but a trailing `/*` or `/**`: oc's `*` crosses
+ * this holds only when every edit rule after the first path rule is a deny. Paths must be absolute
+ * (`~` is already expanded; Windows drive paths become Claude's `/c/...` form) with no wildcard but a trailing `/*` or `/**`: oc's `*` crosses
  * `/`, so both mean the whole tree, which Claude spells `/**`. Characters Claude's rule or argument
  * parsing treats specially (brackets, parentheses, `!`, `#`, commas, spaces) leave it to oc.
  */
@@ -412,13 +412,21 @@ function claudeEditDenies(rules: PermissionV1.Ruleset) {
   if (first < 0) return []
   const paths = edit.slice(first).flatMap((rule) => {
     if (rule.pattern === "*" && rule.action === "deny") return []
-    const base = rule.pattern.replace(/\/\*\*?$/, "")
+    const pattern = claudePosixPath(rule.pattern)
+    const base = pattern.replace(/\/\*\*?$/, "")
     if (rule.action !== "deny" || !base.startsWith("/") || /[*?[\]()\\!#, ]/.test(base)) return [undefined]
-    return [base === rule.pattern ? base : `${base}/**`]
+    return [base === pattern ? base : `${base}/**`]
   })
   if (paths.some((item) => item === undefined)) return undefined
   // Claude marks an absolute path with a leading `//`.
   return paths.map((item) => `Edit(/${item})`)
+}
+
+// Claude Code matches Windows paths in POSIX form: `C:\Users\a` (or `C:/Users/a`) is `/c/Users/a`.
+function claudePosixPath(pattern: string) {
+  const drive = /^([A-Za-z]):[\\/]/.exec(pattern)
+  if (!drive) return pattern
+  return `/${drive[1].toLowerCase()}/${pattern.slice(3).replaceAll("\\", "/")}`
 }
 
 export function hasToolCalls(messages: ModelMessage[]): boolean {

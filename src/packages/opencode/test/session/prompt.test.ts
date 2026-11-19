@@ -3255,32 +3255,38 @@ it.instance("a push command as the first message marks the session as a push ses
   }),
 )
 
-it.instance("typed messages inherit the active command permission in storage", () =>
-  Effect.gen(function* () {
-    const { llm } = yield* useServerConfig((url) => ({
-      ...providerCfg(url),
-      command: { imp: { template: "Implement", permission: { session_complete: "allow" }, toolHost: { read: "oc" } } },
-      permission: { "*": "allow" },
-    }))
-    const { prompt, chat, sessions } = yield* boot()
-    yield* llm.text("done")
-    yield* prompt.command({ sessionID: chat.id, command: "imp", arguments: "" })
-    yield* llm.text("again")
-    yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "follow up" }] })
-    const hits = yield* llm.hits
-    expect(JSON.stringify(hits[0]?.body)).toContain('"session_complete"')
-    expect(JSON.stringify(hits[1]?.body)).toContain('"session_complete"')
-    const users = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
-    expect(users[1].info).toMatchObject({ permission: Permission.fromConfig({ session_complete: "allow" }) })
-    expect(users[1].info.role === "user" && users[1].info.toolHost).toEqual(
-      users[0].info.role === "user" && users[0].info.toolHost,
-    )
-    expect(users[1].parts[0]).toMatchObject({ text: "follow up", metadata: { ocActive: "imp" } })
-    expect(JSON.stringify(hits[1]?.body)).toContain("This message is not a new run")
-    expect((yield* sessions.get(chat.id)).permission ?? []).not.toContainEqual(
-      expect.objectContaining({ permission: "session_complete" }),
-    )
-  }),
+it.instance(
+  "typed messages inherit the active command permission in storage",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig((url) => ({
+        ...providerCfg(url),
+        command: {
+          imp: { template: "Implement", permission: { session_complete: "allow" }, toolHost: { read: "oc" } },
+        },
+        permission: { "*": "allow" },
+      }))
+      const { prompt, chat, sessions } = yield* boot()
+      yield* llm.text("done")
+      yield* prompt.command({ sessionID: chat.id, command: "imp", arguments: "" })
+      yield* llm.text("again")
+      yield* prompt.prompt({ sessionID: chat.id, agent: "build", parts: [{ type: "text", text: "follow up" }] })
+      const hits = yield* llm.hits
+      expect(JSON.stringify(hits[0]?.body)).toContain('"session_complete"')
+      expect(JSON.stringify(hits[1]?.body)).toContain('"session_complete"')
+      const users = (yield* sessions.messages({ sessionID: chat.id })).filter((message) => message.info.role === "user")
+      expect(users[1].info).toMatchObject({ permission: Permission.fromConfig({ session_complete: "allow" }) })
+      expect(users[1].info.role === "user" && users[1].info.toolHost).toEqual(
+        users[0].info.role === "user" && users[0].info.toolHost,
+      )
+      expect(users[1].parts[0]).toMatchObject({ text: "follow up", metadata: { ocActive: "imp" } })
+      expect(JSON.stringify(hits[1]?.body)).toContain("This message is not a new run")
+      expect((yield* sessions.get(chat.id)).permission ?? []).not.toContainEqual(
+        expect.objectContaining({ permission: "session_complete" }),
+      )
+    }),
+  // A repo stops the `.opencode` walk; on Windows the temp dir sits under the real profile's own `imp`.
+  { git: true },
 )
 
 noLLMServer.instance("legacy tool flags preserve existing session permission rules", () =>

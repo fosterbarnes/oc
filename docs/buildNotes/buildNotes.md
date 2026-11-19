@@ -131,6 +131,23 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-18 (~20:55) - v0.2.389 petrifiedLovecraft - Windows edit denials reach Claude; test profile leak - Claude Opus 5.5, low; Imp
+
+### Agent
+- Meta: Claude Opus 5.5; low; Imp; completed
+- Version: 0.2.389
+- Fixed `claudeEditDenies` (`session/llm/request.ts`): new `claudePosixPath` turns a drive path (`C:\a` or `C:/a`, including the mixed `C:\Users\u/.config/...` that `~` expands to on Windows) into Claude's `/c/a` form before the POSIX checks, so on Windows a command like `imp` with a mockups deny keeps Claude's own Edit/Write and sends `Edit(//c/...)`. Before, every Windows path deny proxied Edit/Write (the v0.2.372-era exclusion was only unverified, not known broken).
+- Fixed `test/session/prompt.test.ts` "typed messages inherit the active command permission": added `{ git: true }`. On Windows the instance temp dir sits under the profile, so core config's `.opencode` walk (`fs.up` to the project directory) reached the real `C:\Users\<user>\.opencode\commands\imp.md` and replaced the test's `imp`. Confirmed by rerunning with `TEMP` outside the profile (passed) before the edit.
+- Updated `commandToolPlan.test.ts`: `C:/a/**` moved from the oc-only cases to a translated case (`Edit(//c/a/**)`, `Edit(//d/Users/u/.config/x.md)`). FORK.md "Plan-only command permissions" row updated.
+- Verification: macOS `tsgo --noEmit` clean; `test/provider/claude-code/` + `test/session/` 1367 pass 29 skip 0 fail. goonstation (Win10, files copied then restored with git checkout): commandPermissions (real Claude CLI enforced the `//c/...` deny: mockup not written, native Write of imp.md succeeded), commandToolPlan, replacedToolsNote 11 pass and the prompt test 1 pass, 3/3 runs; `test/provider/claude-code/` + `test/session/` 1356 pass 41 skip 0 fail.
+- ERROR: before the fix, goonstation at v0.2.388 failed these two tests 3/3 (opencode recent-change set 932 pass 2 fail); everything else (tui 109, core, pane 17) passed.
+
+### User
+Claude on Windows
+- Commands that block edits to certain folders (like a mockups folder) now let Claude use its own Edit and Write tools on Windows too, instead of routing every edit through oc.
+
+---
+
 ## 2026-11-18 (~19:30) - v0.2.388 squiggleEndevors - Clipboard read only on paste, API key dialog - Claude Opus 5.5, low; Imp
 
 ### Agent

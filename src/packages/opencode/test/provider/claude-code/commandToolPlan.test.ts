@@ -74,16 +74,19 @@ test("edit denials Claude can enforce keep its Edit and Write and reach it as de
   })
   // oc's `*` crosses `/`, so a trailing `/*` denies the whole tree.
   expect(commandToolPlan(user({ edit: { "*": "allow", "/a/*": "deny" } }))!.deny).toEqual(["Edit(//a/**)"])
+  // Claude matches Windows paths in POSIX form; `~` expands to a backslash home on Windows.
+  expect(
+    commandToolPlan(user({ edit: { "*": "allow", "C:/a/**": "deny", "D:\\Users\\u/.config/x.md": "deny" } }))!.deny,
+  ).toEqual(["Edit(//c/a/**)", "Edit(//d/Users/u/.config/x.md)"])
 
   // Only oc can enforce these: a later allow overrides the deny, relative or mid-path wildcards,
-  // `ask`, and Windows paths.
+  // and `ask`.
   const cases: Record<string, "allow" | "ask" | "deny">[] = [
     { "*": "allow", "/a/**": "deny", "/a/b/**": "allow" },
     { "*": "allow", "plans/**": "deny" },
     { "*": "allow", "/a/*.md": "deny" },
     { "*": "allow", "/a/b c/**": "deny" },
     { "*": "allow", "/a/**": "ask" },
-    { "*": "allow", "C:/a/**": "deny" },
   ]
   for (const edit of cases) {
     const plan = commandToolPlan(user({ ...imp, edit }))!
