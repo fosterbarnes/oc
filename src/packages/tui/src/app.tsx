@@ -585,7 +585,7 @@ function App(props: { onSnapshot?: () => Promise<string[]>; pluginHost: TuiPlugi
       tuiConfig.setPaletteKey(command, undefined)
     }
     if (dropped.length) {
-      void persistTuiSetting(["palette_keys"], tuiConfig.palette_keys)
+      void persistTuiSetting(["palette_keys"], tuiConfig.palette_keys, toast)
       toast.show({
         message: `Ignored invalid palette hotkeys: ${dropped.join("; ")}`,
         variant: "error",

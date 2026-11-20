@@ -46,7 +46,7 @@ export function DialogThemeList(props: { native?: boolean }) {
         dialog.clear()
         if (props.native || !config.daily_theme) return
         config.setDailyTheme(false)
-        void persistTuiSetting([DAILY_THEME_KEY], false)
+        void persistTuiSetting([DAILY_THEME_KEY], false, toast)
         toast.show({ message: "Daily theme off", variant: "info" })
       }}
       ref={(r) => {

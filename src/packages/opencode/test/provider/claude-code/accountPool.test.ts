@@ -10,7 +10,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -22,6 +24,7 @@ import {
   _setAccountPoolFile,
   _setUsageCacheDir,
   accountConfigEntry,
+  accountLimitReason,
   DEFAULT_ACCOUNT,
   earliestLimitedUntil,
   applyFailoverChoice,
@@ -504,6 +507,57 @@ test("pool pointer round-trips through the persist file and ignores expired limi
   } finally {
     rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
   }
+})
+
+test("a corrupt pool file is moved aside and in-memory state is kept, not saved over as empty", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-corrupt-"))
+  const file = path.join(root, "account-pool.json")
+  const ids = ["a", "b"]
+  try {
+    _setAccountPoolFile(file)
+    expect(pinSessionAccount("s1", "b", ids)).toBe(true)
+    writeFileSync(file, "{ not json")
+
+    expect(sessionPin("s1", ids)).toBe("b")
+    const aside = readdirSync(root).filter((name) => name.startsWith("account-pool.json.corrupt-"))
+    expect(aside).toHaveLength(1)
+    expect(readFileSync(path.join(root, aside[0]!), "utf8")).toBe("{ not json")
+
+    pinSessionAccount("s2", "a", ids)
+    const saved = JSON.parse(readFileSync(file, "utf8")) as { sessionAccounts?: Record<string, string> }
+    expect(saved.sessionAccounts).toEqual({ s1: "b", s2: "a" })
+    expect(readdirSync(root).filter((name) => name.includes(".tmp-"))).toEqual([])
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("a mutation reloads the file even when its stamp looks unchanged, so an external write survives", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-external-"))
+  const file = path.join(root, "account-pool.json")
+  const ids = ["a", "b"]
+  try {
+    _setAccountPoolFile(file)
+    pinSessionAccount("s1", "a", ids)
+    const before = statSync(file)
+    // Another process pins "s2" instead: same size, and the mtime put back, so the stamps are equal.
+    writeFileSync(file, readFileSync(file, "utf8").replace("s1", "s2"))
+    utimesSync(file, before.atime, before.mtime)
+
+    pinSessionAccount("s3", "b", ids)
+    const saved = JSON.parse(readFileSync(file, "utf8")) as { sessionAccounts?: Record<string, string> }
+    expect(saved.sessionAccounts).toEqual({ s2: "a", s3: "b" })
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 })
+  }
+})
+
+test("an account limit records why, and the reason clears with the limit", () => {
+  const now = Date.now()
+  markAccountLimited("a", now + 60_000, now, "weekly limit reached")
+  expect(accountLimitReason("a", now)).toBe("weekly limit reached")
+  expect(accountLimitReason("a", now + 61_000)).toBeUndefined()
+  expect(accountLimitReason("b", now)).toBeUndefined()
 })
 
 test("a restart keeps the current account when its usage cache reads 100%; only a rejection moves it", () => {

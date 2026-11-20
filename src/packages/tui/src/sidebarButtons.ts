@@ -7,7 +7,7 @@ export function toggleSidebarButton(config: Resolved, toast: ToastContext, name:
   const pinned = config.sidebar_buttons.includes(name)
   const next = pinned ? config.sidebar_buttons.filter((item) => item !== name) : [...config.sidebar_buttons, name]
   config.setSidebarButtons(next)
-  void persistTuiSetting(["sidebar_buttons"], next)
+  void persistTuiSetting(["sidebar_buttons"], next, toast)
   const hint = SIDEBAR_BUTTONS_DEFAULT.includes(name) ? " (oc Palette > Reset sidebar buttons restores it)" : ""
   toast.show({
     message: pinned ? `Removed "${label}" from sidebar${hint}` : `Added "${label}" to sidebar`,
@@ -17,6 +17,6 @@ export function toggleSidebarButton(config: Resolved, toast: ToastContext, name:
 
 export function resetSidebarButtons(config: Resolved, toast: ToastContext) {
   config.setSidebarButtons(undefined)
-  void persistTuiSetting(["sidebar_buttons"], undefined)
+  void persistTuiSetting(["sidebar_buttons"], undefined, toast)
   toast.show({ message: "Sidebar buttons reset", variant: "success" })
 }

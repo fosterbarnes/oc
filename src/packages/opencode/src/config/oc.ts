@@ -4,6 +4,7 @@ import { applyEdits, modify } from "jsonc-parser"
 import { Global } from "@opencode-ai/core/global"
 import { Flock } from "@opencode-ai/core/util/flock"
 import { OcItems } from "@opencode-ai/core/util/ocItems"
+import { OcJson } from "@opencode-ai/core/util/ocJson"
 import { Startup } from "./startup"
 
 export const keys = [
@@ -59,7 +60,7 @@ export function filePath() {
 async function readFile(file: string) {
   try {
     const raw = await fs.readFile(file, "utf8")
-    return JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "")) as Settings
+    return OcJson.read<Settings>(raw, file)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
     throw error
@@ -110,7 +111,7 @@ export async function edit(change: (current: Settings) => Partial<Settings> | un
       if (error.code === "ENOENT") return "{}\n"
       throw error
     })
-    const current = JSON.parse(text.replace(/^\s*\/\/.*$/gm, "") || "{}") as Settings
+    const current = OcJson.read<Settings>(text, file)
     const patch = change(current)
     if (!patch) return current
     let next = text

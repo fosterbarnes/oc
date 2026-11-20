@@ -5,6 +5,7 @@ import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { Flock } from "@opencode-ai/core/util/flock"
 import { OcItems } from "@opencode-ai/core/util/ocItems"
+import { OcJson } from "@opencode-ai/core/util/ocJson"
 import type { OpencodeClient } from "@opencode-ai/sdk/v2"
 import { applyEdits, modify } from "jsonc-parser"
 import type { ToastContext } from "./ui/toast"
@@ -22,7 +23,10 @@ export function resolveOcDirectory(value: unknown, fallback: string) {
   }
 }
 
-export function readOcConfig(): {
+// Runs inside palette getters on every render: one error toast per distinct message per process.
+const shownConfigErrors = new Set<string>()
+
+export function readOcConfig(toast?: ToastContext): {
   executable: string
   ocDir: string
   homeDir: string
@@ -45,24 +49,18 @@ export function readOcConfig(): {
   const fallbackDir = os.homedir()
   const fallbackSort = "name"
   try {
-    const parse = (file: string) => {
-      const raw = fs.readFileSync(file, "utf8")
-      return JSON.parse(raw.replace(/^\s*\/\/.*$/gm, "")) as {
-        executable?: unknown
-        ocDir?: unknown
-        homeDir?: unknown
-        homeDirSort?: unknown
-        server?: { startAtLogin?: unknown; startOnWindowsUserStart?: unknown }
-        revive?: { build?: unknown }
-        claudeFailover?: unknown
-        claudeApiRollover?: unknown
-        claudeAccountNames?: unknown
-      }
-    }
-    const parsed = parse(ocConfigPath())
-    const merged = {
-      ...parsed,
-    }
+    const file = ocConfigPath()
+    const merged = OcJson.read<{
+      executable?: unknown
+      ocDir?: unknown
+      homeDir?: unknown
+      homeDirSort?: unknown
+      server?: { startAtLogin?: unknown; startOnWindowsUserStart?: unknown }
+      revive?: { build?: unknown }
+      claudeFailover?: unknown
+      claudeApiRollover?: unknown
+      claudeAccountNames?: unknown
+    }>(fs.readFileSync(file, "utf8"), file)
     const executable = typeof merged.executable === "string" ? merged.executable.trim() : ""
     const ocDir = resolveOcDirectory(merged.ocDir, fallbackDir)
     const homeDir = resolveOcDirectory(merged.homeDir, fallbackDir)
@@ -97,7 +95,12 @@ export function readOcConfig(): {
       claudeApiRollover,
       claudeAccountNames,
     }
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT" && !shownConfigErrors.has(message)) {
+      shownConfigErrors.add(message)
+      toast?.show({ message: `Cannot read oc.json, using defaults: ${message}`, variant: "error" })
+    }
     return {
       executable: "",
       ocDir: fallbackDir,
@@ -203,9 +206,11 @@ export function persistTuiSetting(
     | ["palette_keys"]
     | ["sidebar_buttons"],
   value: string | boolean | Record<string, string> | readonly string[] | undefined,
-) {
-  persistTuiSettingQueue = persistTuiSettingQueue
-    .then(() => {
+  toast?: ToastContext,
+): Promise<boolean> {
+  // Resolves false after showing an error toast; never rejects, so `void` callers stay safe.
+  const result = persistTuiSettingQueue.then(() =>
+    Flock.withLock(OcItems.TUI_CONFIG_LOCK, async () => {
       const file =
         ["tui.jsonc", "tui.json"]
           .map((name) => path.join(Global.Path.config, name))
@@ -214,10 +219,20 @@ export function persistTuiSetting(
       const edits = modify(text, key, value, { formattingOptions: { tabSize: 2, insertSpaces: true } })
       const next = applyEdits(text, edits)
       // An unchanged file must not be rewritten: every TUI's config watcher reloads on the write.
-      if (next !== text) fs.writeFileSync(file, next)
-    })
-    .catch(() => {})
-  return persistTuiSettingQueue
+      if (next === text) return
+      const temporary = `${file}.tmp-${process.pid}-${Date.now()}`
+      fs.writeFileSync(temporary, next)
+      fs.renameSync(temporary, file)
+    }),
+  )
+  persistTuiSettingQueue = result.catch(() => undefined)
+  return result.then(
+    () => true,
+    (error) => {
+      toast?.show({ message: `Failed to save ${key[0]}: ${String(error)}`, variant: "error" })
+      return false
+    },
+  )
 }
 
 let persistOcQueue: Promise<void> = Promise.resolve()

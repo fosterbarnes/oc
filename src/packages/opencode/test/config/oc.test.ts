@@ -399,7 +399,7 @@ describe("OC config", () => {
     const error = await OcConfig.read().catch((cause: unknown) => cause)
     expect(error).toBeInstanceOf(Error)
     expect((error as Error).message).toStartWith(`Failed to read ${path.join(directory, "oc.json")}: `)
-    expect((error as Error).cause).toBeInstanceOf(SyntaxError)
+    expect(((error as Error).cause as Error).message).toContain("oc.json: ")
   })
 
   test("a port held by an unrelated program fails with a clear error instead of spawning", async () => {

@@ -11,13 +11,21 @@ import { translateStreamForHost } from "./hostTools.js"
 import { getClaudeUserMessage, isWakeTurn, visibleThreadTokens } from "./messageBuilder.js"
 import { getRuntimeMcpStatus, fetchSessionRunState } from "./runtimeStatus.js"
 import {
+  conversationAccount,
   getActiveProcess,
   getClaudeSessionId,
   describeSessionKey,
   retireOtherAccount,
   workingAccount,
 } from "./sessionManager.js"
-import { apiAccountId, apiKeyReady, poolAccountIds, poolAccountLabel, turnAccount } from "./accounts.js"
+import {
+  accountLimitReason,
+  apiAccountId,
+  apiKeyReady,
+  poolAccountIds,
+  poolAccountLabel,
+  turnAccount,
+} from "./accounts.js"
 import { log } from "./logger.js"
 import { detectCliVersion } from "./cliVersion.js"
 import { setProxyDeadlineGuard } from "./proxyDeadline.js"
@@ -145,6 +153,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     const working = workingAccount(turn.sessionKey)
     const keepWorking = working !== undefined && (accountIds.includes(working) || working === apiAccountId())
     const account = keepWorking ? working : turnAccount(turn.affinity, turn.agentAccount, accountIds)
+    const previousAccount = keepWorking ? undefined : conversationAccount(turn.sessionKey)
     const accountSwitched = keepWorking ? false : await retireOtherAccount(turn.sessionKey, account)
     const hasActiveProcess = !!getActiveProcess(turn.sessionKey)
     // oc's compaction prompt is never sent: Claude Code compacts its own
@@ -159,6 +168,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
           prompt: options.prompt,
           hasPriorConversation,
           accountSwitch: accountSwitched ? poolAccountLabel(account) : undefined,
+          accountSwitchReason: accountSwitched && previousAccount ? accountLimitReason(previousAccount) : undefined,
           abortSignal: options.abortSignal,
         })
     const includeHistoryContext = !getClaudeSessionId(turn.sessionKey) && !hasActiveProcess && hasPriorConversation

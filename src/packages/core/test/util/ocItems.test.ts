@@ -27,6 +27,23 @@ describe("secrets", () => {
       other: {},
     })
   })
+
+  test("toWire redacts a top-level secret scalar and fromWire restores the local one", () => {
+    const item = (value: string): OcItems.Item => ({
+      kind: "key",
+      id: "oc:githubToken",
+      category: "oc",
+      label: "githubToken",
+      code: false,
+      file: "oc",
+      path: ["githubToken"],
+      value,
+    })
+    const wire = OcItems.toWire(item("ghp_secret"))
+    expect(wire.kind === "key" && wire.value).toBe(OcItems.REDACTED)
+    const restored = OcItems.fromWire(wire, item("ghp_local"))
+    expect(restored.kind === "key" && restored.value).toBe("ghp_local")
+  })
 })
 
 describe("rewriteHome", () => {
@@ -121,5 +138,87 @@ describe("machine-only oc keys", () => {
       expect(ids).toContain("oc:claudeAccounts")
       expect(ids).not.toContain("oc:claudeAccountNames")
     })
+  })
+})
+
+// A folder or entry the scan cannot read must not look like a deletion; a removed one must.
+describe("collect and apply on disk", () => {
+  let root = ""
+  let savedConfig = ""
+  let savedHome: string | undefined
+  const commands = () => path.join(Global.Path.config, "commands")
+
+  beforeEach(async () => {
+    root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "oc-items-disk-")))
+    savedConfig = Global.Path.config
+    savedHome = process.env.OPENCODE_TEST_HOME
+    Global.Path.config = path.join(root, "config")
+    process.env.OPENCODE_TEST_HOME = root
+    await fs.mkdir(commands(), { recursive: true })
+    await fs.writeFile(path.join(commands(), "top.md"), "top")
+  })
+
+  afterEach(async () => {
+    await fs.chmod(path.join(commands(), "locked"), 0o755).catch(() => undefined)
+    Global.Path.config = savedConfig
+    if (savedHome === undefined) delete process.env.OPENCODE_TEST_HOME
+    else process.env.OPENCODE_TEST_HOME = savedHome
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  test.skipIf(process.platform === "win32")("an unreadable subfolder marks its category partial", async () => {
+    await fs.mkdir(path.join(commands(), "locked"))
+    await fs.writeFile(path.join(commands(), "locked", "inner.md"), "inner")
+    await fs.chmod(path.join(commands(), "locked"), 0o000)
+    const collected = await OcItems.collect()
+    expect(collected.partial.has("command:config")).toBe(true)
+    expect(collected.items.map((item) => item.id)).toContain("command:config:commands/top.md")
+  })
+
+  test.skipIf(process.platform === "win32")("a dangling link marks its category partial", async () => {
+    await fs.symlink(path.join(root, "missing.md"), path.join(commands(), "link.md"))
+    expect((await OcItems.collect()).partial.has("command:config")).toBe(true)
+  })
+
+  test("a removed folder is gone, not partial", async () => {
+    expect((await OcItems.collect()).items.map((item) => item.id)).toContain("command:config:commands/top.md")
+    await fs.rm(commands(), { recursive: true })
+    const collected = await OcItems.collect()
+    expect(collected.items.map((item) => item.id)).not.toContain("command:config:commands/top.md")
+    expect(collected.partial.size).toBe(0)
+  })
+
+  const command = (file: string): OcItems.Item => ({
+    kind: "files",
+    id: `command:config:commands/${file}`,
+    category: "command",
+    label: file,
+    code: false,
+    root: "config",
+    files: [{ path: `commands/${file}`, text: "new" }],
+  })
+
+  test.skipIf(process.platform === "win32")(
+    "apply refuses a link that resolves outside the allowed roots",
+    async () => {
+      await fs.mkdir(path.join(root, "outside"))
+      await fs.writeFile(path.join(root, "outside", "x.md"), "old")
+      await fs.symlink(path.join(root, "outside", "x.md"), path.join(commands(), "x.md"))
+      await expect(OcItems.apply([command("x.md")], { backupRoot: path.join(root, "backups") })).rejects.toThrow(
+        /Refusing to write .*x\.md/,
+      )
+      expect(await fs.readFile(path.join(root, "outside", "x.md"), "utf8")).toBe("old")
+      expect((await fs.lstat(path.join(commands(), "x.md"))).isSymbolicLink()).toBe(true)
+    },
+  )
+
+  test.skipIf(process.platform === "win32")("apply writes through a link into a Claude skills folder", async () => {
+    const skill = path.join(root, ".claude", "skills", "s", "SKILL.md")
+    await fs.mkdir(path.dirname(skill), { recursive: true })
+    await fs.writeFile(skill, "old")
+    await fs.symlink(skill, path.join(commands(), "y.md"))
+    await OcItems.apply([command("y.md")], { backupRoot: path.join(root, "backups") })
+    expect(await fs.readFile(skill, "utf8")).toBe("new")
+    expect((await fs.lstat(path.join(commands(), "y.md"))).isSymbolicLink()).toBe(true)
   })
 })

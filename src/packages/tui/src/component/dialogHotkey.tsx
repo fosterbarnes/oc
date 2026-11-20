@@ -9,6 +9,7 @@ import { validateHotkey } from "../hotkeyValidate"
 import { LEADER_TOKEN, useOpencodeKeymap, useOpencodeModeStack } from "../keymap"
 import { persistTuiSetting } from "../ocSettings"
 import { useDialog } from "../ui/dialog"
+import { useToast } from "../ui/toast"
 
 const HOTKEY_CAPTURE_MODE = "hotkey-capture"
 const LEADER_PREFIX = "<leader>"
@@ -38,6 +39,7 @@ function sequenceKey(sequence: unknown): string {
 
 export function DialogHotkey(props: { command: string; title: string }) {
   const dialog = useDialog()
+  const toast = useToast()
   const { theme } = useTheme()
   const config = useTuiConfig()
   const keymap = useOpencodeKeymap()
@@ -106,7 +108,7 @@ export function DialogHotkey(props: { command: string; title: string }) {
     }
     if (!modified && name === "backspace") {
       config.setPaletteKey(props.command, undefined)
-      void persistTuiSetting(["palette_keys"], config.palette_keys)
+      void persistTuiSetting(["palette_keys"], config.palette_keys, toast)
       dialog.clear()
       return
     }
@@ -114,7 +116,7 @@ export function DialogHotkey(props: { command: string; title: string }) {
       const key = captured()
       if (key && validateHotkey({ key, leaderKey, ownerOf, kittyKeyboard: kittyKeyboard() }).ok) {
         config.setPaletteKey(props.command, key)
-        void persistTuiSetting(["palette_keys"], config.palette_keys)
+        void persistTuiSetting(["palette_keys"], config.palette_keys, toast)
         dialog.clear()
       } else {
         setLeaderPending(false)

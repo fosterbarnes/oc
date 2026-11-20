@@ -747,7 +747,7 @@ export async function requestMirrorRevive(
   id: string,
   from?: string,
 ): Promise<{ state: MirrorReviveState; detail?: string }> {
-  const prepared = await prepareStop(serverStateDirectory(), listOcProcesses()).catch(() => undefined)
+  const prepared = await prepareStop(serverStateDirectory(), listOcProcesses())
   if (!prepared?.live) return { state: "no-server" }
   const response = await fetch(`${prepared.live.url}/global/oc/revive`, {
     method: "POST",

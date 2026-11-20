@@ -9,6 +9,7 @@ import os from "node:os"
 import path from "node:path"
 import { Global } from "../global"
 import { InstallationDisplayVersion } from "../installation/version"
+import { OcJson } from "./ocJson"
 import { OcSync } from "./ocSync"
 
 export const DIRTY = ["ask", "refuse", "overwrite", "backup"] as const
@@ -543,9 +544,10 @@ function senderName() {
 
 function readOcJson(): Record<string, unknown> {
   try {
-    const text = readFileSync(path.join(Global.Path.config, "oc.json"), "utf8")
-    return JSON.parse(text.replace(/^\s*\/\/.*$/gm, "")) as Record<string, unknown>
-  } catch {
+    const file = path.join(Global.Path.config, "oc.json")
+    return OcJson.read(readFileSync(file, "utf8"), file)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`cannot read oc.json: ${String(error)}`)
     return {}
   }
 }

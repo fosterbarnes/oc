@@ -3,7 +3,7 @@ import launch from "cross-spawn"
 import { createInterface } from "node:readline"
 import { randomUUID } from "node:crypto"
 import { EventEmitter } from "node:events"
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { mkdirSync, readFileSync } from "node:fs"
 import { unlink } from "node:fs/promises"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
@@ -19,8 +19,10 @@ import {
   apiAccountKey,
   fileStamp,
   forgetSessionPin,
+  moveCorruptAside,
   poolConfigDir,
   sharesTranscripts,
+  writeFileAtomic,
 } from "./accounts.js"
 
 export interface ActiveProcess {
@@ -747,7 +749,9 @@ function loadedSessions(): Map<string, ClaudeSessionRecord> {
   const text = readSessionsFile()
   const parsed = text ? parseSessionsFile(text) : []
   if (!parsed) {
-    log.warn("ignoring unreadable claude sessions file", { file: SESSIONS_FILE })
+    // Memory stays: keep the bad file aside and restore the file from memory.
+    moveCorruptAside(SESSIONS_FILE)
+    persistSessions()
     return claudeSessions
   }
   claudeSessions.clear()
@@ -790,10 +794,7 @@ function parseSessionsFile(text: string): [string, ClaudeSessionRecord][] | unde
 function persistSessions(): void {
   try {
     mkdirSync(path.dirname(SESSIONS_FILE), { recursive: true })
-    writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(claudeSessions)), {
-      encoding: "utf8",
-      mode: 0o600,
-    })
+    writeFileAtomic(SESSIONS_FILE, JSON.stringify(Object.fromEntries(claudeSessions)))
     sessionsStamp = fileStamp(SESSIONS_FILE)
   } catch (error) {
     log.warn("cannot write claude sessions file", { file: SESSIONS_FILE, error: String(error) })
@@ -890,6 +891,14 @@ export function moveClaudeSessionAccount(key: string, account: string): boolean 
   record.account = account
   persistSessions()
   return true
+}
+
+/** The pool account the key's Claude conversation is on (its live process first), if it has one. */
+export function conversationAccount(key: string): string | undefined {
+  const ap = activeProcesses.get(key)
+  if (ap) return ap.account ?? DEFAULT_ACCOUNT
+  const record = loadedSessions().get(key)
+  return record ? (record.account ?? DEFAULT_ACCOUNT) : undefined
 }
 
 /**

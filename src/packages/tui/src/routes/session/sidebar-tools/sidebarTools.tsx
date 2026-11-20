@@ -419,6 +419,20 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       toast.show({ variant: "error", message: `Could not start ${script.name}: ${result.error}` })
     }
   }
+  // A click arms a row for 3 s; a second click on the same row runs it, so scripts like install never run by accident.
+  const [armedScript, setArmedScript] = createSignal<string>()
+  let armTimer: ReturnType<typeof setTimeout> | undefined
+  const clickScript = (script: Script) => {
+    clearTimeout(armTimer)
+    if (armedScript() === script.name) {
+      setArmedScript(undefined)
+      void runScript(script)
+      return
+    }
+    setArmedScript(script.name)
+    armTimer = setTimeout(() => setArmedScript(undefined), 3000)
+  }
+  onCleanup(() => clearTimeout(armTimer))
   const toggleDirectory = (relativePath: string) => {
     const next = new Set<string>(expanded())
     if (next.has(relativePath)) next.delete(relativePath)
@@ -773,23 +787,25 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
                       pasteScript(props.sessionID, script)
                       void copyText(scriptClipboardText(script))
                     }
-                    if (event.button === 0) void runScript(script)
+                    if (event.button === 0) clickScript(script)
                   }}
                 >
                   <text
                     wrapMode="none"
                     fg={
-                      hovered() === `script:${script.name}`
-                        ? hoverColor
-                        : pins().has(script.name)
-                          ? theme.primary
-                          : theme.text
+                      armedScript() === script.name
+                        ? theme.warning
+                        : hovered() === `script:${script.name}`
+                          ? hoverColor
+                          : pins().has(script.name)
+                            ? theme.primary
+                            : theme.text
                     }
                   >
-                    {pins().has(script.name) ? "* " : "  "}
+                    {armedScript() === script.name ? "run? " : pins().has(script.name) ? "* " : "  "}
                     {clipEnd(
                       hovered() === `script:${script.name}` ? script.name.slice(marqueeOffset()) : script.name,
-                      nameWidth(),
+                      nameWidth() - (armedScript() === script.name ? 3 : 0),
                     )}
                   </text>
                 </box>

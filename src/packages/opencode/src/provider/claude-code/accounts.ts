@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
+import { OcJson } from "@opencode-ai/core/util/ocJson"
 import { OcConfig } from "@/config/oc.js"
 import { emailOf } from "./warmup/identities"
 import { materializeAccountId } from "./warmup/identity"
@@ -45,6 +46,8 @@ const DEFAULT_USAGE_CACHE_DIR = path.join(expandHome("~/.cache"), "opencode")
 const IN_TEST = process.env.BUN_TEST != null
 
 const limitedUntil = new Map<string, number>()
+/** Why an account's `limitedUntil` mark was set ("usage limit reached"); shown in the account-switched note. */
+const limitReasons = new Map<string, string>()
 /**
  * `modelKey(account, model)` -> until when that model is refused on that account. A rejection with no
  * usage window (e.g. a model that needs extra usage the org disabled) gates one model, not the login.
@@ -99,43 +102,92 @@ export function fileStamp(file: string): string {
   return stat ? `${stat.mtimeMs}:${stat.size}` : ""
 }
 
-/** The file is the source of truth: reload it whenever another process changed it since this one last saw it. */
-function ensureLoaded(now = Date.now()): void {
+/** Write via a temp file and rename, so a crash or a concurrent reader never sees a half-written file. */
+export function writeFileAtomic(file: string, text: string): void {
+  const temp = `${file}.tmp-${process.pid}`
+  writeFileSync(temp, text, { encoding: "utf8", mode: 0o600 })
+  renameSync(temp, file)
+}
+
+/** Move an unparseable state file out of the way (kept for inspection) so the next save cannot overwrite it. */
+export function moveCorruptAside(file: string): void {
+  const aside = `${file}.corrupt-${Date.now()}`
+  try {
+    renameSync(file, aside)
+    log.warn("moved unreadable claude state file aside; keeping in-memory state", { file, aside })
+  } catch (error) {
+    log.warn("cannot move unreadable claude state file aside", { file, error: String(error) })
+  }
+}
+
+/**
+ * The file is the source of truth: reload it whenever another process changed it since this one last
+ * saw it. `fresh` skips that shortcut; mutators use it so they change what is on disk now.
+ */
+function ensureLoaded(now = Date.now(), fresh = false): void {
   if (!poolFile) return
   const stamp = fileStamp(poolFile)
-  if (stamp === poolStamp) return
+  if (stamp === poolStamp && !fresh) return
   poolStamp = stamp
   readPersist(now)
 }
 
 function readPersist(now: number): void {
   if (!poolFile) return
+  const raw = loadPoolFile(poolFile)
+  if (!raw) return
   limitedUntil.clear()
   modelLimited.clear()
   sessionAccounts.clear()
   apiRollover.clear()
   currentAccount = undefined
-  try {
-    const raw = JSON.parse(readFileSync(poolFile, "utf8")) as {
-      currentAccount?: unknown
-      limitedUntil?: unknown
-      sessionAccounts?: unknown
-      apiRollover?: unknown
-      modelLimited?: unknown
+  if (typeof raw.currentAccount === "string" && raw.currentAccount) currentAccount = raw.currentAccount
+  if (raw.sessionAccounts && typeof raw.sessionAccounts === "object") {
+    for (const [session, id] of Object.entries(raw.sessionAccounts as Record<string, unknown>)) {
+      if (typeof id === "string" && id) sessionAccounts.set(session, id)
     }
-    if (typeof raw.currentAccount === "string" && raw.currentAccount) currentAccount = raw.currentAccount
-    if (raw.sessionAccounts && typeof raw.sessionAccounts === "object") {
-      for (const [session, id] of Object.entries(raw.sessionAccounts as Record<string, unknown>)) {
-        if (typeof id === "string" && id) sessionAccounts.set(session, id)
-      }
-    }
-    if (Array.isArray(raw.apiRollover))
-      for (const session of raw.apiRollover) if (typeof session === "string") apiRollover.add(session)
-    readUntilMap(raw.modelLimited, modelLimited, now)
-    readUntilMap(raw.limitedUntil, limitedUntil, now)
-  } catch {
-    // Missing or invalid file: start empty.
   }
+  if (Array.isArray(raw.apiRollover))
+    for (const session of raw.apiRollover) if (typeof session === "string") apiRollover.add(session)
+  readUntilMap(raw.modelLimited, modelLimited, now)
+  readUntilMap(raw.limitedUntil, limitedUntil, now)
+  limitReasons.clear()
+  if (raw.limitReason && typeof raw.limitReason === "object") {
+    for (const [id, reason] of Object.entries(raw.limitReason as Record<string, unknown>)) {
+      if (typeof reason === "string" && reason) limitReasons.set(id, reason)
+    }
+  }
+}
+
+type PoolFile = {
+  currentAccount?: unknown
+  limitedUntil?: unknown
+  limitReason?: unknown
+  sessionAccounts?: unknown
+  apiRollover?: unknown
+  modelLimited?: unknown
+}
+
+/**
+ * The parsed pool file; `{}` when it is missing (an empty pool). Undefined when it cannot be read or
+ * parsed: the caller then keeps its in-memory state, and an unparseable file is moved aside so the
+ * next save writes that state instead of overwriting the evidence.
+ */
+function loadPoolFile(file: string): PoolFile | undefined {
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as unknown
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as PoolFile
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    if (!(error instanceof SyntaxError)) {
+      log.warn("cannot read claude account pool file", { file, error: String(error) })
+      return undefined
+    }
+  }
+  moveCorruptAside(file)
+  // Restore the file from memory now, or the next reload would read "missing" and empty the pool.
+  persistPool()
+  return undefined
 }
 
 /** Fill `into` from a persisted `{ key: untilMs }` object, skipping expired or invalid entries. */
@@ -151,18 +203,19 @@ function persistPool(now = Date.now()): void {
   const live = (map: Map<string, number>) => Object.fromEntries([...map].filter(([, until]) => until > now))
   const limited = live(limitedUntil)
   const models = live(modelLimited)
+  const reasons = Object.fromEntries([...limitReasons].filter(([id]) => id in limited))
   try {
     mkdirSync(path.dirname(poolFile), { recursive: true })
-    writeFileSync(
+    writeFileAtomic(
       poolFile,
       JSON.stringify({
         ...(currentAccount ? { currentAccount } : {}),
         limitedUntil: limited,
+        ...(Object.keys(reasons).length ? { limitReason: reasons } : {}),
         ...(sessionAccounts.size ? { sessionAccounts: Object.fromEntries(sessionAccounts) } : {}),
         ...(apiRollover.size ? { apiRollover: [...apiRollover] } : {}),
         ...(Object.keys(models).length ? { modelLimited: models } : {}),
       }),
-      { encoding: "utf8", mode: 0o600 },
     )
     poolStamp = fileStamp(poolFile)
   } catch (error) {
@@ -265,6 +318,7 @@ export function nextUsableAccount(ids: string[], now = Date.now()): string | und
   // An unknown current (an API pick whose key is still loading, or a removed account) is not
   // overwritten: the key may land later, and an explicit pick replaces it anyway.
   if (next && next !== currentAccount && (current || !currentAccount)) {
+    ensureLoaded(now, true)
     currentAccount = next
     persistPool(now)
   }
@@ -343,7 +397,7 @@ export function failoverCandidates(from: string, ids: string[], now = Date.now()
 
 /** `model` is refused on `id` until `resetsAtMs` (an hour without one); the account stays usable for other models. */
 export function markModelLimited(id: string, model: string, resetsAtMs: number | undefined, now = Date.now()): void {
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
   const key = modelKey(id, model)
   if (until <= (modelLimited.get(key) ?? 0)) return
@@ -367,7 +421,7 @@ export function applyFailoverChoice(sessionID: string | undefined, id: string, i
  */
 export function pinSessionAccount(sessionID: string, id: string | undefined, ids: string[], now = Date.now()): boolean {
   if (id !== undefined && !known(id, ids)) return false
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   sessionAccounts.set(sessionID, id ?? UNPINNED)
   apiRollover.delete(sessionID)
   if (id !== undefined && id === apiAccount?.id) limitedUntil.delete(id)
@@ -377,7 +431,7 @@ export function pinSessionAccount(sessionID: string, id: string | undefined, ids
 
 /** Drop a deleted session's pin so `sessionAccounts` does not grow for the life of the pool file. */
 export function forgetSessionPin(sessionID: string, now = Date.now()): void {
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   const pinned = sessionAccounts.delete(sessionID)
   if (apiRollover.delete(sessionID) || pinned) persistPool(now)
 }
@@ -420,19 +474,32 @@ export function poolState(
 /** The global pick: a pool account or the API account (every unpinned chat then bills API credits). */
 export function setCurrentAccount(id: string, ids: string[], now = Date.now()): boolean {
   if (!known(id, ids)) return false
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   limitedUntil.delete(id)
   currentAccount = id
   persistPool(now)
   return true
 }
 
-export function markAccountLimited(id: string, resetsAtMs: number | undefined, now = Date.now()): void {
-  ensureLoaded(now)
+export function markAccountLimited(
+  id: string,
+  resetsAtMs: number | undefined,
+  now = Date.now(),
+  reason?: string,
+): void {
+  ensureLoaded(now, true)
   const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
   if (until <= (limitedUntil.get(id) ?? 0)) return
   limitedUntil.set(id, until)
+  if (reason) limitReasons.set(id, reason)
+  else limitReasons.delete(id)
   persistPool(now)
+}
+
+/** Why the account is limited right now, when the mark recorded a reason. */
+export function accountLimitReason(id: string, now = Date.now()): string | undefined {
+  ensureLoaded(now)
+  return (limitedUntil.get(id) ?? 0) > now ? limitReasons.get(id) : undefined
 }
 
 /** `CLAUDE_CONFIG_DIR` for a pool account; undefined keeps the inherited environment. */
@@ -599,7 +666,7 @@ export function apiRolloverCandidate(now = Date.now()): string | undefined {
 /** Keep a chat on API credits for its next turns; `apiRolloverTurn` lets it go. Its pin stays underneath. */
 export function pinApiRollover(sessionID: string | undefined, now = Date.now()): void {
   if (!apiAccount || !sessionID || sessionID === "default") return
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   apiRollover.add(sessionID)
   persistPool(now)
 }
@@ -617,7 +684,7 @@ export function isApiRollover(sessionID: string | undefined, now = Date.now()): 
  */
 export function releaseApiPin(sessionID: string | undefined, now = Date.now()): boolean {
   if (!apiAccount || !sessionID || sessionID === "default") return false
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   if (sessionAccounts.get(sessionID) !== apiAccount.id) return false
   sessionAccounts.set(sessionID, UNPINNED)
   persistPool(now)
@@ -655,18 +722,20 @@ function nameKey(id: string): string {
 function readNames(): Record<string, string> {
   if (!namesFile) return {}
   try {
-    const raw = JSON.parse(readFileSync(namesFile, "utf8").replace(/^\s*\/\/.*$/gm, "")) as {
-      claudeAccountNames?: unknown
-    }
-    const names = raw.claudeAccountNames
+    const names = OcJson.read<{ claudeAccountNames?: unknown }>(
+      readFileSync(namesFile, "utf8"),
+      namesFile,
+    ).claudeAccountNames
     if (!names || typeof names !== "object") return {}
     return Object.fromEntries(
       Object.entries(names as Record<string, unknown>).filter(
         (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim() !== "",
       ),
     )
-  } catch {
-    // Missing or invalid oc.json: no names.
+  } catch (error) {
+    // Missing oc.json: no names. An unreadable one warns and also gives no names.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      log.warn("cannot read oc.json names", { error: String(error) })
     return {}
   }
 }
@@ -767,7 +836,7 @@ export function poolAccountLabel(id: string): string {
  * pick, and its usage cache. Used after a sign-in (it may be a different person now) and on removal.
  */
 export function forgetAccount(id: string, now = Date.now()): void {
-  ensureLoaded(now)
+  ensureLoaded(now, true)
   limitedUntil.delete(id)
   for (const [session, pinned] of sessionAccounts) if (pinned === id) sessionAccounts.delete(session)
   if (currentAccount === id) currentAccount = undefined
@@ -788,6 +857,7 @@ export function forgetAccount(id: string, now = Date.now()): void {
 /** Test-only. Disables disk so tests cannot clobber the live pool file. */
 export function _resetAccountPool(): void {
   limitedUntil.clear()
+  limitReasons.clear()
   modelLimited.clear()
   sessionAccounts.clear()
   apiRollover.clear()

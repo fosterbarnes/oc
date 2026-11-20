@@ -1,5 +1,7 @@
 import { readFileSync, statSync } from "node:fs"
+import { OcJson } from "@opencode-ai/core/util/ocJson"
 import { OcConfig } from "@/config/oc"
+import { log } from "../logger.js"
 import { isRecord } from "@/util/record"
 import { isScheduleEmpty, normalizeSchedule, type WarmupSchedule } from "./schedule"
 import { ScheduleValidationError } from "./store"
@@ -63,11 +65,18 @@ export function readClaudeAccounts(): SyncedAccounts {
   try {
     const stat = statSync(file)
     if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.value
-    const raw = JSON.parse(readFileSync(file, "utf8").replace(/^\s*\/\/.*$/gm, "")) as { claudeAccounts?: unknown }
+    const raw = OcJson.read<{ claudeAccounts?: unknown }>(readFileSync(file, "utf8"), file)
     const value = parseClaudeAccounts(raw.claudeAccounts)
     cached = { mtimeMs: stat.mtimeMs, size: stat.size, value }
     return value
-  } catch {
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+    // Cache the failure by stamp so a bad file warns once, not every scheduler tick.
+    const stamp = statSync(file, { throwIfNoEntry: false })
+    if (stamp && !(cached?.mtimeMs === stamp.mtimeMs && cached.size === stamp.size)) {
+      log.warn("cannot read oc.json claudeAccounts", { error: String(error) })
+      cached = { mtimeMs: stamp.mtimeMs, size: stamp.size, value: {} }
+    }
     return {}
   }
 }

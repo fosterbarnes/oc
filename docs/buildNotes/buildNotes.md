@@ -131,6 +131,61 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-20 (~01:47) - v0.2.398 fugHou - Roast fixes WP1: settings and sync data safety - Claude Opus 5.5, low (workers: Opus 5.5 high, Sonnet 5.5 medium and high); Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified (no live sync between two machines, no TUI view of the script row or switch note)
+- Version: 0.2.398
+- Plan: `~/.config/opencode/plans/oc-roast-fixes.md` WP1 (items 1.1-1.10; 1.11 deferred, below).
+- Fixed 1.1 `core/src/util/ocItems.ts`: scan reports unreadable folders/entries (non-ENOENT readdir, dangling link, EACCES, ELOOP via `lstat`) as `partial` `category:root`; `ocSync.ts` rescan keeps previous state under a partial prefix, so an I/O error no longer tombstones and deletes on peers. A missing folder (ENOENT/ENOTDIR) still syncs as deletion.
+- Added 1.2 `core/src/util/ocJson.ts` (`OcJson.read`, jsonc with trailing commas, throws `<file>: <code> at line N`); replaced the 7 regex oc.json readers (`config/oc.ts` x2, `tui/src/ocSettings.ts`, `ocSync.ts`, `ocMirror.ts`, `claude-code/accounts.ts`, `warmup/synced.ts`). TUI `readOcConfig(toast?)` toasts once per distinct error; core readers warn.
+- Fixed 1.3 `tui/src/ocSettings.ts` `persistTuiSetting(key, value, toast?)`: resolves boolean, toasts its own failure, never rejects, writes temp+rename under new `OcItems.TUI_CONFIG_LOCK`; `OcItems.apply` locks tui items too (oc lock first). Removed 5 dead try/catch blocks in `ocCommands.tsx`; callers pass `toast`.
+- Fixed 1.4 `claude-code/accounts.ts`, `sessionManager.ts`: atomic writes (`writeFileAtomic`), parse before clearing maps, unparsable file moved to `<file>.corrupt-<ms>` and memory written back, mutators force a fresh reload (`ensureLoaded(now, true)`).
+- Fixed 1.5 `toWire` redacts top-level scalar secrets (last path segment as key); a redacted secret with no local value is skipped in `compare`/`applyPulled` (else the next scan would send a deletion back). Import footer now says "secret settings are redacted; files are copied as they are".
+- Fixed 1.6 `applyPulled` (now exported for tests) drops an incoming item whose id or `OcItems.derivedId` differs from the manifest entry, or that is excluded by its own tags.
+- Fixed 1.7 symlinked writes allowed only inside the oc roots or `~/.claude*/skills|commands` (`inside` via `path.relative`, case-insensitive on win32); a link to a missing target is refused, never replaced. `restore`/`undo` still follow links unchecked.
+- Fixed 1.8 `config/resident.ts` `requestMirrorRevive`: removed the catch that turned every error into `no-server`.
+- Added 1.9 `sidebarTools.tsx`: first left click arms a script row for 3 s (`run? `, warning color), second click runs.
+- Added 1.10 `cliEvents.ts` limit patterns carry a reason; `markAccountLimited(..., reason)` persists `limitReason`; the switch note reads "runs on X (previous login: weekly limit reached)". Reasons exist only for marks set during a failing turn; usage-cache marks show no suffix.
+- TODO 1.11 (favorites sync) not done: `model.json` lives in the state dir and is rewritten whole by the TUI and `opencode run` (`variant.shared.ts:183`) with no lock, so synced values would be overwritten. Proposed: move `favorite`, `favoriteCategories`, `favoriteCategoryColors`, `hidden` into tui.json keys written with `persistTuiSetting`, migrate once, then they sync as tui items.
+- Changed test `opencode/test/config/oc.test.ts`: the read error's cause is now the OcJson error, not a SyntaxError (intended change).
+- MISTAKE: dispatched WP1 to GPT workers first; the user stopped it (code work goes to Claude Opus/Sonnet). Their partial edits were reverted with `git restore` before re-dispatch. A worker also appended a test with a shell heredoc (oc's bash tool is not covered by the Claude Code hook).
+- Verification: `bun turbo typecheck --force` 16/16 uncached; core `ocItems` 14 pass, `ocSync` 10 pass, `ocJson` 4 pass; opencode `accountPool` 46, `config/oc` 30, `cliEvents` 15, `cliEventsStream` 14, `sessionManager` 31, `sessionSync` 8, `warmup` 64, `warmupFakeModel` 3, `warmupSync` 18, all 0 fail. Probe: `derivedId` equals the id of all 149 items collected from the real config (probe deleted). Not run: live two-machine sync, TUI checks.
+
+### User
+Settings and sync
+- Sync no longer deletes files on your other machine when a folder or linked file is briefly unreadable.
+- `oc.json` with a trailing comma or a block comment now loads; a really broken file shows an error instead of silently resetting your settings.
+- Settings that fail to save now say so instead of showing "Saved".
+- The Claude account pool and session files survive a crash mid-write; a damaged file is kept beside it as `.corrupt-<time>`.
+- Secret settings at the top level of a config file are no longer exported or synced, and the import footer says files are copied as they are.
+- Sync refuses items whose contents claim a different place than their name, and refuses writes through links that point outside your config folders.
+
+Sidebar and chat
+- Script rows need a second click within 3 seconds to run.
+- "Claude account switched" notes now say why the previous login was left.
+- Mirror revive shows the real error instead of "oc isn't running".
+
+---
+
+## 2026-11-20 (~01:35) - v0.2.397 zeWorth - Roast fixes WP0: honest status words - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.397 (docs-only in this repo: no bump)
+- Added AGENTS.md "Build notes" rule: Meta says `completed` only when the deciding check ran; otherwise `completed, live unverified` plus the missing check in Verification and the commit body. Same rule added to the shared build-notes skill (`~/.config/opencode/skills/base/build-notes/SKILL.md`).
+- Added outside the repo: Claude Code PreToolUse hook `~/.claude/hooks/blockShellSrcWrites.sh` (registered in `~/.claude/settings.json`, shared by claude2/claude3 via symlink) that blocks Bash `sed -i`, `perl -pi`, redirects, `tee`, and inline python/bun writes into `src/`; scratch paths (`tmp/`, `test/tmp/`, `/var/folders/`) stay allowed.
+- Kept: no oc permission rule for the same thing. oc bash permissions match parsed command globs, which cannot see heredoc bodies; a glob would deny read-only commands too.
+- Plan: `~/.config/opencode/plans/oc-roast-fixes.md` (WP0). Source reviews: `~/.config/opencode/plans/roast/oc/`.
+- Verification: hook probed with 11 commands (6 blocked, 5 allowed as intended), then live: a `sed -i` into `src/` from this session was refused by the hook.
+
+### User
+Agent rules
+- Build notes now say "completed, live unverified" when the deciding check could not run, instead of "completed".
+- Claude sessions can no longer edit oc source through shell commands; they must use the file tools.
+
+---
+
 ## 2026-11-19 (~04:58) - v0.2.397 zeWorth - Mirror revive version from the new binary - Claude Opus 5.5, low; Implementation
 
 ### Agent

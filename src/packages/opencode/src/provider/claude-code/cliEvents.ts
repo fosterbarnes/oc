@@ -597,10 +597,11 @@ export function formatTasksStoppedNote(count: number, why: string): string {
 
 export const ACCOUNT_BLOCK_MARKER = "▌ **claude account:**"
 
-const ACCOUNT_LIMIT_PATTERNS: RegExp[] = [
-  /third-party apps now draw from your extra usage/i,
-  /you[''`]?ve hit your individual spend limit/i,
-  /you[''`]?ve hit your (session|usage|weekly) limit/i,
+/** Limit texts the CLI prints, each with the reason the chat note gives for leaving that login. */
+const ACCOUNT_LIMIT_PATTERNS: [RegExp, (match: RegExpMatchArray) => string][] = [
+  [/third-party apps now draw from your extra usage/i, () => "Anthropic now bills third-party apps to extra usage"],
+  [/you[''`]?ve hit your individual spend limit/i, () => "spend limit reached"],
+  [/you[''`]?ve hit your (session|usage|weekly) limit/i, (match) => `${match[1]!.toLowerCase()} limit reached`],
 ]
 
 const ACCOUNT_BLOCKS = {
@@ -661,5 +662,20 @@ export function isAccountLimitError(input: { rateLimit?: RateLimitInfo | null; r
   if (input.rateLimit && isRateLimitRejected(input.rateLimit)) return true
   const text = input.resultText
   if (typeof text !== "string" || text.length === 0) return false
-  return ACCOUNT_LIMIT_PATTERNS.some((pattern) => pattern.test(text))
+  return ACCOUNT_LIMIT_PATTERNS.some(([pattern]) => pattern.test(text))
+}
+
+/** Why an account limit text (`isAccountLimitError`) means this login is out, for the account-switched note. */
+export function limitReasonFromText(text: string): string | undefined {
+  for (const [pattern, reason] of ACCOUNT_LIMIT_PATTERNS) {
+    const match = text.match(pattern)
+    if (match) return reason(match)
+  }
+  return undefined
+}
+
+/** Same for a rejected rate-limit event. */
+export function limitReasonFromRateLimit(info: RateLimitInfo): string {
+  const window = info.rateLimitType ? (RATE_LIMIT_WINDOWS[info.rateLimitType] ?? info.rateLimitType) : undefined
+  return window ? `rate limit rejected in ${window}` : "rate limit rejected"
 }

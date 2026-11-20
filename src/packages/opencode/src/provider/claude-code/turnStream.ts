@@ -33,6 +33,8 @@ import {
   isAccountLimitError,
   isModelNotFound,
   isRateLimitRejected,
+  limitReasonFromRateLimit,
+  limitReasonFromText,
   parseCompactBoundary,
   parseRateLimitEvent,
   reportCompactBoundary,
@@ -519,7 +521,11 @@ class ClaudeTurn {
   private beginAccountSwitch(msg: ClaudeStreamMessage): boolean {
     const info = parseRateLimitEvent(msg)
     if (!info || !isRateLimitRejected(info)) return false
-    return this.queueAccountSwitch(resetsAtToMs(info.resetsAt ?? info.overageResetsAt), info.rateLimitType)
+    return this.queueAccountSwitch(
+      resetsAtToMs(info.resetsAt ?? info.overageResetsAt),
+      info.rateLimitType,
+      limitReasonFromRateLimit(info),
+    )
   }
 
   /** Same failover when the CLI only put the limit in result/assistant text. */
@@ -530,9 +536,9 @@ class ClaudeTurn {
     // An error result that names no limit is some other failure, even when the
     // reply quotes limit text. The streamed copy is only consulted when the
     // CLI sent no result text (its synthetic limit reply streams as text).
-    if (resultText !== null) return isAccountLimitError({ resultText }) && this.queueAccountSwitch(undefined, "text")
-    if (!isAccountLimitError({ resultText: this.out.shown })) return false
-    return this.queueAccountSwitch(undefined, "text")
+    const text = resultText ?? this.out.shown
+    if (!isAccountLimitError({ resultText: text })) return false
+    return this.queueAccountSwitch(undefined, "text", limitReasonFromText(text))
   }
 
   /**
@@ -546,7 +552,11 @@ class ClaudeTurn {
     return /credit balance (is )?too low/i.test(text)
   }
 
-  private queueAccountSwitch(resetsAtMs: number | undefined, rateLimitType: string | undefined): boolean {
+  private queueAccountSwitch(
+    resetsAtMs: number | undefined,
+    rateLimitType: string | undefined,
+    reason: string | undefined,
+  ): boolean {
     // API credits are not a usage window: a 429 there is transient (the CLI retries), and an empty
     // balance is handled at the result. Neither may mark the profile limited or move its pin to a login.
     if (this.account === apiAccountId()) return false
@@ -554,7 +564,7 @@ class ClaudeTurn {
     // A rejection event with no usage window refuses this model (e.g. one needing extra usage the org
     // disabled), not the login: gate only the model, so other models keep using the account.
     if (rateLimitType === undefined) markModelLimited(this.account, model, resetsAtMs)
-    else markAccountLimited(this.account, resetsAtMs)
+    else markAccountLimited(this.account, resetsAtMs, Date.now(), reason)
     if (this.turn.compactionMode) return false
     const pool = this.failoverDeclined
       ? []

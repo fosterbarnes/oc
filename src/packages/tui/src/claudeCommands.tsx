@@ -36,7 +36,7 @@ export function createClaudeAccountCommands() {
   const renderer = useRenderer()
   const clipboard = useClipboard()
   const [resumeEnabled, setResumeEnabled] = createSignal(false)
-  const [failoverMode, setFailoverMode] = createSignal(readOcConfig().claudeFailover)
+  const [failoverMode, setFailoverMode] = createSignal(readOcConfig(toast).claudeFailover)
   const [rolloverMode, setRolloverMode] = createSignal(readOcConfig().claudeApiRollover)
 
   onMount(() => {

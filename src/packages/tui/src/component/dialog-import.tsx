@@ -154,7 +154,9 @@ export function DialogExport() {
       title="Export oc settings"
       options={options()}
       preserveSelection
-      footer={<text>{`${picked().size} of ${items().length} selected · secrets are never exported`}</text>}
+      footer={
+        <text>{`${picked().size} of ${items().length} selected · secret settings are redacted; files are copied as they are`}</text>
+      }
       onSelect={(option) => {
         const node = nodeByValue(nodes(), option.value)
         if (node) setPicked(togglePicked(node, picked()))

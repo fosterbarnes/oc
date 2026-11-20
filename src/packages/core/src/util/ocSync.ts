@@ -11,6 +11,7 @@ import { Global } from "../global"
 import { InstallationVersion } from "../installation/version"
 import { Hash } from "./hash"
 import { OcItems } from "./ocItems"
+import { OcJson } from "./ocJson"
 import { which } from "./which"
 
 export const PORT = 4097
@@ -46,13 +47,20 @@ export function backupRoot() {
   return path.join(dir(), "backups")
 }
 
+let lastSettingsWarning: string | undefined
+
 // A missing or unparsable oc.json means sync off, as the TUI's `readOcConfig` treats it.
 export function settings(): Settings {
   const parsed = (() => {
     try {
-      const text = readFileSync(path.join(Global.Path.config, "oc.json"), "utf8")
-      return JSON.parse(text.replace(/^\s*\/\/.*$/gm, "")) as { sync?: { enabled?: unknown; exclude?: unknown } }
-    } catch {
+      const file = path.join(Global.Path.config, "oc.json")
+      return OcJson.read<{ sync?: { enabled?: unknown; exclude?: unknown } }>(readFileSync(file, "utf8"), file)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}
+      // Runs every sync tick: warn once per distinct message.
+      const message = error instanceof Error ? error.message : String(error)
+      if (message !== lastSettingsWarning) console.warn(`sync off, cannot read oc.json: ${message}`)
+      lastSettingsWarning = message
       return {}
     }
   })()
@@ -124,9 +132,14 @@ async function rescan(): Promise<Scan> {
     // A key that became machine-only leaves the state without a tombstone, so no peer deletes its copy.
     if (OcItems.machineOnly(id)) continue
     // Tombstones never expire (about 100 bytes each): a peer that was offline for months, or one
-    // that excluded the item meanwhile, must not bring a deleted item back. An unreadable root or a
-    // half-saved settings file keeps its items as they were.
-    if (previous.deleted || collected.unread.has(OcItems.sourceOf(id))) {
+    // that excluded the item meanwhile, must not bring a deleted item back. An unreadable root, an
+    // unreadable folder or entry under a category (`partial`, keyed `category:root`), or a half-saved
+    // settings file keeps its items as they were.
+    if (
+      previous.deleted ||
+      collected.unread.has(OcItems.sourceOf(id)) ||
+      collected.partial.has(id.split(":", 2).join(":"))
+    ) {
       next[id] = previous
       continue
     }
@@ -232,7 +245,8 @@ async function fetchItems(peer: Peer, ids: string[]) {
 }
 
 // Runs under the lock against a fresh scan, so a local edit made while fetching is decided again.
-async function applyPulled(
+// Exported for tests only; `pull` is the caller and holds the lock.
+export async function applyPulled(
   peer: Peer,
   entries: readonly ManifestEntry[],
   fetched: Map<string, OcItems.Item>,
@@ -254,12 +268,25 @@ async function applyPulled(
     const local = fresh.raw.get(entry.id)
     const incoming = fetched.get(entry.id)
     if (!entry.deleted && !incoming) continue
+    // The body decides where an item is written: drop one whose id, or the id its own kind, root, and
+    // paths give it, is not the manifest entry's, or that this machine excludes by the body's tags.
+    if (
+      incoming &&
+      (incoming.id !== entry.id ||
+        OcItems.derivedId(incoming) !== entry.id ||
+        OcItems.excluded(entry.id, OcItems.tags(incoming), exclude))
+    )
+      continue
+    const restored = incoming && OcItems.fromWire(incoming, local)
+    // A redacted secret this machine has no value for: writing nothing would read as a deletion on
+    // the next scan and send a tombstone back to the peer.
+    if (restored?.kind === "key" && restored.value === undefined) continue
     if (entry.deleted && local) remove.push(local)
-    if (incoming) {
-      write.push(OcItems.fromWire(incoming, local))
+    if (restored) {
+      write.push(restored)
       // Files the peer's version no longer has.
-      if (local?.kind === "files" && incoming.kind === "files") {
-        const kept = new Set(incoming.files.map((file) => file.path))
+      if (local?.kind === "files" && restored.kind === "files") {
+        const kept = new Set(restored.files.map((file) => file.path))
         const stale = local.files.filter((file) => !kept.has(file.path))
         if (stale.length) remove.push({ ...local, files: stale })
       }

@@ -94,6 +94,9 @@ const _MACHINE_OC_KEYS = new Set([
 
 // Every read-modify-write of oc.json (server settings writes and sync applies) holds this lock.
 export const OC_CONFIG_LOCK = "oc-config"
+// Every write of tui.json (TUI settings writes and sync applies) holds this lock. A caller that needs
+// both takes OC_CONFIG_LOCK first.
+export const TUI_CONFIG_LOCK = "tui-config"
 
 /** True for an `oc:<key>` item id whose key never leaves this machine. */
 export function machineOnly(id: string) {
@@ -118,13 +121,16 @@ export function rootDir(root: Root) {
 const _cache = new Map<string, { mtimeMs: number; size: number; data: Buffer }>()
 
 // `unread`: sources that could not be read this time (missing root, broken jsonc). Sync must not
-// treat their items as deleted. `mtimes`: newest file time per item id.
+// treat their items as deleted. `partial`: `category:root` id prefixes where a folder or entry could
+// not be read (permissions, dangling link), so items under them may be missing without being
+// deleted. `mtimes`: newest file time per item id.
 export async function collect() {
   const skipped: string[] = []
   const unread = new Set<Source>()
+  const partial = new Set<string>()
   const found = [
-    ...(await collectRoot("config", skipped, unread)),
-    ...(await collectRoot("legacy", skipped, unread)),
+    ...(await collectRoot("config", skipped, unread, partial)),
+    ...(await collectRoot("legacy", skipped, unread, partial)),
     ...(await collectKeys(unread)),
   ]
   return {
@@ -132,22 +138,40 @@ export async function collect() {
     mtimes: new Map(found.map((entry) => [entry.item.id, entry.mtime])),
     skipped,
     unread,
+    partial,
   }
 }
 
 type Found = { item: Item; mtime: number }
+type Unreadable = (rel: string, error: NodeJS.ErrnoException) => void
 
-async function collectRoot(root: Root, skipped: string[], unread: Set<Source>): Promise<Found[]> {
+// Paths already reported as unreadable, so a 20 s sync loop logs each once.
+const _warned = new Set<string>()
+// readdir codes that mean the folder is not there: it holds no items, so deleting `commands/` syncs.
+const _GONE = new Set(["ENOENT", "ENOTDIR"])
+
+async function collectRoot(root: Root, skipped: string[], unread: Set<Source>, partial: Set<string>): Promise<Found[]> {
   const base = rootDir(root)
   const names = await fs.readdir(base, { withFileTypes: true }).catch(() => undefined)
   if (!names) {
     unread.add(root)
     return []
   }
-  const skills = await collectSkills(root, base, "skills", skipped)
+  const unreadable =
+    (category: Category): Unreadable =>
+    (rel, error) => {
+      partial.add(`${category}:${root}`)
+      const file = path.join(base, rel)
+      if (_warned.has(file)) return
+      _warned.add(file)
+      console.warn(
+        `oc items: cannot read ${file} (${error.code ?? error.message}); keeping its ${category} items as they were`,
+      )
+    }
+  const skills = await collectSkills(root, base, "skills", skipped, unreadable("skill"))
   const files = await Promise.all(
     _FILE_DIRS.map(async ([dir, category]) => {
-      const paths = await walk(base, dir, skipped)
+      const paths = await walk(base, dir, skipped, unreadable(category))
       return Promise.all(
         paths
           .filter((file) => category !== "theme" || file.endsWith(".json"))
@@ -165,11 +189,16 @@ async function collectRoot(root: Root, skipped: string[], unread: Set<Source>): 
 }
 
 // One item per folder holding SKILL.md, with every file under it.
-async function collectSkills(root: Root, base: string, dir: string, skipped: string[]): Promise<Found[]> {
-  const full = path.join(base, dir)
-  const names = await fs.readdir(full).catch(() => [] as string[])
+async function collectSkills(
+  root: Root,
+  base: string,
+  dir: string,
+  skipped: string[],
+  unreadable: Unreadable,
+): Promise<Found[]> {
+  const names = await listNames(base, dir, unreadable)
   if (names.includes("SKILL.md")) {
-    const files = await walk(base, dir, skipped)
+    const files = await walk(base, dir, skipped, unreadable)
     return [
       await filesItem(
         root,
@@ -185,24 +214,30 @@ async function collectSkills(root: Root, base: string, dir: string, skipped: str
     names
       .filter((name) => !_SKIP_NAME.test(name))
       .map(async (name) => {
-        const stat = await fs.stat(path.join(full, name)).catch(() => undefined)
-        return stat?.isDirectory() ? collectSkills(root, base, `${dir}/${name}`, skipped) : []
+        const stat = await statEntry(base, `${dir}/${name}`, unreadable)
+        return stat?.isDirectory() ? collectSkills(root, base, `${dir}/${name}`, skipped, unreadable) : []
       }),
   )
   return children.flat()
 }
 
 // Every file under `base/dir` (symlinks followed), as forward-slash paths relative to `base`.
-async function walk(base: string, dir: string, skipped: string[], depth = 0): Promise<string[]> {
+async function walk(
+  base: string,
+  dir: string,
+  skipped: string[],
+  unreadable: Unreadable,
+  depth = 0,
+): Promise<string[]> {
   if (depth > 8) return []
-  const names = await fs.readdir(path.join(base, dir)).catch(() => [] as string[])
+  const names = await listNames(base, dir, unreadable)
   const nested = await Promise.all(
     names
       .filter((name) => !_SKIP_NAME.test(name))
       .map(async (name) => {
         const rel = `${dir}/${name}`
-        const stat = await fs.stat(path.join(base, rel)).catch(() => undefined)
-        if (stat?.isDirectory()) return walk(base, rel, skipped, depth + 1)
+        const stat = await statEntry(base, rel, unreadable)
+        if (stat?.isDirectory()) return walk(base, rel, skipped, unreadable, depth + 1)
         if (!stat?.isFile()) return []
         if (stat.size > _MAX_FILE) {
           skipped.push(rel)
@@ -212,6 +247,28 @@ async function walk(base: string, dir: string, skipped: string[], depth = 0): Pr
       }),
   )
   return nested.flat()
+}
+
+// A folder that exists but cannot be listed is unreadable; a missing one holds no items.
+function listNames(base: string, dir: string, unreadable: Unreadable) {
+  return fs.readdir(path.join(base, dir)).catch((error: NodeJS.ErrnoException) => {
+    if (!_GONE.has(error.code ?? "")) unreadable(dir, error)
+    return [] as string[]
+  })
+}
+
+// undefined when the entry cannot be followed. Only a missing entry (lstat ENOENT) is a deletion; a
+// dangling link, EACCES, or ELOOP is unreadable.
+function statEntry(base: string, rel: string, unreadable: Unreadable) {
+  const full = path.join(base, rel)
+  return fs.stat(full).catch(async (error: NodeJS.ErrnoException) => {
+    const gone = await fs.lstat(full).then(
+      () => false,
+      (inner: NodeJS.ErrnoException) => inner.code === "ENOENT",
+    )
+    if (!gone) unreadable(rel, error)
+    return undefined
+  })
 }
 
 async function filesItem(
@@ -231,7 +288,7 @@ async function filesItem(
   })
   const display = category === "skill" ? label : label.replace(/^[^/]+\//, "")
   return {
-    item: { kind: "files", id: `${category}:${root}:${label}`, category, label: display, code, root, files },
+    item: { kind: "files", id: filesId(category, root, label), category, label: display, code, root, files },
     mtime: Math.max(0, ...read.map((entry) => entry.mtimeMs)),
   }
 }
@@ -280,6 +337,32 @@ function keyItem(file: KeyFile, keys: string[], value: unknown): KeyItem {
   }
 }
 
+function filesId(category: Category, root: Root, label: string) {
+  return `${category}:${root}:${label}`
+}
+
+// The id an item's own body gives it, as `collect` would build it: key items from their file and
+// path, files items from their root and paths (a skill is the folder of its top SKILL.md and holds
+// only files under it; any other files item is one file in its category's folder). undefined when
+// the paths fit no item. Sync compares it with the manifest id before writing a peer's item.
+export function derivedId(item: Item) {
+  if (item.kind === "key") return keyItem(item.file, item.path, item.value).id
+  const paths = item.files.map((file) => file.path)
+  if (item.category === "skill") {
+    const folder = paths
+      .filter((file) => file.endsWith("/SKILL.md"))
+      .sort((a, b) => a.length - b.length)[0]
+      ?.slice(0, -"/SKILL.md".length)
+    if (folder === undefined || (folder !== "skills" && !folder.startsWith("skills/"))) return undefined
+    if (!paths.every((file) => file.startsWith(`${folder}/`))) return undefined
+    return filesId("skill", item.root, folder.slice("skills/".length))
+  }
+  if (paths.length !== 1) return undefined
+  const segments = paths[0].split("/")
+  const category = segments.length === 1 ? "instruction" : _FILE_DIRS.find(([dir]) => dir === segments[0])?.[1]
+  return category === item.category ? filesId(category, item.root, paths[0]) : undefined
+}
+
 export function keyFilePath(file: KeyFile) {
   const names = {
     opencode: ["opencode.jsonc", "opencode.json", "config.json"],
@@ -315,7 +398,11 @@ export function sourceOf(id: string): Source {
 export function toWire(item: Item): Item {
   const home = Global.Path.home
   if (item.kind === "key") {
-    return { ...item, value: mapStrings(redact(item.value), (text) => rewriteHome(text, home, HOME_TOKEN)) }
+    // The last path segment is the key, so a top-level scalar like `githubToken` is redacted too.
+    return {
+      ...item,
+      value: mapStrings(redact(item.value, item.path.at(-1)), (text) => rewriteHome(text, home, HOME_TOKEN)),
+    }
   }
   return {
     ...item,
@@ -522,6 +609,8 @@ export async function compare(items: readonly Item[]) {
     const current = local.get(wire.id)
     if (current && hash(toWire(current)) === hash(wire)) return []
     const item = fromWire(wire, current)
+    // A redacted secret this machine has no value for: nothing to import.
+    if (item.kind === "key" && item.value === undefined) return []
     const text = item.kind === "key" ? JSON.stringify(item.value) : item.files.map((file) => file.text ?? "").join("\n")
     return [{ item, status: current ? "changed" : "new", missing: missingPaths(text ?? "", Global.Path.home) }]
   })
@@ -542,8 +631,13 @@ export async function apply(
   items: readonly Item[],
   options: { remove?: readonly Item[]; backupRoot?: string; keep?: number } = {},
 ) {
-  const touchesOc = [...items, ...(options.remove ?? [])].some((item) => item.kind === "key" && item.file === "oc")
-  return touchesOc ? Flock.withLock(OC_CONFIG_LOCK, () => applyUnlocked(items, options)) : applyUnlocked(items, options)
+  const files = new Set(
+    [...items, ...(options.remove ?? [])].flatMap((item) => (item.kind === "key" ? [item.file] : [])),
+  )
+  const run = () => applyUnlocked(items, options)
+  // Fixed order (oc, then tui) so two writers that need both never wait on each other.
+  const tui = files.has("tui") ? () => Flock.withLock(TUI_CONFIG_LOCK, run) : run
+  return files.has("oc") ? Flock.withLock(OC_CONFIG_LOCK, tui) : tui()
 }
 
 async function applyUnlocked(
@@ -599,6 +693,7 @@ async function applyUnlocked(
       record.files.push({ target, existed })
     }
     await fs.writeFile(path.join(dir, "record.json"), JSON.stringify(record, null, 2))
+    const allowed = await writeRoots()
     for (const [target, data] of writes) {
       const content = await data()
       if (content === undefined) {
@@ -606,8 +701,14 @@ async function applyUnlocked(
         continue
       }
       // A symlinked file (a command linked to a Claude skill) is written at its real path, so the
-      // rename replaces the content and the link survives.
-      const real = await fs.realpath(target).catch(() => target)
+      // rename replaces the content and the link survives. Only inside the oc roots or a Claude
+      // skills/commands folder: a link elsewhere fails the whole apply instead of being followed.
+      const real = await realTarget(target)
+      if (!allowed.some((root) => inside(root, real))) {
+        throw new Error(
+          `Refusing to write ${target}: it resolves to ${real}, outside the oc config folders and ~/.claude*/skills or commands`,
+        )
+      }
       await fs.mkdir(path.dirname(real), { recursive: true })
       const temporary = `${real}.tmp-${process.pid}`
       staged.push({ target, real, temporary })
@@ -662,8 +763,45 @@ function assertSafe(item: Item) {
 function filePath(root: Root, rel: string) {
   const base = path.resolve(rootDir(root))
   const target = path.resolve(base, ...rel.split("/"))
-  if (!target.startsWith(base + path.sep)) throw new Error(`Unsafe path ${rel}`)
+  if (!inside(base, target)) throw new Error(`Unsafe path ${rel}`)
   return target
+}
+
+// True when `child` is below `parent` (case-insensitive on Windows).
+function inside(parent: string, child: string) {
+  const fold = (value: string) => (process.platform === "win32" ? value.toLowerCase() : value)
+  const rel = path.relative(fold(parent), fold(child))
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel)
+}
+
+// Folders a write may land in after following links: the item roots and every ~/.claude*/skills or
+// commands folder, each as given and as resolved by `realTarget` (it may not exist yet).
+async function writeRoots() {
+  const claude = (await fs.readdir(Global.Path.home).catch(() => [] as string[])).filter((name) =>
+    name.startsWith(".claude"),
+  )
+  const dirs = [
+    rootDir("config"),
+    rootDir("legacy"),
+    ...claude.flatMap((name) => ["skills", "commands"].map((dir) => path.join(Global.Path.home, name, dir))),
+  ]
+  const real = await Promise.all(dirs.map((dir) => realTarget(dir).catch(() => undefined)))
+  return [...dirs.map((dir) => path.resolve(dir)), ...real.filter((dir) => dir !== undefined)]
+}
+
+// Where a write to `target` lands: its real path, or for a new file the real path of its nearest
+// existing folder plus the rest. A link whose target is missing is refused, never replaced.
+async function realTarget(target: string): Promise<string> {
+  const real = await fs.realpath(target).catch(() => undefined)
+  if (real) return real
+  const link = await fs.lstat(target).then(
+    (stat) => stat.isSymbolicLink(),
+    () => false,
+  )
+  if (link) throw new Error(`Refusing to write ${target}: it is a link whose target is missing`)
+  const parent = path.dirname(target)
+  if (parent === target) return target
+  return path.join(await realTarget(parent), path.basename(target))
 }
 
 async function pruneBackups(root: string, keep: number) {

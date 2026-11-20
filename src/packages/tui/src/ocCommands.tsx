@@ -401,7 +401,7 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Folders",
         get desc() {
-          return readOcConfig().homeDir
+          return readOcConfig(toast).homeDir
         },
         slashName: "homeDir",
         run: () => {
@@ -431,7 +431,7 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Folders",
         get desc() {
-          return readOcConfig().homeDirSort
+          return readOcConfig(toast).homeDirSort
         },
         slashName: "homeDirSort",
         run: () => {
@@ -456,7 +456,7 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Folders",
         get desc() {
-          return readOcConfig().ocDir
+          return readOcConfig(toast).ocDir
         },
         slashName: "ocDir",
         run: () => {
@@ -486,7 +486,7 @@ export function createOcCommands(input: {
         category: "oc",
         group: "Server and processes",
         get desc() {
-          return readOcConfig().serverStartAtLogin ? "on" : "off"
+          return readOcConfig(toast).serverStartAtLogin ? "on" : "off"
         },
         slashName: "serverStartAtLogin",
         run: () => {
@@ -638,14 +638,9 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setKeybindPreset(option.value)
-                try {
-                  persistTuiSetting(["keybind_preset"], option.value)
-                } catch (cause) {
-                  const message = cause instanceof Error ? cause.message : String(cause)
-                  toast.show({ message: `Keybind layout applied but not saved: ${message}`, variant: "error" })
-                  return
-                }
-                toast.show({ message: `Keybind layout: ${option.value}`, variant: "success" })
+                void persistTuiSetting(["keybind_preset"], option.value, toast).then(
+                  (saved) => saved && toast.show({ message: `Keybind layout: ${option.value}`, variant: "success" }),
+                )
               }}
             />
           ))
@@ -696,14 +691,10 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setSidebarButtonStyle(option.value)
-                try {
-                  persistTuiSetting(["sidebar_button_style"], option.value)
-                } catch (cause) {
-                  const message = cause instanceof Error ? cause.message : String(cause)
-                  toast.show({ message: `Sidebar button style applied but not saved: ${message}`, variant: "error" })
-                  return
-                }
-                toast.show({ message: `Sidebar button style: ${option.title}`, variant: "success" })
+                void persistTuiSetting(["sidebar_button_style"], option.value, toast).then(
+                  (saved) =>
+                    saved && toast.show({ message: `Sidebar button style: ${option.title}`, variant: "success" }),
+                )
               }}
             />
           ))
@@ -829,12 +820,7 @@ export function createOcCommands(input: {
                   const value =
                     option.value === "click" ? (settings.click === "tab" ? "inline" : "tab") : !settings[option.value]
                   tuiConfig.setSubagentTabs({ ...settings, [option.value]: value })
-                  try {
-                    persistTuiSetting(["subagent_tabs", option.value], value)
-                  } catch (cause) {
-                    const message = cause instanceof Error ? cause.message : String(cause)
-                    toast.show({ message: `Subagent tabs applied but not saved: ${message}`, variant: "error" })
-                  }
+                  void persistTuiSetting(["subagent_tabs", option.value], value, toast)
                   show(option.value)
                 }}
               />
@@ -1085,14 +1071,9 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setSmoothStreaming(option.value)
-                try {
-                  persistTuiSetting(["smooth_streaming"], option.value)
-                } catch (cause) {
-                  const message = cause instanceof Error ? cause.message : String(cause)
-                  toast.show({ message: `Smooth streaming applied but not saved: ${message}`, variant: "error" })
-                  return
-                }
-                toast.show({ message: `Smooth streaming ${option.title}`, variant: "success" })
+                void persistTuiSetting(["smooth_streaming"], option.value, toast).then(
+                  (saved) => saved && toast.show({ message: `Smooth streaming ${option.title}`, variant: "success" }),
+                )
               }}
             />
           ))
@@ -1119,11 +1100,16 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setDailyTheme(option.value)
-                void persistTuiSetting([DAILY_THEME_KEY], option.value)
-                toast.show({
-                  message: option.value ? `Daily theme on: ${dailyTheme(dayNumber(new Date()))}` : "Daily theme off",
-                  variant: "success",
-                })
+                void persistTuiSetting([DAILY_THEME_KEY], option.value, toast).then(
+                  (saved) =>
+                    saved &&
+                    toast.show({
+                      message: option.value
+                        ? `Daily theme on: ${dailyTheme(dayNumber(new Date()))}`
+                        : "Daily theme off",
+                      variant: "success",
+                    }),
+                )
               }}
             />
           ))
@@ -1185,14 +1171,10 @@ export function createOcCommands(input: {
               onSelect={(option) => {
                 dialog.clear()
                 tuiConfig.setAutoConfirmUpdates(option.value)
-                try {
-                  persistTuiSetting(["auto_confirm_updates"], option.value)
-                } catch (cause) {
-                  const message = cause instanceof Error ? cause.message : String(cause)
-                  toast.show({ message: `Auto confirm updates applied but not saved: ${message}`, variant: "error" })
-                  return
-                }
-                toast.show({ message: `Auto confirm updates ${option.title}`, variant: "success" })
+                void persistTuiSetting(["auto_confirm_updates"], option.value, toast).then(
+                  (saved) =>
+                    saved && toast.show({ message: `Auto confirm updates ${option.title}`, variant: "success" }),
+                )
               }}
             />
           ))
