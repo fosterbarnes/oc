@@ -369,7 +369,7 @@ class ClaudeTurn {
     if (!this.turn.compactionMode && this.turn.affinity !== "default") {
       this.activeProcess.wakeTarget = {
         sessionID: this.turn.affinity,
-        directory: this.turn.cwd,
+        directory: this.turn.directory,
         providerID: this.config.provider,
         modelID: this.turn.modelId,
         agent: this.turn.agent,
@@ -2063,7 +2063,7 @@ class ClaudeTurn {
     if (resetAt === undefined) return
     const entry = ScheduledResume.requestResume({
       sessionID,
-      directory: this.turn.cwd,
+      directory: this.turn.directory,
       fireAt: resetAt + 60_000,
       reason: ScheduledResume.RESUME_REASON,
     })

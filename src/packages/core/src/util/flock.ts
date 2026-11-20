@@ -54,9 +54,16 @@ export namespace Flock {
     baseDelayMs?: number
     maxDelayMs?: number
     onWait?: Wait
+    /**
+     * Before breaking a stale lock, check whether its owner process is still alive on this host (same
+     * hostname, same pid, started no later than the lock). A live owner that merely stopped heartbeating
+     * (laptop sleep, long pause) keeps the lock. When the check is unsupported or fails, the age rule decides.
+     */
+    checkOwner?: boolean
   }
 
   type Opts = {
+    checkOwner: boolean
     staleMs: number
     timeoutMs: number
     baseDelayMs: number
@@ -153,6 +160,24 @@ export namespace Flock {
     return now - dir.mtimeMs > staleMs
   }
 
+  // FILETIME (100 ns ticks since 1601-01-01), the unit `ProcessIdentity.created` uses on every platform.
+  const FILETIME_EPOCH_MS = 11644473600000n
+
+  async function ownerAlive(metaPath: string) {
+    try {
+      const { ProcessTree } = await import("./processTree")
+      if (!ProcessTree.identitySupported) return false
+      const meta = JSON.parse(await readFile(metaPath, "utf8"))
+      const createdAt = Date.parse(meta?.createdAt)
+      if (meta?.hostname !== os.hostname() || !Number.isInteger(meta.pid) || Number.isNaN(createdAt)) return false
+      const owner = await ProcessTree.processIdentity(meta.pid)
+      // A process that started after the lock was taken is a reused pid, not the owner.
+      return !!owner && Number(BigInt(owner.created) / 10000n - FILETIME_EPOCH_MS) <= createdAt
+    } catch {
+      return false
+    }
+  }
+
   async function tryAcquireLockDir(lockDir: string, opts: Opts): Promise<Owned | { acquired: false }> {
     const token = randomUUID?.() ?? randomBytes(16).toString("hex")
     const metaPath = path.join(lockDir, "meta.json")
@@ -194,6 +219,8 @@ export namespace Flock {
         if (!(await stale(lockDir, heartbeatPath, metaPath, opts.staleMs))) {
           return { acquired: false }
         }
+
+        if (opts.checkOwner && (await ownerAlive(metaPath))) return { acquired: false }
 
         await rm(lockDir, { recursive: true, force: true })
 
@@ -318,6 +345,7 @@ export namespace Flock {
   export async function acquire(key: string, input: Options = {}): Promise<Lease> {
     input.signal?.throwIfAborted()
     const cfg: Opts = {
+      checkOwner: input.checkOwner ?? false,
       staleMs: input.staleMs ?? defaultOpts.staleMs,
       timeoutMs: input.timeoutMs ?? defaultOpts.timeoutMs,
       baseDelayMs: input.baseDelayMs ?? defaultOpts.baseDelayMs,

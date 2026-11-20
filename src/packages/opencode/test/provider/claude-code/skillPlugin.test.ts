@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test"
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { ensureSkillPlugin, poolSkillsDir } from "@/provider/claude-code/skillPlugin"
@@ -23,14 +23,25 @@ test("ensureSkillPlugin links oc skills, skips Claude Code's own, and rebuilds o
   const shared = skill(sources, "shared")
   const projectClaude = skill(path.join(tmp.path, "proj", ".claude", "skills"), "local")
 
-  expect(ensureSkillPlugin([notes, models, shared, projectClaude], plugin, claudeSkills)).toBe(plugin)
-  expect(JSON.parse(readFileSync(path.join(plugin, ".claude-plugin", "plugin.json"), "utf8"))).toEqual({ name: "oc" })
-  expect(readdirSync(path.join(plugin, "skills")).toSorted()).toEqual(["available-models", "build-notes"])
-  expect(readFileSync(path.join(plugin, "skills", "build-notes", "SKILL.md"), "utf8")).toContain("# build-notes")
+  const first = ensureSkillPlugin([notes, models, shared, projectClaude], plugin, claudeSkills)!
+  expect(path.dirname(first)).toBe(plugin)
+  expect(JSON.parse(readFileSync(path.join(first, ".claude-plugin", "plugin.json"), "utf8"))).toEqual({ name: "oc" })
+  expect(readdirSync(path.join(first, "skills")).toSorted()).toEqual(["available-models", "build-notes"])
+  expect(readFileSync(path.join(first, "skills", "build-notes", "SKILL.md"), "utf8")).toContain("# build-notes")
+  expect(ensureSkillPlugin([notes, models], plugin, claudeSkills)).toBe(first)
 
-  // A changed set replaces the links and leaves the skill folders themselves alone.
-  expect(ensureSkillPlugin([models], plugin, claudeSkills)).toBe(plugin)
-  expect(readdirSync(path.join(plugin, "skills"))).toEqual(["available-models"])
+  // A changed set gets its own folder; another project's folder stays while it is in use.
+  const second = ensureSkillPlugin([models], plugin, claudeSkills)!
+  expect(second).not.toBe(first)
+  expect(readdirSync(path.join(second, "skills"))).toEqual(["available-models"])
+  expect(readdirSync(path.join(first, "skills")).toSorted()).toEqual(["available-models", "build-notes"])
+
+  // A folder unused for over a day is pruned, leaving the skill folders themselves alone.
+  const old = new Date(Date.now() - 2 * 24 * 60 * 60_000)
+  utimesSync(first, old, old)
+  ensureSkillPlugin([notes], plugin, claudeSkills)
+  expect(existsSync(first)).toBe(false)
+  expect(existsSync(second)).toBe(true)
   expect(existsSync(notes.location)).toBe(true)
 
   expect(

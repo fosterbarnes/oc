@@ -8,11 +8,10 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
 
-import {
-  fetchSessionDirectory,
-  fetchSessionRunState,
-  setOpencodeClient,
-} from "@/provider/claude-code/runtimeStatus.js"
+import { fetchSessionDirectory, fetchSessionRunState, setOpencodeClient } from "@/provider/claude-code/runtimeStatus.js"
+import { isProxyCallStillServed } from "@/provider/claude-code/claudeCodeLanguageModel.js"
+import { queuePendingProxyCall, rejectAllPendingProxyCallsForSession } from "@/provider/claude-code/proxyBroker.js"
+import { sessionKey } from "@/provider/claude-code/sessionManager.js"
 
 /**
  * `setOpencodeClient` ignores null, so "no client captured" is expressed as a
@@ -164,4 +163,32 @@ test("the 'default' bucket has no run state to read", async () => {
   assert.equal(await fetchSessionRunState("default"), "unknown")
   assert.equal(await fetchSessionRunState(""), "unknown")
   assert.equal(probe.calls, 0)
+})
+
+test("a pending proxy call's status lookup asks the call's own project", async () => {
+  // One resident server, many projects: status is per instance, and the
+  // shared client's default instance lists this session as missing, i.e. idle.
+  const directories: unknown[] = []
+  setOpencodeClient({
+    session: {
+      status: async (options?: { query?: { directory?: string } }) => {
+        directories.push(options?.query?.directory)
+        return { data: options?.query?.directory === "/proj/b" ? { ses_b: { type: "busy" } } : {} }
+      },
+    },
+  })
+  // The spawn cwd in the key (a configured cwd) is not the session's project.
+  const key = sessionKey("/configured/cwd", "tools::ses_b::context=[]")
+  queuePendingProxyCall(
+    key,
+    { id: "call-dir", toolName: "bash", input: {}, resolve: () => {}, reject: () => {} },
+    undefined,
+    "/proj/b",
+  )
+  try {
+    assert.equal(await isProxyCallStillServed("call-dir"), true)
+    assert.deepEqual(directories, ["/proj/b"])
+  } finally {
+    rejectAllPendingProxyCallsForSession(key, new Error("cleanup"))
+  }
 })

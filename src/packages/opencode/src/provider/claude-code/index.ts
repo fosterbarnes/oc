@@ -20,12 +20,7 @@ import { configureLogger, log } from "./logger.js"
 import { isUnknownPreset, resolvePermissionPreset, type ResolvedPermissionPreset } from "./permissionPresets.js"
 import { deleteActiveProcessesForSession, ensureProcessExitCleanup } from "./sessionManager.js"
 import { forgetSessionExchanges } from "./sessionSync.js"
-import {
-  getOpencodeProjectDirectory,
-  isUsableDirectory,
-  setOpencodeClient,
-  setOpencodeProjectDirectory,
-} from "./runtimeStatus.js"
+import { isUsableDirectory, setOpencodeClient, setOpencodeProjectDirectory } from "./runtimeStatus.js"
 import { logStartupDiagnostics, pickOpencodeVersion, type DiagnosticsProviderEntry } from "./startupDiagnostics.js"
 
 export interface ClaudeCodeProvider {
@@ -279,8 +274,9 @@ export function claudeCodeProviders(
  * Purely observational. It defines no agents and changes no agent's config;
  * an agent this plugin never heard of is simply absent from the registry,
  * which is what keeps opencode's built-ins out of the override path.
+ * `directory` is the booting plugin's own project, which keys the registry.
  */
-export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> {
+export async function buildAgentRegistry(config: OpenCodeConfig, directory?: string): Promise<void> {
   const options = config.provider?.[PROVIDER_ID]?.options
   const configured = options?.defaultSubagentModel
   setDefaultSubagentModel(typeof configured === "string" ? configured : undefined)
@@ -288,7 +284,7 @@ export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> 
   // either way), so they are read from disk and then overlaid with whatever
   // config does carry, which is authoritative when both describe one agent.
   const records: Record<string, AgentRecord> = await readAgentMarkdownRecords(
-    agentDirectories(process.env.HOME ?? process.env.USERPROFILE, getOpencodeProjectDirectory()),
+    agentDirectories(process.env.HOME ?? process.env.USERPROFILE, directory),
   )
 
   for (const [name, agent] of Object.entries(config.agent ?? {})) {
@@ -306,8 +302,9 @@ export async function buildAgentRegistry(config: OpenCodeConfig): Promise<void> 
     }
   }
 
-  setAgentRegistry(records)
+  setAgentRegistry(records, directory)
   log.debug("agent registry built", {
+    directory,
     agents: Object.keys(records).length,
     defaultSubagentModel: getDefaultSubagentModel(),
   })
@@ -345,14 +342,17 @@ export const claudeCodeServer: OpenCodePlugin = async (input) => {
   // Claude CLI spawn time only when `process.cwd()` is unusable. Rescues
   // macOS GUI launches at `/` without freezing the value into provider
   // config, so opencode workspace switches mid-session still take effect.
-  // See `resolveSpawnCwd` in runtimeStatus.ts and issue #4.
-  setOpencodeProjectDirectory(pickOpencodeDirectory(input))
+  // See `resolveSpawnCwd` in runtimeStatus.ts and issue #4. The resident
+  // server boots this once per project, so this plugin's own work uses
+  // `directory`, not the global the last project set.
+  const directory = pickOpencodeDirectory(input)
+  setOpencodeProjectDirectory(directory)
 
   return {
     config: async (config) => {
       config.provider ??= {}
 
-      await buildAgentRegistry(config)
+      await buildAgentRegistry(config, directory)
 
       const existing = config.provider[PROVIDER_ID]
       config.provider[PROVIDER_ID] = {

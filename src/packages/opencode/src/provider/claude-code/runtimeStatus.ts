@@ -10,7 +10,7 @@ import { log } from "./logger.js"
  */
 type OpencodeClient = {
   mcp?: {
-    status?: () => Promise<{ data?: unknown; error?: unknown }>
+    status?: (options?: { query?: { directory?: string } }) => Promise<{ data?: unknown; error?: unknown }>
   }
   tool?: {
     list?: (options: {
@@ -24,7 +24,7 @@ type OpencodeClient = {
       query?: { directory?: string }
     }) => Promise<{ data?: unknown; error?: unknown }>
     /** `GET /session/status`: sessions missing from the map are idle. */
-    status?: () => Promise<{ data?: unknown; error?: unknown }>
+    status?: (options?: { query?: { directory?: string } }) => Promise<{ data?: unknown; error?: unknown }>
   }
 }
 
@@ -167,22 +167,6 @@ export function decideSpawnCwd(
 }
 
 /**
- * Resolve the spawn cwd for a specific opencode session. Looks up the
- * session's `directory` via the SDK (keyed by the `x-session-affinity`
- * id opencode sets on LLM calls) and feeds it into `resolveSpawnCwdFrom`
- * as tier 2. Falls back cleanly to the non-session resolution when the
- * id is absent ("default"), no SDK client is captured, or the lookup
- * fails - so the TUI / direct-AI-SDK / test paths are unaffected.
- */
-export async function resolveSpawnCwdForSession(
-  configured: string | undefined,
-  sessionID: string | undefined,
-): Promise<string> {
-  const sessionDir = sessionID ? await fetchSessionDirectory(sessionID) : undefined
-  return resolveSpawnCwdFrom(configured, process.cwd(), opencodeProjectDirectory, sessionDir)
-}
-
-/**
  * Fetch an opencode session's project directory via `GET /session/{id}`.
  * Returns `undefined` on any failure (no client, "default"/empty id,
  * rejected call, malformed response, unusable directory) so callers fall
@@ -215,14 +199,16 @@ export type SessionRunState = "busy" | "idle" | "unknown"
  * Whether opencode still considers this session to be running a turn.
  * `unknown` when there is no client or the route is missing, which every
  * caller must treat as "do not act": a wrong guess here is worse than no
- * answer.
+ * answer. Status is per instance, so `directory` must be the session's own:
+ * the shared client otherwise asks whichever project booted last, which
+ * lists the session as missing and so "idle".
  */
-export async function fetchSessionRunState(sessionID: string): Promise<SessionRunState> {
+export async function fetchSessionRunState(sessionID: string, directory?: string): Promise<SessionRunState> {
   if (!sessionID || sessionID === "default") return "unknown"
   const status = opencodeClient?.session?.status
   if (!status) return "unknown"
   try {
-    const res = await status.call(opencodeClient!.session)
+    const res = await status.call(opencodeClient!.session, directory ? { query: { directory } } : undefined)
     const data = (res as { data?: unknown }).data
     if (!data || typeof data !== "object") return "unknown"
     const entry = (data as Record<string, unknown>)[sessionID]
@@ -244,11 +230,11 @@ export async function fetchSessionRunState(sessionID: string): Promise<SessionRu
  * failure (no client captured, status call rejected, malformed response)
  * so the merge falls back to disk-only.
  */
-export async function getRuntimeMcpStatus(): Promise<RuntimeMcpStatus | undefined> {
+export async function getRuntimeMcpStatus(directory?: string): Promise<RuntimeMcpStatus | undefined> {
   const client = opencodeClient
   if (!client?.mcp?.status) return undefined
   try {
-    const res = await client.mcp.status()
+    const res = await client.mcp.status(directory ? { query: { directory } } : undefined)
     const data = (res as { data?: unknown }).data
     if (!data || typeof data !== "object") return undefined
     const out: RuntimeMcpStatus = {}

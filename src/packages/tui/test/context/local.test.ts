@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   moveModelFavorite,
   loadModelFavorites,
+  loadHiddenModels,
   parseModel,
   pruneSessionAgents,
   pruneSessionModelOverrides,
@@ -68,13 +69,26 @@ test("local model shares reasoning for display, outgoing selections and persiste
   const events = createEventSource()
   const calls = createFetch((url) => {
     if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }])
-    if (url.pathname === "/config/providers") return json({
-      providers: [{ id: "test", name: "Test", models: Object.fromEntries(
-        ["first", "second", "third", "unsupported"].map((id) => [id, {
-          id, name: id, variants: id === "unsupported" ? { highThinking: {} } : { low: {}, high: {} },
-        }]),
-      ) }], default: { test: "first" },
-    })
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: Object.fromEntries(
+              ["first", "second", "third", "unsupported"].map((id) => [
+                id,
+                {
+                  id,
+                  name: id,
+                  variants: id === "unsupported" ? { highThinking: {} } : { low: {}, high: {} },
+                },
+              ]),
+            ),
+          },
+        ],
+        default: { test: "first" },
+      })
   }, events)
   const updates: Array<{ id: string; providerID: string; variant?: string }> = []
   const prompts: Array<{ variant?: string }> = []
@@ -99,8 +113,12 @@ test("local model shares reasoning for display, outgoing selections and persiste
     await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
     expect(local().model.variant.selected()).toBe("high")
     expect(local().model.variant.current()).toBe("high")
-    await sdk().client.session.prompt({ sessionID: "new", model: local().model.current(),
-      variant: local().model.variant.current(), parts: [{ type: "text", text: "test" }] })
+    await sdk().client.session.prompt({
+      sessionID: "new",
+      model: local().model.current(),
+      variant: local().model.variant.current(),
+      parts: [{ type: "text", text: "test" }],
+    })
     expect(prompts.at(-1)?.variant).toBe("high")
     route().navigate({ type: "session", sessionID: "explicit" })
     expect(local().model.variant.current()).toBe("low")
@@ -113,21 +131,32 @@ test("local model shares reasoning for display, outgoing selections and persiste
     await local().model.select({ providerID: "test", modelID: "first" })
     expect(updates.at(-1)?.variant).toBeUndefined()
     await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
-    for (const [modelID, variant] of [["second", undefined], ["third", "low"], ["unsupported", undefined]] as const) {
+    for (const [modelID, variant] of [
+      ["second", undefined],
+      ["third", "low"],
+      ["unsupported", undefined],
+    ] as const) {
       await local().model.select({ providerID: "test", modelID })
       expect(local().model.variant.current()).toBe(variant)
       expect(updates.at(-1)?.variant).toBe(variant)
-      await wait(() => JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
-        .session.providerDefault.modelID === modelID &&
-        !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+      await wait(
+        () =>
+          JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8")).session.providerDefault.modelID ===
+            modelID && !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")),
+      )
     }
     route().navigate({ type: "home" })
     local().model.set({ providerID: "test", modelID: "first" })
     await local().model.variant.set(undefined)
     expect(local().model.variant.current()).toBeUndefined()
     await wait(() => {
-      try { return JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8"))
-        .variant["test/first"] === "default" } catch { return false }
+      try {
+        return (
+          JSON.parse(fs.readFileSync(path.join(statePath, "model.json"), "utf8")).variant["test/first"] === "default"
+        )
+      } catch {
+        return false
+      }
     })
     const persisted = await Bun.file(path.join(statePath, "model.json")).json()
     expect(persisted.variant).toEqual({ ...saved.variant, "test/first": "default" })
@@ -145,11 +174,22 @@ test("a rejected session request keeps the previous model and agent", async () =
   await Bun.write(path.join(statePath, "kv.json"), "{}")
   const events = createEventSource()
   const calls = createFetch((url) => {
-    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }, { name: "plan", mode: "primary" }])
-    if (url.pathname === "/config/providers") return json({
-      providers: [{ id: "test", name: "Test", models: { first: { id: "first", name: "first" },
-        second: { id: "second", name: "second" } } }], default: { test: "first" },
-    })
+    if (url.pathname === "/agent")
+      return json([
+        { name: "build", mode: "primary" },
+        { name: "plan", mode: "primary" },
+      ])
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: { first: { id: "first", name: "first" }, second: { id: "second", name: "second" } },
+          },
+        ],
+        default: { test: "first" },
+      })
   }, events)
   let rejected = 0
   const fetch = (async (request: RequestInfo | URL) => {
@@ -182,6 +222,7 @@ async function mountLocal(
   statePath: string,
   fetch: typeof globalThis.fetch,
   events: ReturnType<typeof createEventSource>,
+  tuiInput: Parameters<typeof createTuiResolvedConfig>[0] = {},
 ) {
   let local!: ReturnType<typeof useLocal>
   let route!: ReturnType<typeof useRoute>
@@ -197,43 +238,88 @@ async function mountLocal(
     dialog = useDialog()
     return null
   }
-  const app = await testRender(() => {
-    const renderer = useRenderer()
-    const keymap = createDefaultOpenTuiKeymap(renderer)
-    const config = createTuiResolvedConfig()
-    onCleanup(registerOpencodeKeymap(keymap, renderer, config))
-    return createComponent(OpencodeKeymapProvider, { keymap,
-    get children() { return createComponent(TestTuiContexts, {
-    directory, paths: { state: statePath, home, worktree: home },
-    get children() { return createComponent(ArgsProvider, {
-      get children() { return createComponent(TuiConfigProvider, { config,
-        get children() { return createComponent(KVProvider, {
-          get children() { return createComponent(SDKProvider, { url: "http://test", directory, fetch, events: events.source,
-            get children() { return createComponent(PermissionProvider, {
-              get children() { return createComponent(ProjectProvider, {
-                get children() { return createComponent(ExitProvider, { exit: (error) => { throw error },
-                get children() { return createComponent(RouteProvider, {
-                  get children() { return createComponent(SyncProvider, {
-                    get children() { return createComponent(ThemeProvider, { mode: "dark",
-                      get children() { return createComponent(ToastProvider, {
-                        get children() { return createComponent(LocalProvider, {
-                          get children() { return createComponent(DialogProvider, {
-                            get children() { return createComponent(Probe, {}) },
-                          }) },
-                        }) },
-                      }) },
-                    }) },
-                  }) },
-                }) },
-                }) },
-              }) },
-            }) },
-          }) },
-        }) },
-      }) },
-    }) },
-  }) },
-  }) }, { kittyKeyboard: true, width: 100, height: 50 })
+  const app = await testRender(
+    () => {
+      const renderer = useRenderer()
+      const keymap = createDefaultOpenTuiKeymap(renderer)
+      const config = createTuiResolvedConfig(tuiInput)
+      onCleanup(registerOpencodeKeymap(keymap, renderer, config))
+      return createComponent(OpencodeKeymapProvider, {
+        keymap,
+        get children() {
+          return createComponent(TestTuiContexts, {
+            directory,
+            paths: { state: statePath, home, worktree: home },
+            get children() {
+              return createComponent(ArgsProvider, {
+                get children() {
+                  return createComponent(TuiConfigProvider, {
+                    config,
+                    get children() {
+                      return createComponent(KVProvider, {
+                        get children() {
+                          return createComponent(SDKProvider, {
+                            url: "http://test",
+                            directory,
+                            fetch,
+                            events: events.source,
+                            get children() {
+                              return createComponent(PermissionProvider, {
+                                get children() {
+                                  return createComponent(ProjectProvider, {
+                                    get children() {
+                                      return createComponent(ExitProvider, {
+                                        exit: (error) => {
+                                          throw error
+                                        },
+                                        get children() {
+                                          return createComponent(RouteProvider, {
+                                            get children() {
+                                              return createComponent(SyncProvider, {
+                                                get children() {
+                                                  return createComponent(ThemeProvider, {
+                                                    mode: "dark",
+                                                    get children() {
+                                                      return createComponent(ToastProvider, {
+                                                        get children() {
+                                                          return createComponent(LocalProvider, {
+                                                            get children() {
+                                                              return createComponent(DialogProvider, {
+                                                                get children() {
+                                                                  return createComponent(Probe, {})
+                                                                },
+                                                              })
+                                                            },
+                                                          })
+                                                        },
+                                                      })
+                                                    },
+                                                  })
+                                                },
+                                              })
+                                            },
+                                          })
+                                        },
+                                      })
+                                    },
+                                  })
+                                },
+                              })
+                            },
+                          })
+                        },
+                      })
+                    },
+                  })
+                },
+              })
+            },
+          })
+        },
+      })
+    },
+    { kittyKeyboard: true, width: 100, height: 50 },
+  )
   await wait(() => !!local && local.model.ready && sync.status === "complete")
   return { app, local: () => local, route: () => route, sync: () => sync, sdk: () => sdk, dialog: () => dialog }
 }
@@ -266,8 +352,118 @@ test("favorite categories load old favorites and discard unknown or malformed ca
   })
 })
 
+// test/preload.ts points XDG_CONFIG_HOME at a temp folder, so this is never the real tui.json.
+const tuiFile = path.join(process.env["XDG_CONFIG_HOME"]!, "opencode", "tui.json")
+
+function readTui(): Record<string, unknown> {
+  try {
+    return JSON.parse(fs.readFileSync(tuiFile, "utf8"))
+  } catch {
+    return {}
+  }
+}
+
+function readTuiLists() {
+  const saved = readTui()
+  return {
+    ...loadModelFavorites({
+      favorite: saved.model_favorites,
+      favoriteCategories: saved.model_favorite_categories,
+      favoriteCategoryColors: saved.model_favorite_category_colors,
+    }),
+    hidden: loadHiddenModels(saved.model_hidden),
+  }
+}
+
+test("favorites and hidden models move from model.json to tui.json once and leave model.json fields intact", async () => {
+  await using tmp = await tmpdir()
+  fs.rmSync(tuiFile, { force: true })
+  const statePath = path.join(tmp.path, "state")
+  const file = path.join(statePath, "model.json")
+  const favorites = ["first", "second"].map((modelID) => ({ providerID: "test", modelID }))
+  const hidden = [{ providerID: "test", modelID: "third" }]
+  const old = { favorite: favorites, hidden, favoriteCategories: [], favoriteCategoryColors: {} }
+  await Bun.write(file, JSON.stringify({ ...old, recent: [favorites[0]] }))
+  await Bun.write(path.join(statePath, "kv.json"), "{}")
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }])
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: Object.fromEntries(["first", "second", "third"].map((id) => [id, { id, name: id }])),
+          },
+        ],
+        default: { test: "first" },
+      })
+  }, events)
+  const mounted = await mountLocal(tmp.path, statePath, calls.fetch, events)
+  const model = mounted.local().model
+  try {
+    await wait(() => model.ready && mounted.sync().status === "complete")
+    await wait(() => readTui().model_hidden !== undefined)
+    expect(readTui().model_favorites).toEqual(favorites)
+    expect(readTui().model_hidden).toEqual(hidden)
+    expect(model.favorite()).toEqual(favorites)
+    expect(model.hidden()).toEqual(hidden)
+    // A later pick writes tui.json only and keeps the old model.json fields as they were.
+    model.toggleFavorite(favorites[0]!)
+    await wait(() => (readTui().model_favorites as unknown[]).length === 1)
+    model.set({ providerID: "test", modelID: "second" }, { recent: true })
+    await wait(() => (JSON.parse(fs.readFileSync(file, "utf8")).recent as unknown[]).length === 2)
+    const rewritten = JSON.parse(fs.readFileSync(file, "utf8"))
+    expect(rewritten.favorite).toEqual(favorites)
+    expect(rewritten.hidden).toEqual(hidden)
+    expect(readTuiLists().favorite).toEqual([favorites[1]])
+  } finally {
+    mounted.app.renderer.destroy()
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
+
+test("a tui.json that already has the list keys wins over model.json and is not migrated over", async () => {
+  await using tmp = await tmpdir()
+  const statePath = path.join(tmp.path, "state")
+  const kept = [{ providerID: "test", modelID: "first" }]
+  await Bun.write(
+    path.join(statePath, "model.json"),
+    JSON.stringify({ favorite: [{ providerID: "test", modelID: "second" }] }),
+  )
+  await Bun.write(path.join(statePath, "kv.json"), "{}")
+  fs.rmSync(tuiFile, { force: true })
+  const events = createEventSource()
+  const calls = createFetch((url) => {
+    if (url.pathname === "/agent") return json([{ name: "build", mode: "primary" }])
+    if (url.pathname === "/config/providers")
+      return json({
+        providers: [
+          {
+            id: "test",
+            name: "Test",
+            models: { first: { id: "first", name: "first" }, second: { id: "second", name: "second" } },
+          },
+        ],
+        default: { test: "first" },
+      })
+  }, events)
+  const mounted = await mountLocal(tmp.path, statePath, calls.fetch, events, { model_favorites: kept })
+  const model = mounted.local().model
+  try {
+    await wait(() => model.ready && mounted.sync().status === "complete")
+    expect(model.favorite()).toEqual(kept)
+    expect(readTui().model_favorites).toBeUndefined()
+  } finally {
+    mounted.app.renderer.destroy()
+    await wait(() => !fs.readdirSync(statePath).some((name) => name.endsWith(".tmp")))
+  }
+})
+
 test("favorite categories persist assignments, rename and reorder, preserving models and cycling", async () => {
   await using tmp = await tmpdir()
+  fs.rmSync(tuiFile, { force: true })
   const statePath = path.join(tmp.path, "state")
   const file = path.join(statePath, "model.json")
   const favorites = ["first", "second", "third", "fourth"].map((modelID) => ({ providerID: "test", modelID }))
@@ -325,12 +521,13 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
     model.renameFavoriteCategory("Code", "Coding")
     expect(model.favorite().filter((item) => item.category === "Coding").length).toBe(2)
     expect(model.favoriteCategoryColors()).toEqual({ Coding: "#a78bfa" })
-    await wait(() => JSON.parse(fs.readFileSync(file, "utf8")).favoriteCategories?.includes("Coding"))
-    const saved = await Bun.file(file).json()
-    expect(loadModelFavorites(saved)).toEqual({
+    await wait(() => !!(readTui().model_favorite_categories as string[] | undefined)?.includes("Coding"))
+    await wait(() => JSON.stringify(readTuiLists().favorite) === JSON.stringify(model.favorite()))
+    expect(readTuiLists()).toEqual({
       favorite: [...model.favorite()],
       favoriteCategories: ["Research", "Coding"],
       favoriteCategoryColors: { Coding: "#a78bfa" },
+      hidden: [],
     })
     const current = model.current()?.modelID
     await model.cycleFavorite(1)
@@ -356,12 +553,12 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
     model.toggleFavorite(favorites[1]!)
     expect(model.favorite()[0]!.category).toBeUndefined()
     model.deleteFavoriteCategory("Research")
-    await wait(() => JSON.parse(fs.readFileSync(file, "utf8")).favoriteCategories?.length === 0)
-    expect((await Bun.file(file).json()).favorite).toEqual(model.favorite())
+    await wait(() => readTuiLists().favoriteCategories.length === 0)
+    await wait(() => JSON.stringify(readTuiLists().favorite) === JSON.stringify(model.favorite()))
   } finally {
     mounted.app.renderer.destroy()
     await wait(() => {
-      const saved = JSON.parse(fs.readFileSync(file, "utf8"))
+      const saved = readTuiLists()
       return (
         JSON.stringify(saved.favorite) === JSON.stringify(model.favorite()) &&
         JSON.stringify(saved.favoriteCategories) === JSON.stringify(model.favoriteCategories())
@@ -373,6 +570,7 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
 
 test("model menu nests category headings and creates, assigns and manages them without selecting a model", async () => {
   await using tmp = await tmpdir()
+  fs.rmSync(tuiFile, { force: true })
   const statePath = path.join(tmp.path, "state")
   const file = path.join(statePath, "model.json")
   const favorites = ["first", "second", "third"].map((modelID) => ({ providerID: "test", modelID }))
@@ -475,7 +673,10 @@ test("model menu nests category headings and creates, assigns and manages them w
     await app.waitForVisualIdle()
     expect(frame().indexOf("Research")).toBeLessThan(frame().indexOf("Code"))
     // Favorites heading shows only while an uncategorized favorite exists.
-    const headingRow = () => frame().split("\n").findIndex((line) => line.trim() === "Favorites")
+    const headingRow = () =>
+      frame()
+        .split("\n")
+        .findIndex((line) => line.trim() === "Favorites")
     model.assignFavoriteCategory(favorites[0]!, "Code")
     await app.waitForVisualIdle()
     expect(headingRow()).toBe(-1)
@@ -492,7 +693,7 @@ test("model menu nests category headings and creates, assigns and manages them w
   } finally {
     app.renderer.destroy()
     await wait(() => {
-      const saved = JSON.parse(fs.readFileSync(file, "utf8"))
+      const saved = readTuiLists()
       return (
         JSON.stringify(saved.favorite) === JSON.stringify(model.favorite()) &&
         JSON.stringify(saved.favoriteCategories) === JSON.stringify(model.favoriteCategories())
@@ -520,7 +721,8 @@ test("moves a favorite across a category edge into the neighboring category", ()
   const a2 = { providerID: "p", modelID: "a2", category: "A" }
   const b = { providerID: "p", modelID: "b", category: "B" }
   const favorites = [a, free, b, a2]
-  const ids = (list: { modelID: string; category?: string }[]) => list.map((item) => `${item.modelID}:${item.category ?? "-"}`)
+  const ids = (list: { modelID: string; category?: string }[]) =>
+    list.map((item) => `${item.modelID}:${item.category ?? "-"}`)
 
   // Down from the last uncategorized favorite lands first in A
   expect(ids(moveModelFavorite(favorites, free, 1, ["A", "B", "Empty"]))).toEqual(["free:A", "a:A", "b:B", "a2:A"])
@@ -579,9 +781,9 @@ test("matches existing resolution when no session override exists", () => {
   const agent = { providerID: "agent", modelID: "d" }
   const fallback = { providerID: "fallback", modelID: "e" }
 
-  expect(
-    resolveSessionModel(undefined, selected, cli, agent, fallback),
-  ).toEqual(resolveCurrentModel(selected, cli, agent, fallback))
+  expect(resolveSessionModel(undefined, selected, cli, agent, fallback)).toEqual(
+    resolveCurrentModel(selected, cli, agent, fallback),
+  )
 })
 
 test("uses an explicit session selection across agent names", () => {
@@ -589,12 +791,8 @@ test("uses an explicit session selection across agent names", () => {
   const agentA = { providerID: "agent-a", modelID: "model" }
   const agentB = { providerID: "agent-b", modelID: "model" }
 
-  expect(
-    resolveSessionModel(session, undefined, undefined, agentA, agentB),
-  ).toEqual(session)
-  expect(
-    resolveSessionModel(session, undefined, undefined, agentB, agentA),
-  ).toEqual(session)
+  expect(resolveSessionModel(session, undefined, undefined, agentA, agentB)).toEqual(session)
+  expect(resolveSessionModel(session, undefined, undefined, agentB, agentA)).toEqual(session)
 })
 
 test("keeps agent defaults for a session without an override", () => {
@@ -610,10 +808,7 @@ test("keeps a session override ahead of CLI and fallback choices", () => {
   const agent = { providerID: "agent", modelID: "model" }
   const fallback = { providerID: "fallback", modelID: "model" }
 
-  expect(
-
-    resolveSessionModel(session, undefined, cli, agent, fallback),
-  ).toEqual(session)
+  expect(resolveSessionModel(session, undefined, cli, agent, fallback)).toEqual(session)
   expect(resolveSessionModel(undefined, undefined, cli, agent, fallback)).toEqual(cli)
 })
 
@@ -638,5 +833,4 @@ test("uses the session agent ahead of the last selected and CLI agents", () => {
 
 test("prunes only the deleted session agent", () => {
   expect(pruneSessionAgents({ first: "plan", second: "build" }, "first")).toEqual({ second: "build" })
-
 })

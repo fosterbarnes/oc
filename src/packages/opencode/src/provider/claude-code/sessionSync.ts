@@ -159,7 +159,7 @@ async function askFreshConversation(turn: TurnContext, reason: string, abortSign
   // The shared client is bound to whichever instance booted last; the TUI
   // replies to the session's own instance, so the question must live there.
   const response = await client.post({
-    url: `/question/ask?directory=${encodeURIComponent(turn.cwd)}`,
+    url: `/question/ask?directory=${encodeURIComponent(turn.directory)}`,
     body: {
       sessionID: turn.affinity,
       questions: [

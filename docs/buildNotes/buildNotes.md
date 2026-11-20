@@ -131,6 +131,31 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-20 (~02:04) - v0.2.399 fruitGatana - Roast fixes WP2 plus favorites in tui.json - Claude Opus 5.5, low (workers: Opus 5.5 high, Sonnet 5.5 high x2); Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified (no two-project resident server run, no /reload check, no sleep/wake lock check, no favorites sync between machines)
+- Version: 0.2.399
+- Plan: `~/.config/opencode/plans/oc-roast-fixes.md` WP2 (2.1-2.3) and WP1 1.11.
+- Fixed 2.1 claude-code on the multi-project resident server: `runtimeStatus.ts` `fetchSessionRunState(session, directory)` and `getRuntimeMcpStatus(directory)` pass `{ query: { directory } }`; `turnContext.ts` adds `turn.directory` (from `fetchSessionDirectory`, else cwd); `proxyBroker.ts` `PendingProxyCall.directory` (4th param of `queuePendingProxyCall`); `isProxyCallStillServed` asks the call's own project, so a proxied call past its 10 min deadline is no longer rejected as idle. Also routed through `turn.directory`: `/question/ask` (`sessionSync.ts`), wake target and scheduled resume (`turnStream.ts`), proxy server, skill list, tool list (`spawnPlanning.ts`). `agentModels.ts` keeps one registry per directory (`index.ts` builds it from the plugin's own directory). `skillPlugin.ts` uses one folder per link-set hash, no shared `rmSync`, prunes folders unused for a day. Removed unused `resolveSpawnCwdForSession`, `getAgentRegistry`. Still process-wide: `defaultSubagentModel`, toasts.
+- Fixed 2.2 `server/routes/instance/httpapi/server.ts` `createRoutes` reuses `locationServiceMapLayer` instead of `buildLocationServiceMap()` (one map per project; /reload disposers cover it). Logged in `UPSTREAM-SYNC.md` Custom Behavior (upstream v1 has the double map).
+- Fixed 2.3 `core/src/util/flock.ts` opt-in `checkOwner`: before breaking a stale lock, a live owner on the same host (pid alive, FILETIME start at or before `createdAt`, `processTree` loaded dynamically) keeps it; unsupported or failed probe falls back to the age rule. `session/run-state.ts` passes `checkOwner: true`. `run-state.test.ts` polls instead of sleeping 100 ms.
+- Added 1.11 favorites/hidden models move from `model.json` to tui.json keys `model_favorites`, `model_favorite_categories`, `model_favorite_category_colors`, `model_hidden` (`tui/src/config/index.tsx` lenient schemas, checked per entry on load, so one bad synced entry cannot drop the whole tui.json). `context/local.tsx` reads them from tuiConfig (synced changes reload), writes via `persistTuiSetting`, migrates once from `model.json` when tui.json has none of the keys; `model.json` keeps recent/variant/session and its old list fields untouched. Risk: two TUIs starting at once both migrate (same data).
+- Added `tui/test/preload.ts` (+ `bunfig.toml` test preload): points `XDG_CONFIG_HOME` at a temp folder so tui tests never write the real tui.json.
+- MISTAKE: a worker made its first `runtimeStatus.ts` edit through a Python script; oc subagents' bash is not covered by the Claude Code shell-write hook.
+- Verification: `bun turbo typecheck --force` 16/16 uncached; core `flock` 14 pass; opencode run-state, runtimeStatusSessions, skillPlugin, broker, sessionSync, accountPool, httpapi-listen 108 pass 0 fail; whole tui suite (preload changed) 804 pass, 12 skip, 0 fail. Not run: live resident server with two projects, /reload, sleep/wake, cross-machine favorites sync.
+
+### User
+Shared server
+- Claude Code chats in different projects on the shared oc server no longer read each other's status, agents, or skills; a long-running Claude tool call is no longer cancelled after 10 minutes because another project was opened.
+- Each project's file watchers and plugins start once instead of twice, and /reload refreshes all of it.
+- A chat is no longer taken over by a second window after the laptop wakes from sleep while the first window still runs it.
+
+Models
+- Favorite and hidden models now sync and export with your other settings; existing favorites move over automatically.
+
+---
+
 ## 2026-11-20 (~01:47) - v0.2.398 fugHou - Roast fixes WP1: settings and sync data safety - Claude Opus 5.5, low (workers: Opus 5.5 high, Sonnet 5.5 medium and high); Implementation
 
 ### Agent

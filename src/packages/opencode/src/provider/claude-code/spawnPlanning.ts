@@ -247,8 +247,12 @@ export function resolvedProxyMcpTools(
  * "the registry answered and has no `question` entry" from "nobody
  * answered": only the former is a real version-gate signal.
  */
-export async function fetchLiveToolInfo(config: ClaudeCodeConfig, modelId: string): Promise<LiveToolInfo> {
-  const items = await fetchOpencodeToolList(config.provider, modelId, config.cwd)
+export async function fetchLiveToolInfo(
+  config: ClaudeCodeConfig,
+  modelId: string,
+  directory: string,
+): Promise<LiveToolInfo> {
+  const items = await fetchOpencodeToolList(config.provider, modelId, directory)
   const question = items?.find((item) => item.id === "question")
   return {
     resolved: items !== undefined,
@@ -273,10 +277,14 @@ export function stripContextRemindersEnabled(config: ClaudeCodeConfig): boolean 
 }
 
 /** Share one lazy registry request within a turn without making it stale. */
-export function createLiveToolInfoLoader(config: ClaudeCodeConfig, modelId: string): () => Promise<LiveToolInfo> {
+export function createLiveToolInfoLoader(
+  config: ClaudeCodeConfig,
+  modelId: string,
+  directory: string,
+): () => Promise<LiveToolInfo> {
   let pending: Promise<LiveToolInfo> | undefined
   return () => {
-    pending ??= fetchLiveToolInfo(config, modelId)
+    pending ??= fetchLiveToolInfo(config, modelId, directory)
     return pending
   }
 }
@@ -289,11 +297,12 @@ export async function ensureProxyServer(
   config: ClaudeCodeConfig,
   tools: ProxyToolDef[],
   sessionKeyForCalls: string,
+  directory: string,
 ): Promise<ProxyMcpServer> {
   const timeoutOverrides = config.proxyToolTimeoutMs
   const srv = await createProxyMcpServer(tools, timeoutOverrides)
   srv.calls.on("call", (call: ProxyToolCall) => {
-    queuePendingProxyCall(sessionKeyForCalls, call, timeoutOverrides)
+    queuePendingProxyCall(sessionKeyForCalls, call, timeoutOverrides, directory)
   })
   return srv
 }
@@ -350,12 +359,12 @@ export async function planSpawn(input: {
   }
 
   // Started alongside the tool plan; only used when that plan leaves Claude's `Skill` on.
-  const skillsFetch = fetchOpencodeSkills(turn.cwd)
+  const skillsFetch = fetchOpencodeSkills(turn.directory)
   const tools = await assembleProxyTools(input)
   const skillOn = tools.cliTools ? tools.cliTools.includes("Skill") : !tools.disallowed.includes("Skill")
   const skills = skillOn ? await skillsFetch : undefined
   const proxyServer =
-    tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey) : null
+    tools.combined.length > 0 ? await ensureProxyServer(config, tools.combined, turn.sessionKey, turn.directory) : null
   const mcp = effectiveMcpConfig(config, turn.cwd, proxyServer?.configPath(), input.runtimeStatus)
   const systemPromptFile = systemPrompt(
     buildToolEnvironmentNote(

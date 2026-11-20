@@ -12,7 +12,7 @@ import {
   resolveOpencodeAgentPrompt,
   resolveSessionAffinity,
 } from "./callOptions.js"
-import { resolveSpawnCwdForSession } from "./runtimeStatus.js"
+import { fetchSessionDirectory, getOpencodeProjectDirectory, resolveSpawnCwdFrom } from "./runtimeStatus.js"
 import { deleteActiveProcess, deleteClaudeSessionId, sessionKey } from "./sessionManager.js"
 import { requestScope, isNamingAgent } from "./title.js"
 
@@ -27,7 +27,14 @@ export async function resolveTurnContext(
 ) {
   const scope = requestScope(options)
   const affinity = resolveSessionAffinity(options.providerOptions, config.provider)
-  const cwd = await resolveSpawnCwdForSession(config.cwd, affinity)
+  // The session's own project. Authoritative for `opencode serve`, where one
+  // process serves many projects and `process.cwd()` is the launch folder.
+  const sessionDirectory = await fetchSessionDirectory(affinity)
+  const cwd = resolveSpawnCwdFrom(config.cwd, process.cwd(), getOpencodeProjectDirectory(), sessionDirectory)
+  // The opencode instance this turn belongs to, for every per-project client
+  // call. Unlike `cwd` it ignores a configured cwd; the shared client would
+  // otherwise route to whichever project booted last.
+  const directory = sessionDirectory ?? cwd
   const agent = resolveOpencodeAgent(options.providerOptions, config.provider)
   // An oc compaction runs Claude Code's own `/compact` inside the live conversation.
   const compactionMode = agent === "compaction"
@@ -42,16 +49,17 @@ export async function resolveTurnContext(
   // names its model explicitly (`task` with `model`) keeps it.
   const effectiveModelId = hasExplicitModel(options.providerOptions, config.provider)
     ? modelId
-    : resolveAgentModel(agent, modelId)
+    : resolveAgentModel(agent, modelId, { directory })
   const reasoningEffort = compactionMode
     ? undefined
-    : (resolveAgentEffort(agent, readReasoningEffort(options.providerOptions, config.provider)) as
+    : (resolveAgentEffort(agent, readReasoningEffort(options.providerOptions, config.provider), { directory }) as
         | ReasoningEffort
         | undefined)
   return {
     scope,
     affinity,
     cwd,
+    directory,
     agent,
     // oc's own model and variant names, for a wake prompt (sessionManager.ts).
     modelId,

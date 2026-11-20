@@ -46,12 +46,13 @@ import { toFinishReason, toUsage } from "./usage.js"
 /**
  * Whether opencode is still serving a proxied call whose deadline just passed.
  * A busy session means a permission prompt is open or the tool is running.
+ * Asked of the session's own instance: another project's reads it as idle.
  */
 export async function isProxyCallStillServed(callId: string): Promise<boolean> {
   const pending = findPendingProxyCall(callId)
   if (!pending) return false
   const session = describeSessionKey(pending.sessionKey).session
-  return (await fetchSessionRunState(session)) === "busy"
+  return (await fetchSessionRunState(session, pending.directory)) === "busy"
 }
 
 setProxyDeadlineGuard(({ callId }) => isProxyCallStillServed(callId))
@@ -198,7 +199,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
     // One MCP status snapshot per turn, so the hot-reload check and the spawn
     // agree. The CLI version decides which optional flags the spawn may pass.
     const [runtimeStatus, cliVersion] = await Promise.all([
-      turn.compactionMode ? undefined : getRuntimeMcpStatus(),
+      turn.compactionMode ? undefined : getRuntimeMcpStatus(turn.directory),
       detectCliVersion(this.config.cliPath),
     ])
 
@@ -240,7 +241,7 @@ export class ClaudeCodeLanguageModel implements LanguageModelV3 {
       runtimeStatus,
       cliVersion,
       proxyTools,
-      loadLiveToolInfo: createLiveToolInfoLoader(this.config, this.modelId),
+      loadLiveToolInfo: createLiveToolInfoLoader(this.config, this.modelId, turn.directory),
       notice,
     })
     return { stream, request: { body: { text: userMsg } }, response: { headers: {} } }

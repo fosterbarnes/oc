@@ -1,4 +1,4 @@
-import { createStore } from "solid-js/store"
+import { createStore, reconcile } from "solid-js/store"
 import { createSimpleContext } from "./helper"
 import { batch, createEffect, createMemo } from "solid-js"
 import { useSync } from "./sync"
@@ -15,6 +15,8 @@ import { useRoute } from "./route"
 import { usePermission } from "./permission"
 import { Locale } from "../util/locale"
 import { errorMessage } from "../util/error"
+import { useTuiConfig } from "../config"
+import { persistTuiSetting } from "../ocSettings"
 
 export type LocalTheme = {
   secondary: RGBA
@@ -51,6 +53,7 @@ export function recentModels(
 }
 
 export type ModelFavorite = { providerID: string; modelID: string; category?: string }
+type ModelHidden = { providerID: string; modelID: string }
 
 // Favorite category heading colors: a theme color name or a hex value
 export const FAVORITE_CATEGORY_THEME_COLORS: readonly string[] = [
@@ -101,6 +104,15 @@ export function loadModelFavorites(value: Record<string, unknown>) {
         )
       : {}
   return { favorite, favoriteCategories: categories, favoriteCategoryColors: colors as Record<string, string> }
+}
+
+export function loadHiddenModels(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((item) =>
+    item && typeof item.providerID === "string" && typeof item.modelID === "string"
+      ? [{ providerID: item.providerID, modelID: item.modelID }]
+      : [],
+  )
 }
 
 // Swaps with the next favorite in the same category. At a category edge the favorite joins the
@@ -195,6 +207,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
     const args = useArgs()
     const event = useEvent()
     const permission = usePermission()
+    const tuiConfig = useTuiConfig()
 
     // Background saves never block input; a failed write is reported, not left unhandled.
     function persist(filePath: string, value: unknown) {
@@ -435,7 +448,19 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
       const filePath = path.join(paths.state, "model.json")
       const state = {
         pending: false,
+        // tui.json list writes in flight; plain on purpose, the reload effect must not rerun when it drops
+        saving: 0,
       }
+      // Favorites and hidden models live in tui.json so they sync and export. The old model.json
+      // fields are written back untouched (migration source, never deleted).
+      const legacy: Record<string, unknown> = {}
+      const hasListKeys = () =>
+        [
+          tuiConfig.model_favorites,
+          tuiConfig.model_favorite_categories,
+          tuiConfig.model_favorite_category_colors,
+          tuiConfig.model_hidden,
+        ].some((item) => item !== undefined)
 
       function save() {
         if (!modelStore.ready) {
@@ -444,14 +469,44 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
         }
         state.pending = false
         persist(filePath, {
+          ...legacy,
           recent: modelStore.recent,
-          favorite: modelStore.favorite,
-          favoriteCategories: modelStore.favoriteCategories,
-          favoriteCategoryColors: modelStore.favoriteCategoryColors,
-          hidden: modelStore.hidden,
           variant: modelStore.variant,
           session: modelStore.session,
         })
+      }
+
+      function applyLists(favorites: ReturnType<typeof loadModelFavorites>, hidden: ModelHidden[]) {
+        batch(() => {
+          setModelStore("favorite", favorites.favorite)
+          setModelStore("favoriteCategories", favorites.favoriteCategories)
+          setModelStore("favoriteCategoryColors", reconcile(favorites.favoriteCategoryColors))
+          setModelStore("hidden", hidden)
+        })
+      }
+
+      // A reload from another machine's sync or an edit updates the lists. Skipped while this
+      // TUI's own writes are queued, so a stale reload cannot undo a pick the file has not caught up to.
+      createEffect(() => {
+        if (!hasListKeys() || state.saving > 0) return
+        applyLists(
+          loadModelFavorites({
+            favorite: tuiConfig.model_favorites,
+            favoriteCategories: tuiConfig.model_favorite_categories,
+            favoriteCategoryColors: tuiConfig.model_favorite_category_colors,
+          }),
+          loadHiddenModels(tuiConfig.model_hidden),
+        )
+      })
+
+      function saveLists() {
+        state.saving++
+        void Promise.all([
+          persistTuiSetting(["model_favorites"], [...modelStore.favorite], toast),
+          persistTuiSetting(["model_favorite_categories"], [...modelStore.favoriteCategories], toast),
+          persistTuiSetting(["model_favorite_category_colors"], { ...modelStore.favoriteCategoryColors }, toast),
+          persistTuiSetting(["model_hidden"], [...modelStore.hidden], toast),
+        ]).finally(() => state.saving--)
       }
 
       readJson<unknown>(filePath)
@@ -459,11 +514,21 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (!x || typeof x !== "object") return
           const value = x as Record<string, unknown>
           if (Array.isArray(value.recent)) setModelStore("recent", value.recent)
-          const favorites = loadModelFavorites(value)
-          setModelStore("favorite", favorites.favorite)
-          setModelStore("favoriteCategories", favorites.favoriteCategories)
-          setModelStore("favoriteCategoryColors", favorites.favoriteCategoryColors)
-          if (Array.isArray(value.hidden)) setModelStore("hidden", value.hidden)
+          Object.assign(
+            legacy,
+            Object.fromEntries(
+              ["favorite", "favoriteCategories", "favoriteCategoryColors", "hidden"]
+                .filter((key) => value[key] !== undefined)
+                .map((key) => [key, value[key]]),
+            ),
+          )
+          // One-time move: tui.json without any of the list keys takes the model.json lists.
+          if (!hasListKeys()) {
+            const favorites = loadModelFavorites(value)
+            const hidden = loadHiddenModels(value.hidden)
+            applyLists(favorites, hidden)
+            if (favorites.favorite.length || favorites.favoriteCategories.length || hidden.length) saveLists()
+          }
           if (typeof value.variant === "object" && value.variant !== null)
             setModelStore("variant", value.variant as Record<string, string | undefined>)
           if (typeof value.session === "object" && value.session !== null)
@@ -625,7 +690,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           if (color !== undefined && !isFavoriteCategoryColor(color)) return
           // Solid stores delete a key set to undefined
           setModelStore("favoriteCategoryColors", name, color)
-          save()
+          saveLists()
         },
         assignFavoriteCategory(model: { providerID: string; modelID: string }, category?: string) {
           if (category !== undefined && !modelStore.favoriteCategories.includes(category)) return
@@ -636,7 +701,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
                 : item,
             ),
           )
-          save()
+          saveLists()
         },
         renameFavoriteCategory(previous: string | undefined, input: string) {
           const name = input.trim()
@@ -656,14 +721,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
             setModelStore("favoriteCategoryColors", previous, undefined)
             setModelStore("favoriteCategoryColors", name, color)
           })
-          save()
+          saveLists()
         },
         moveFavoriteCategory(name: string, direction: -1 | 1) {
           const index = modelStore.favoriteCategories.indexOf(name)
           const next = index + direction
           if (index < 0 || next < 0 || next >= modelStore.favoriteCategories.length) return
           setModelStore("favoriteCategories", (list) => list.with(index, list[next]!).with(next, name))
-          save()
+          saveLists()
         },
         deleteFavoriteCategory(name: string) {
           batch(() => {
@@ -675,7 +740,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               ),
             )
           })
-          save()
+          saveLists()
         },
         hidden() {
           return modelStore.hidden
@@ -808,14 +873,14 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               ? modelStore.favorite.filter((x) => x.providerID !== model.providerID || x.modelID !== model.modelID)
               : [{ providerID: model.providerID, modelID: model.modelID }, ...modelStore.favorite]
             setModelStore("favorite", next)
-            save()
+            saveLists()
           })
         },
         moveFavorite(model: { providerID: string; modelID: string }, direction: -1 | 1) {
           const next = moveModelFavorite(modelStore.favorite, model, direction, modelStore.favoriteCategories)
           if (next === modelStore.favorite) return
           setModelStore("favorite", next)
-          save()
+          saveLists()
         },
         // Hiding also unfavorites, so favorite cycling never lands on a hidden model
         toggleHidden(model: { providerID: string; modelID: string }) {
@@ -825,12 +890,12 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
           batch(() => {
             if (modelStore.hidden.some(same)) {
               setModelStore("hidden", (list) => list.filter((x) => !same(x)))
-              save()
+              saveLists()
               return
             }
             setModelStore("hidden", (list) => [item, ...list])
             setModelStore("favorite", (list) => list.filter((x) => !same(x)))
-            save()
+            saveLists()
           })
         },
         variant: {

@@ -7,7 +7,7 @@
  * loads itself (anything under a `<configDir>/skills` folder) are left out so
  * they never appear twice.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
@@ -20,8 +20,8 @@ export type SkillSource = { name: string; location: string }
 const PLUGIN_NAME = "oc"
 const SAFE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-/** Hash of the linked set, so an unchanged skill set is never rebuilt. */
-let builtHash: string | undefined
+/** A link-set folder unused this long is pruned; a live `claude` may still read a younger one. */
+const STALE_FOLDER_MS = 24 * 60 * 60_000
 
 /** oc's live skill list for a directory, or undefined when opencode did not answer. */
 export async function fetchOpencodeSkills(directory: string): Promise<SkillSource[] | undefined> {
@@ -58,6 +58,10 @@ export function poolSkillsDir(account: string): string {
  * undefined when no skill needs linking. `root` is a seam for checks.
  * `accountSkillsDir` is the spawning account's own skills folder
  * (poolSkillsDir); skills it already loads are left out.
+ *
+ * One folder per link set under `root`: projects on one resident server can
+ * link different skills, and a running `claude` keeps reading its folder, so
+ * a build never replaces another set's folder in place.
  */
 export function ensureSkillPlugin(
   skills: readonly SkillSource[],
@@ -72,19 +76,30 @@ export function ensureSkillPlugin(
     .toSorted((a, b) => a.name.localeCompare(b.name))
   if (links.length === 0) return undefined
 
-  const hash = Bun.hash(JSON.stringify([root, links])).toString(36)
-  const skillsDir = path.join(root, "skills")
-  if (builtHash === hash && existsSync(skillsDir)) return root
+  const hash = Bun.hash(JSON.stringify(links)).toString(36)
+  const folder = path.join(root, hash)
+  // Written last, so a folder without it is a build that died partway.
+  const manifest = path.join(folder, ".claude-plugin", "plugin.json")
+  const now = new Date()
+  if (existsSync(manifest)) {
+    // Marks the folder in use, so the prune below spares it.
+    utimesSync(folder, now, now)
+    return folder
+  }
 
   // Junctions are removed without touching the skill folders they point at.
-  rmSync(skillsDir, { recursive: true, force: true })
-  mkdirSync(skillsDir, { recursive: true })
-  mkdirSync(path.join(root, ".claude-plugin"), { recursive: true })
-  writeFileSync(path.join(root, ".claude-plugin", "plugin.json"), JSON.stringify({ name: PLUGIN_NAME }))
-  for (const link of links) symlinkSync(link.target, path.join(skillsDir, link.name), "junction")
-  builtHash = hash
-  log.info("linked oc skills for claude code", { root, skills: links.length })
-  return root
+  rmSync(folder, { recursive: true, force: true })
+  mkdirSync(path.join(folder, "skills"), { recursive: true })
+  for (const link of links) symlinkSync(link.target, path.join(folder, "skills", link.name), "junction")
+  mkdirSync(path.dirname(manifest), { recursive: true })
+  writeFileSync(manifest, JSON.stringify({ name: PLUGIN_NAME }))
+  for (const entry of readdirSync(root)) {
+    const stale = path.join(root, entry)
+    const mtimeMs = statSync(stale, { throwIfNoEntry: false })?.mtimeMs ?? now.getTime()
+    if (entry !== hash && now.getTime() - mtimeMs > STALE_FOLDER_MS) rmSync(stale, { recursive: true, force: true })
+  }
+  log.info("linked oc skills for claude code", { folder, skills: links.length })
+  return folder
 }
 
 function isClaudeSkill(location: string) {

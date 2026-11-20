@@ -15,6 +15,8 @@ export interface PendingProxyCall {
   toolName: string
   input: Record<string, unknown>
   signal?: AbortSignal
+  /** The opencode session's project, so a status lookup asks its own instance. */
+  directory?: string
 }
 
 type InternalPending = PendingProxyCall & {
@@ -113,6 +115,7 @@ export function queuePendingProxyCall(
   sessionKey: string,
   call: ProxyToolCall,
   timeoutOverrides?: Record<string, number>,
+  directory?: string,
   /** Test seam, same shape as `createProxyMcpServer`'s `keepaliveMs`. */
   stallWarningMs: number = PROXY_STALL_WARNING_MS,
   /** Test seam: lower it so a short test deadline still warns. */
@@ -211,6 +214,7 @@ export function queuePendingProxyCall(
     toolName: call.toolName,
     input: call.input,
     signal: call.signal,
+    directory,
     createdAt: Date.now(),
     deadlineMs,
     timer,

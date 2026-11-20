@@ -123,14 +123,17 @@ describe("util.flock", () => {
     expect(contention).toMatchObject({ key: "held", name: "FlockContentionError" })
     const file = path.join(tmp.path, "file")
     await fs.writeFile(file, "not a directory")
-    const filesystem = await Flock.acquire("failure", { dir: path.join(file, "locks") })
-      .catch((error: unknown) => error)
+    const filesystem = await Flock.acquire("failure", { dir: path.join(file, "locks") }).catch(
+      (error: unknown) => error,
+    )
     expect(filesystem).toBeInstanceOf(Error)
     expect(filesystem).not.toBeInstanceOf(Flock.ContentionError)
     const controller = new AbortController()
     const cancelled = new Error("cancelled")
     const aborted = Flock.acquire("held", {
-      dir, signal: controller.signal, onWait: () => controller.abort(cancelled),
+      dir,
+      signal: controller.signal,
+      onWait: () => controller.abort(cancelled),
     }).catch((error: unknown) => error)
     expect(await aborted).toBe(cancelled)
   })
@@ -418,6 +421,61 @@ describe("util.flock", () => {
       },
     )
     expect(hit).toBe(true)
+  })
+
+  describe("checkOwner", () => {
+    // A lock owned by `pid` on this host, taken just now (so a live test process started before it) with a
+    // heartbeat that went stale.
+    async function staleLock(dir: string, key: string, pid: number) {
+      const lockDir = lock(dir, key)
+      await fs.mkdir(lockDir, { recursive: true })
+      await fs.writeFile(path.join(lockDir, "heartbeat"), "")
+      await fs.writeFile(
+        path.join(lockDir, "meta.json"),
+        JSON.stringify({
+          token: "other",
+          pid,
+          hostname: os.hostname(),
+          createdAt: new Date().toISOString(),
+        }),
+      )
+      const old = new Date(Date.now() - 5_000)
+      await fs.utimes(path.join(lockDir, "heartbeat"), old, old)
+    }
+
+    async function deadPid() {
+      const child = spawn(process.execPath, ["-e", "0"])
+      await new Promise((resolve) => child.on("close", resolve))
+      return child.pid!
+    }
+
+    const opts = (dir: string, checkOwner?: boolean) => ({ dir, staleMs: 200, timeoutMs: 0, checkOwner })
+
+    test("keeps a stale lock whose owner is alive", async () => {
+      await using tmp = await tmpdir()
+      const dir = path.join(tmp.path, "locks")
+      await staleLock(dir, "flock:owner-alive", process.pid)
+
+      await expect(Flock.acquire("flock:owner-alive", opts(dir, true))).rejects.toBeInstanceOf(Flock.ContentionError)
+    })
+
+    test("breaks a stale lock whose owner is dead", async () => {
+      await using tmp = await tmpdir()
+      const dir = path.join(tmp.path, "locks")
+      await staleLock(dir, "flock:owner-dead", await deadPid())
+
+      const lease = await Flock.acquire("flock:owner-dead", opts(dir, true))
+      await lease.release()
+    })
+
+    test("breaks a stale lock with a live owner when checkOwner is off", async () => {
+      await using tmp = await tmpdir()
+      const dir = path.join(tmp.path, "locks")
+      await staleLock(dir, "flock:owner-ignored", process.pid)
+
+      const lease = await Flock.acquire("flock:owner-ignored", opts(dir))
+      await lease.release()
+    })
   })
 
   test("fails clearly on unwritable lock roots", async () => {

@@ -39,7 +39,11 @@ it.instance("replacement run waits for the cancelled run's finalizers instead of
       const second = yield* state
         .ensureRunning(sessionID, Effect.succeed(result("interrupted")), Effect.succeed(result("second")))
         .pipe(Effect.exit, Effect.forkChild)
-      yield* Effect.sleep("100 millis")
+      // The cancel left the runner Idle, so Running means the replacement run is installed and queued.
+      yield* pollWithTimeout(
+        state.phase(sessionID).pipe(Effect.map((phase) => (phase === "Running" ? true : undefined))),
+        "replacement run never started",
+      )
       expect(second.pollUnsafe()).toBeUndefined()
 
       yield* Deferred.succeed(hold, undefined)

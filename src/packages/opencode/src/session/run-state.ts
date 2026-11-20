@@ -259,7 +259,8 @@ function owned<A>(sessionID: SessionID, work: Effect.Effect<A>) {
   return permit.withPermits(1)(
     Effect.acquireRelease(
       Effect.tryPromise({
-        try: (signal) => Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, signal }),
+        try: (signal) =>
+          Flock.acquire(`session:${sessionID}`, { timeoutMs: 0, staleMs: 15_000, checkOwner: true, signal }),
         catch: (cause) =>
           cause instanceof Flock.ContentionError
             ? new HeldElsewhereError("Session is running in another oc process", { cause })

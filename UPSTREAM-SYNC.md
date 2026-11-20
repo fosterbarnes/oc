@@ -64,6 +64,11 @@ Protect these areas when porting upstream changes:
 - `AGENTS.md`, `SCRIPTS.md`, `docs/buildNotes/`, `README.md`, `FORK.md`, `SCOPE.md`, and this guide
 - TUI maintenance display-version behavior in the core, build, plugin, and TUI
   adapter/sidebar paths
+- `createRoutes` in `packages/opencode/src/server/routes/instance/httpapi/server.ts`
+  reuses the shared `locationServiceMapLayer` instead of calling
+  `buildLocationServiceMap()`. Upstream v1 builds a second map there, so each
+  project booted watchers and plugins twice and `/reload` (which disposes the
+  shared map) left the second map stale. Keep the single map when porting.
 
 Do not port changes into upstream areas this fork removed on purpose: the
 browser app (`packages/app`), desktop (`packages/desktop`), the hosted SaaS and

@@ -348,7 +348,7 @@ function stallLines(lines: string[]): string[] {
 test("a call with no deadline warns repeatedly while it waits", async () => {
   const handle = makeCall("task")
   const lines = await captureLogsAsync(async () => {
-    const pending = queuePendingProxyCall("sess-stall", handle.call, undefined, 15)
+    const pending = queuePendingProxyCall("sess-stall", handle.call, undefined, undefined, 15)
     assert.equal(pending.deadlineMs, PROXY_NO_DEADLINE_MS, "task has no deadline")
     await pause(55)
   })
@@ -364,7 +364,7 @@ test("a call with no deadline warns repeatedly while it waits", async () => {
 test("resolving a call stops its stall warnings", async () => {
   const handle = makeCall("task")
   const lines = await captureLogsAsync(async () => {
-    queuePendingProxyCall("sess-stall-stop", handle.call, undefined, 15)
+    queuePendingProxyCall("sess-stall-stop", handle.call, undefined, undefined, 15)
     await pause(25)
     resolvePendingProxyCallById(handle.id, { kind: "text", text: "done" })
     await pause(60)
@@ -378,7 +378,7 @@ test("resolving a call stops its stall warnings", async () => {
 test("rejecting a call stops its stall warnings", async () => {
   const handle = makeCall("task_batch")
   const lines = await captureLogsAsync(async () => {
-    queuePendingProxyCall("sess-stall-reject", handle.call, undefined, 15)
+    queuePendingProxyCall("sess-stall-reject", handle.call, undefined, undefined, 15)
     await pause(25)
     rejectPendingProxyCallById(handle.id, new Error("aborted"))
     await pause(60)
@@ -390,7 +390,7 @@ test("rejecting a call stops its stall warnings", async () => {
 test("a call that has a deadline is never armed, since the deadline reports it", async () => {
   const handle = makeCall("bash", { command: "sleep 1" })
   const lines = await captureLogsAsync(async () => {
-    const pending = queuePendingProxyCall("sess-stall-deadline", handle.call, undefined, 15)
+    const pending = queuePendingProxyCall("sess-stall-deadline", handle.call, undefined, undefined, 15)
     assert.ok(pending.deadlineMs > PROXY_NO_DEADLINE_MS, "bash has a deadline")
     await pause(55)
   })
@@ -401,7 +401,7 @@ test("a call that has a deadline is never armed, since the deadline reports it",
 test("stallWarningMs of 0 arms nothing", async () => {
   const handle = makeCall("task")
   const lines = await captureLogsAsync(async () => {
-    queuePendingProxyCall("sess-stall-off", handle.call, undefined, 0)
+    queuePendingProxyCall("sess-stall-off", handle.call, undefined, undefined, 0)
     await pause(40)
   })
   assert.deepEqual(stallLines(lines), [])
@@ -423,7 +423,7 @@ test("a deadline-bearing call warns once, before the deadline rejects it", async
   const lines = await captureLogsAsync(async (live) => {
     // 200 ms deadline with the minimum lowered to 1 ms, so it arms and warns
     // at 60 percent, which is 120 ms.
-    queuePendingProxyCall("sess-warn", handle.call, { bash: 200 }, 0, 1)
+    queuePendingProxyCall("sess-warn", handle.call, { bash: 200 }, undefined, 0, 1)
     await pause(160)
     // Warned, and the call is still alive: the point is a notice BEFORE
     // death, so both halves are asserted while it is still pending.
@@ -445,7 +445,7 @@ test("a deadline-bearing call warns once, before the deadline rejects it", async
 test("resolving before the warning point means no notice at all", async () => {
   const handle = makeCall("bash", {})
   const lines = await captureLogsAsync(async () => {
-    queuePendingProxyCall("sess-warn-fast", handle.call, { bash: 200 }, 0, 1)
+    queuePendingProxyCall("sess-warn-fast", handle.call, { bash: 200 }, undefined, 0, 1)
     await pause(30)
     resolvePendingProxyCallById(handle.id, { kind: "text", text: "quick" })
     await pause(160)
@@ -457,7 +457,7 @@ test("a short deadline is not armed: the notice would arrive with the rejection"
   const handle = makeCall("bash", {})
   const lines = await captureLogsAsync(async () => {
     // Real minimum this time, so a 200 ms deadline is below the floor.
-    queuePendingProxyCall("sess-warn-short", handle.call, { bash: 200 }, 0)
+    queuePendingProxyCall("sess-warn-short", handle.call, { bash: 200 }, undefined, 0)
     await pause(280)
   })
   assert.deepEqual(deadlineLines(lines), [])
@@ -467,7 +467,7 @@ test("a short deadline is not armed: the notice would arrive with the rejection"
 test("a call with no deadline gets the heartbeat, never this notice", async () => {
   const handle = makeCall("task")
   const lines = await captureLogsAsync(async () => {
-    queuePendingProxyCall("sess-warn-none", handle.call, undefined, 15, 1)
+    queuePendingProxyCall("sess-warn-none", handle.call, undefined, undefined, 15, 1)
     await pause(55)
   })
   assert.deepEqual(deadlineLines(lines), [])

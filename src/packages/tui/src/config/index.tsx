@@ -88,6 +88,20 @@ export const Info = Schema.Struct({
   sidebar_buttons: Schema.optional(Schema.Array(Schema.String)).annotate({
     description: "Sidebar buttons: palette command names in display order; omit for the defaults",
   }),
+  // Model lists are checked entry by entry on load (`loadModelFavorites` in context/local.tsx): a strict
+  // shape here would make one bad synced entry discard the whole tui file.
+  model_favorites: Schema.optional(Schema.Array(Schema.Unknown)).annotate({
+    description: "Favorite models, in menu order: { providerID, modelID, category? }",
+  }),
+  model_favorite_categories: Schema.optional(Schema.Array(Schema.Unknown)).annotate({
+    description: "Favorite category names, in menu order",
+  }),
+  model_favorite_category_colors: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)).annotate({
+    description: "Favorite category heading colors: a theme color name or a hex value, keyed by category",
+  }),
+  model_hidden: Schema.optional(Schema.Array(Schema.Unknown)).annotate({
+    description: "Models hidden from the model list: { providerID, modelID }",
+  }),
   keybind_preset: Schema.optional(Schema.Literals(TuiKeybindPreset.Names)).annotate({
     description: "Keybind layout: 'oc' (default) or 'opencode' (stock OpenCode keys)",
   }),

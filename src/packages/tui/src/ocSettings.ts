@@ -204,8 +204,14 @@ export function persistTuiSetting(
       ]
     | ["subagent_tabs", "click" | "auto_open" | "return_to_parent"]
     | ["palette_keys"]
-    | ["sidebar_buttons"],
-  value: string | boolean | Record<string, string> | readonly string[] | undefined,
+    | ["sidebar_buttons"]
+    | ["model_favorites" | "model_favorite_categories" | "model_favorite_category_colors" | "model_hidden"],
+  value:
+    | string
+    | boolean
+    | Record<string, string | undefined>
+    | readonly (string | Record<string, string | undefined>)[]
+    | undefined,
   toast?: ToastContext,
 ): Promise<boolean> {
   // Resolves false after showing an error toast; never rejects, so `void` callers stay safe.

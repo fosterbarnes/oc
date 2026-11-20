@@ -55,15 +55,13 @@ export type AgentRecord = {
   reasoningEffort?: string
 }
 
-let registry: Record<string, AgentRecord> = {}
+// One registry per project: the resident server boots this plugin once per
+// project directory, and each project reads its own `.opencode/agents`.
+const registries = new Map<string | undefined, Record<string, AgentRecord>>()
 let defaultSubagentModel: string | undefined
 
-export function setAgentRegistry(records: Record<string, AgentRecord>): void {
-  registry = records
-}
-
-export function getAgentRegistry(): Record<string, AgentRecord> {
-  return registry
+export function setAgentRegistry(records: Record<string, AgentRecord>, directory?: string): void {
+  registries.set(directory, records)
 }
 
 /** `undefined` (the default) means no implicit override for any agent. */
@@ -76,7 +74,7 @@ export function getDefaultSubagentModel(): string | undefined {
 }
 
 export function _resetAgentRegistryForTests(): void {
-  registry = {}
+  registries.clear()
   defaultSubagentModel = undefined
 }
 
@@ -133,17 +131,19 @@ export function resolveAgentModel(
   agent: string | undefined,
   modelId: string,
   overrides?: {
+    /** Project whose registry answers; ignored when `records` is given. */
+    directory?: string
     records?: Record<string, AgentRecord>
     defaultSubagentModel?: string
   },
 ): string {
   if (!agent) return modelId
 
-  const record = (overrides?.records ?? registry)[agent]
+  const record = (overrides?.records ?? registries.get(overrides?.directory))?.[agent]
   if (!record) return modelId
   if (record.model?.includes("/")) return modelId
 
-  const fallback = overrides ? overrides.defaultSubagentModel : defaultSubagentModel
+  const fallback = overrides?.records ? overrides.defaultSubagentModel : defaultSubagentModel
   const declared = record.forceModel?.trim()
   const wanted = declared || (record.mode === "subagent" ? fallback : undefined)
   if (!wanted) return modelId
@@ -189,11 +189,11 @@ export function resolveAgentModel(
 export function resolveAgentEffort(
   agent: string | undefined,
   inherited: string | undefined,
-  overrides?: { records?: Record<string, AgentRecord> },
+  overrides?: { directory?: string; records?: Record<string, AgentRecord> },
 ): string | undefined {
   if (!agent) return inherited
 
-  const record = (overrides?.records ?? registry)[agent]
+  const record = (overrides?.records ?? registries.get(overrides?.directory))?.[agent]
   const declared = record?.reasoningEffort?.trim()
   if (!declared) return inherited
 
