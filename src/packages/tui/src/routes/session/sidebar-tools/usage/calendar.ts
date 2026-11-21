@@ -2,7 +2,7 @@ import { projectClaudeUsage, type ClaudeCodeUsage } from "./claude"
 import type { CursorUsage } from "./cursor"
 import { orderUsageWindows, windowName } from "./format"
 import { Locale } from "../../../../util/locale"
-import type { OpenAIUsage, OpenCodeGoUsage } from "./probes"
+import { goUsageWindows, type OpenAIUsage, type OpenCodeGoUsage } from "./probes"
 import { USAGE_PLAN_PROVIDERS, type UsagePlanProvider, type UsageProviderId } from "./providers"
 import { usageWindowStale, type UsageSnapshot, type UsageWindow } from "./snapshot"
 
@@ -119,8 +119,8 @@ export function usageCalendarEvents(
     if (id === "opencode-go") {
       const snapshot = input.go
       if (!snapshot.ok) return []
-      return [snapshot.weekly, snapshot.monthly].flatMap((window) =>
-        window ? reset(`OpenCode Go ${windowName(window.minutes).toLowerCase()} reset`, window, snapshot) : [],
+      return goUsageWindows(snapshot).flatMap((window) =>
+        reset(`OpenCode Go ${windowName(window.minutes).toLowerCase()} reset`, window, snapshot),
       )
     }
     if (id !== "claude-code") return []

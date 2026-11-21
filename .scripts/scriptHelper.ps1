@@ -247,7 +247,7 @@ function assertCommitSubject {
     if ($second -and 'misc.' -in $first, $second) { throw "'misc.' must be the only segment." }
     if ($Subject -match '[^\x20-\x7E]') { throw 'Line 1 must be plain ASCII.' }
     if ($Subject.Length -gt $commitSubjectLimit) {
-        throw "Line 1 is $($Subject.Length) characters; the limit is $commitSubjectLimit."
+        throw "Line 1 is $($Subject.Length) characters; the limit is $commitSubjectLimit (cut $($Subject.Length - $commitSubjectLimit))."
     }
 }
 

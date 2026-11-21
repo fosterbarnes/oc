@@ -131,6 +131,24 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-21 (~18:51) - v0.2.402 mojaveFindlay - OpenCode Go 5h usage row - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.402
+- Fixed: `parseGoUsageResponse` in `usage/probes.ts` now reads `usage.rolling` (5h window, 300 min assumed; the server's `limits.rollingWindow` is not in the response) as `OpenCodeGoUsage.rolling: UsageWindow | null`.
+- Added `goUsageWindows(usage)` in `usage/probes.ts` returning rolling, weekly, monthly in order; the sidebar entry, Usage menu, reset refresh timer (`sidebarUsage.tsx`), and calendar (`usage/calendar.ts`) use it instead of hand-built `[weekly, monthly]` lists.
+- Removed the index-based `wk`/`mo` tag fallback for Go; tags come from `windowTag(minutes)`.
+- Plan: `~/.config/opencode/plans/openCodeGoRollingUsage.md`.
+- Verification: `bun test` sidebarTools + usageCalendar (81 pass), `bun typecheck` clean, live probe against `opencode.ai/zen/go/v1/usage` returned windows [300, 10080, 43200] minutes.
+
+### User
+Usage sidebar
+- OpenCode Go now shows a 5h row above the weekly and monthly rows, like Claude and Codex.
+- The usage menu and the reset calendar also list the OpenCode Go 5-hour window.
+
+---
+
 ## 2026-11-21 (~18:26) - v0.2.401 bicepVape - Paste images into question answers - Claude Opus 5.5, low; Implementation
 
 ### Agent

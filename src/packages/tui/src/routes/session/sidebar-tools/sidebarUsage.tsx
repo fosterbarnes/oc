@@ -54,6 +54,7 @@ import {
 } from "./usage/live"
 import {
   probeOpenAIUsage,
+  goUsageWindows,
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
   type OpenAIUsage,
@@ -532,8 +533,8 @@ export function createSidebarUsage(input: {
             goSnapshot.ok
               ? {
                   name: "OpenCode Go",
-                  windows: [goSnapshot.weekly, goSnapshot.monthly].flatMap((reading, index) =>
-                    reading ? [window(windowTag(reading.minutes, index ? "mo" : "wk"), reading, goSnapshot)] : [],
+                  windows: goUsageWindows(goSnapshot).map((reading) =>
+                    window(windowTag(reading.minutes, "-"), reading, goSnapshot),
                   ),
                 }
               : {
@@ -745,14 +746,12 @@ export function createSidebarUsage(input: {
       if (id === "opencode-go") {
         const snapshot = goUsage()
         if (!snapshot.ok) return [unavailable(category, snapshot)]
-        return [snapshot.weekly, snapshot.monthly]
-          .filter((window) => window !== null)
-          .map((window) =>
-            row(category, windowName(window.minutes), window.usedPercent, [
-              reset(window.resetMs),
-              ...usageReadingDetails(window, snapshot, nowMs),
-            ]),
-          )
+        return goUsageWindows(snapshot).map((window) =>
+          row(category, windowName(window.minutes), window.usedPercent, [
+            reset(window.resetMs),
+            ...usageReadingDetails(window, snapshot, nowMs),
+          ]),
+        )
       }
       if (id === "openrouter") {
         const snapshot = openRouterUsage()
@@ -1097,7 +1096,7 @@ export function createSidebarUsage(input: {
     const claude = claudeCodeUsage()
     const windows: [UsageProviderId, UsageWindow[]][] = [
       ["openai", codex.ok ? [codex.primary, codex.secondary] : []],
-      ["opencode-go", go.ok ? [go.weekly, ...(go.monthly ? [go.monthly] : [])] : []],
+      ["opencode-go", go.ok ? goUsageWindows(go) : []],
       ["cursor", cursor.ok ? [cursor.monthly] : []],
       [
         "claude-code",

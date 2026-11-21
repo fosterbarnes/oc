@@ -55,6 +55,7 @@ import {
 import { resolveAuthPath } from "../../src/routes/session/sidebar-tools/usage/fetch.ts"
 import { orderUsageWindows } from "../../src/routes/session/sidebar-tools/usage/format.ts"
 import {
+  goUsageWindows,
   probeOpenAIUsage,
   probeOpenCodeGoUsage,
   probeOpenRouterUsage,
@@ -872,7 +873,7 @@ test("returns a neutral state for failed OpenAI usage requests", async () => {
   }
 })
 
-test("parses OpenCode Go weekly and monthly usage with reset dates", async () => {
+test("parses OpenCode Go rolling, weekly and monthly usage with reset dates", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-go-usage-"))
   try {
     const authPath = path.join(root, "auth.json")
@@ -887,6 +888,7 @@ test("parses OpenCode Go weekly and monthly usage with reset dates", async () =>
         return new Response(
           JSON.stringify({
             usage: {
+              rolling: { status: "ok", percent: 41, resetsAt: "2026-08-10T17:00:00.000Z" },
               weekly: { status: "ok", percent: 27.5, resetsAt: "2026-08-17T00:00:00.000Z" },
               monthly: { status: "ok", percent: 12.4, resetsAt: "2026-09-01T12:00:00.000Z" },
             },
@@ -909,6 +911,12 @@ test("parses OpenCode Go weekly and monthly usage with reset dates", async () =>
       assert.equal(result.monthly?.usedPercent, 12.4)
       assert.equal(result.monthly.minutes, 30 * 24 * 60)
       assert.match(result.monthly.resetAt ?? "", new RegExp(localDatePrefix("2026-09-01T12:00:00.000Z")))
+      assert.equal(result.rolling?.usedPercent, 41)
+      assert.equal(result.rolling?.minutes, 300)
+      assert.deepEqual(
+        goUsageWindows(result).map((window) => window.minutes),
+        [300, 7 * 24 * 60, 30 * 24 * 60],
+      )
     }
   } finally {
     rmSync(root, { recursive: true, force: true })
@@ -934,6 +942,8 @@ test("returns null OpenCode Go monthly usage when the response omits it", async 
     if (result.ok) {
       assert.equal(result.weekly.usedPercent, 4)
       assert.equal(result.monthly, null)
+      assert.equal(result.rolling, null)
+      assert.equal(goUsageWindows(result).length, 1)
     }
   } finally {
     rmSync(root, { recursive: true, force: true })

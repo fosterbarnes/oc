@@ -33,6 +33,7 @@ export type OpenAIUsage =
 export type OpenCodeGoUsage =
   | {
       ok: true
+      rolling: UsageWindow | null
       weekly: UsageWindow
       monthly: UsageWindow | null
       fetchedAt?: number
@@ -43,6 +44,11 @@ export type OpenCodeGoUsage =
       reason?: "no-credentials"
       metadata?: UsageProbeMetadata
     }
+
+/** Go windows in sidebar order: 5h, week, month; windows the response left out are skipped. */
+export function goUsageWindows(usage: Extract<OpenCodeGoUsage, { ok: true }>): UsageWindow[] {
+  return [usage.rolling, usage.weekly, usage.monthly].filter((window) => window !== null)
+}
 
 export type OpenRouterUsage =
   | {
@@ -193,11 +199,13 @@ function parseGoUsageResponse(value: unknown, receiptMs: number): OpenCodeGoUsag
   if (!value || typeof value !== "object") return goErrorResult()
   const usage = (value as { usage?: unknown }).usage
   if (!usage || typeof usage !== "object") return goErrorResult()
-  const windows = usage as { weekly?: unknown; monthly?: unknown }
+  const windows = usage as { rolling?: unknown; weekly?: unknown; monthly?: unknown }
   const weekly = goWindow(windows.weekly, 7 * 24 * 60, receiptMs)
   if (!weekly) return goErrorResult()
   return {
     ok: true,
+    // The server sets the rolling length (`limits.rollingWindow`) without reporting it; 5h, as other clients assume.
+    rolling: goWindow(windows.rolling, 5 * 60, receiptMs),
     weekly,
     monthly: goWindow(windows.monthly, 30 * 24 * 60, receiptMs),
   }

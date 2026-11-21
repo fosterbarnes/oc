@@ -59,7 +59,7 @@ function grouped(entries: UsageEntry[], width: number, options: { remaining: boo
   return entries.flatMap((entry, index): Line[] => {
     const head: Line = [
       { text: entry.name, tone: "text" },
-      ...(entry.active ? [{ text: " «", tone: "accent" as const }] : []),
+      ...(entry.active ? [{ text: " «", tone: "warning" as const }] : []),
     ]
     const right =
       entry.note !== undefined
@@ -112,7 +112,7 @@ function table(entries: UsageEntry[], width: number, options: { remaining: boole
   const lines = rows.map((entry): Line => {
     const head: Line = [
       { text: entry.name.padEnd(nameWidth), tone: "text" },
-      entry.active ? { text: " «", tone: "accent" } : { text: "  ", tone: "text" },
+      entry.active ? { text: " «", tone: "warning" } : { text: "  ", tone: "text" },
     ]
     if (entry.note !== undefined) return [...head, { text: ` ${entry.note}`, tone: "muted" }]
     return [
