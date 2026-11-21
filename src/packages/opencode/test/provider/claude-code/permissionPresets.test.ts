@@ -243,19 +243,31 @@ test("a CLI with neither flag degrades to the plugin's own denial, loudly", () =
   assert.equal(lines.filter((line) => /WARN/.test(line)).length, 2)
 })
 
-test("an undetected CLI version skips both new flags", () => {
-  const args =
-    captureLogs(() => {}) &&
-    buildCliArgs({
-      sessionKey: "ro-unknown",
-      skipPermissions: false,
-      includeSessionId: false,
-      cliVersion: null,
-      permissionMode: READ_ONLY_PERMISSION_MODE,
-    })
+test("an undetected CLI version refuses a read-only spawn", () => {
+  for (const cliVersion of [null, undefined])
+    assert.throws(
+      () =>
+        buildCliArgs({
+          sessionKey: "ro-unknown",
+          skipPermissions: false,
+          includeSessionId: false,
+          cliVersion,
+          permissionMode: READ_ONLY_PERMISSION_MODE,
+        }),
+      /could not be read, so read-only mode cannot be enforced/,
+    )
+})
 
+test("an undetected CLI version does not affect other permission modes", () => {
+  const args = buildCliArgs({
+    sessionKey: "mode-unknown",
+    skipPermissions: false,
+    includeSessionId: false,
+    cliVersion: null,
+    permissionMode: "default",
+  })
   assert.equal(args.includes("--restricted"), false)
-  assert.equal(args.includes("--permission-prompts"), false)
+  assert.ok(args.includes("--permission-mode"))
 })
 
 test("every other permission mode is untouched by the read-only branch", () => {

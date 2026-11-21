@@ -79,7 +79,14 @@ export function buildCliArgs(opts: {
   // `can_use_tool` request gets on a CLI too old for the flag.
   const readOnly = isReadOnlyPermissionMode(permissionMode)
   if (readOnly) {
-    if (cliSupportsRestricted(cliVersion ?? null)) {
+    // An unreadable version could be any CLI: assuming one without --restricted would drop the cwd
+    // confinement of reads, so refuse. The turn setup catch (turnStream.ts) shows this as a turn error.
+    if (!cliVersion)
+      throw new Error(
+        "Read-only mode needs to know the Claude CLI version, but it could not be read, so read-only mode cannot be enforced. " +
+          "Update the claude CLI (2.1.258 or newer) or check that `claude --version` runs, then try again.",
+      )
+    if (cliSupportsRestricted(cliVersion)) {
       args.push("--restricted")
     } else {
       // The preset still holds: `--disallowedTools` carries the same tool

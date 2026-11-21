@@ -3,7 +3,7 @@
 Read before running or writing provider, pane, or perf tests, and before judging a test failure.
 The general rules (no mocks, run from package dirs, probes) are in `AGENTS.md` "Testing".
 
-- A failing test is fixed in the same change (product or test); there is no standing list. Whole-suite runs need `--timeout 30000` (see `AGENTS.md` "Testing"). On 2026-11-18 (macOS) core, tui, and schema passed with 0 failures; the opencode suite's remaining one-off failures, unreproduced, are in that day's build notes.
+- A failing test is fixed in the same change (product or test); failures that are known and not yet fixed are listed once, in "Known failures" at the end of this file. Whole-suite runs need `--timeout 30000` (see `AGENTS.md` "Testing"). On 2026-11-18 (macOS) core, tui, and schema passed with 0 failures; the opencode suite's remaining one-off failures, unreproduced, are in that day's build notes.
   - Fixed 2026-11-17: tuiPane "claude warm-up palette opens the schedule dialog" counted Down presses past a "Time format" row the schedule dialog no longer has (selection starts on the mode row), so it landed on Save; it also reopened the palette over the open dialog, whose own "Search" box matched the wait. Pane suite 16/16 on macOS.
 - On macOS, `keychainStubEnv` (`test/lib/cli-process.ts`) puts a failing `security` stub first on PATH for every `cliIt` and pane run, so nothing a test starts reaches the real Keychain or shows "Keychain Not Found"; calls are logged to `<home>/security.log`.
 - Fixed 2026-11-17 (v0.2.376), the former macOS fakeModel/steering/warm-up entries: the cli fixture home was not realpath'd (`/var` vs `/private/var`); fake summaries lacked `<summary>` tags (CLI 2.1.322 re-asks); fake 400/404s were queued per retry (now `llm.errorEvery`); plugin.log reads raced its 100 ms flush; held steers were written in the same tick as the proxy result (product fix: `stdinFence`); spawns inherited a parent Claude Code session's env (product fix: `HOST_SESSION_ENV`).
@@ -15,3 +15,11 @@ The general rules (no mocks, run from package dirs, probes) are in `AGENTS.md` "
 - Spawned oc and `claude` children get `hostEnv()` (`test/lib/cli-process.ts`), which drops inherited `CLAUDE*`/`ANTHROPIC*` vars: run from a Claude Code session they change what the CLI sends (desktop entrypoint adds a background status request).
 - Pane cleanup may stop only processes the test started: anchor on the mux server's CIM creation time recorded at spawn, walk descendants whose creation is no earlier than their live parent, recheck each identity before stopping, compare CIM to CIM. Never `taskkill /T` or PID-only trees (reused PIDs reached unrelated processes). If identity cannot be proven, leave processes and fail loudly.
 - Every new Claude-provider feature gets a fake-model scenario, plus a pane check when it changes what the TUI shows.
+
+## Known failures
+
+The one list of tests that fail today and are not fixed. Remove an entry in the change that fixes it.
+
+- Mac-only (recorded 2026-11-18): `buildNotesChanged.tests.ps1` and `installDir.tests.ps1` (Windows path literals); tui `dependencies.test.ts` "finds Git Bash"; tui `openSidebar.test.ts` pooled-live (real Keychain); `test/provider/claude-code` per this file.
+- opencode suite one-offs on macOS (2026-11-18): unreproduced, listed in that day's build notes.
+- Shell-dependent: `steering.test.ts` "cancel retires written unread input after visible content" (see above): run it from PowerShell.

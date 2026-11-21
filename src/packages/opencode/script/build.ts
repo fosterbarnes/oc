@@ -334,18 +334,22 @@ if (Script.release) {
     process.platform === "win32"
       ? path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe")
       : "/usr/bin/tar"
+  // Archives go to the repo-root `.release/` (gitignored), not `outdir`: the next build's `rm -rf dist`
+  // would delete Mac zips copied in for a release. A build only rewrites the archives it makes.
+  const releaseFolder = path.resolve(dir, "../../../.release")
+  await fs.mkdir(releaseFolder, { recursive: true })
   for (const key of Object.keys(binaries)) {
     if (key.includes("linux")) {
-      await $`tar -czf ../../${key}.tar.gz *`.cwd(`${outdir}/${key}/bin`)
+      await $`tar -czf ${path.join(releaseFolder, `${key}.tar.gz`)} *`.cwd(`${outdir}/${key}/bin`)
     } else {
       // The system bsdtar (Windows and macOS) writes zips; Git's GNU tar can come first on PATH on
       // Windows and cannot. Entries are
       // listed explicitly so folders (cursor-runtime) never depend on shell glob expansion.
       const bin = `${outdir}/${key}/bin`
-      await $`${systemTar} -a -cf ../../${key}.zip ${readdirSync(bin)}`.cwd(bin)
+      await $`${systemTar} -a -cf ${path.join(releaseFolder, `${key}.zip`)} ${readdirSync(bin)}`.cwd(bin)
     }
   }
-  // .scripts/pushRelease.ps1 publishes the zips.
+  // .scripts/pushRelease.ps1 publishes the zips from `.release/`.
 }
 
 export { binaries }

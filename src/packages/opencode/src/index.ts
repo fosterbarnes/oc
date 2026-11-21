@@ -1,23 +1,22 @@
 import yargs from "yargs"
 import { hideBin } from "yargs/helpers"
 import { UI } from "./cli/ui"
-import { InstallationDisplayVersion } from "@opencode-ai/core/installation/version"
+import { InstallationDisplayVersion, InstallationSourceTree } from "@opencode-ai/core/installation/version"
 import { FormatError } from "./cli/error"
 import { EOL } from "os"
 import { errorMessage } from "./util/error"
 import { Heap } from "./cli/heap"
 import { native } from "@opencode-ai/core/global"
-import {
-  resolveCommandToLoad,
-  withExecutableDefault,
-  type CommandToLoad,
-} from "./cli/commandLoader"
+import { resolveCommandToLoad, withExecutableDefault, type CommandToLoad } from "./cli/commandLoader"
 
 const rawArgs = hideBin(process.argv)
+// Hidden: .scripts/pushRelease.ps1 compares this build-time source fingerprint with the tagged commit's tree.
+if (rawArgs.includes("--source-tree")) {
+  process.stdout.write(InstallationSourceTree + EOL)
+  process.exit(0)
+}
 // The native build runs the upstream in-process TUI; only oc builds rewrite to the resident launcher.
-const args = native
-  ? rawArgs
-  : withExecutableDefault(rawArgs, process.execPath)
+const args = native ? rawArgs : withExecutableDefault(rawArgs, process.execPath)
 
 function needsAllCommands(args: readonly string[]) {
   return args.includes("-h") || args.includes("--help") || args.includes("completion")

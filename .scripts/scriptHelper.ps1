@@ -7,6 +7,8 @@ $srcRoot = Join-Path $repoRoot 'src'
 $projectName = 'opencode'
 $buildScript = Join-Path $srcRoot 'packages' 'opencode' 'script' 'build.ts'
 $distFolder = Join-Path $srcRoot 'packages' 'opencode' 'dist'
+# build.ts -Release writes the zips here (not in dist, which every full build wipes); Mac zips are copied in by hand.
+$releaseFolder = Join-Path $repoRoot '.release'
 # build.ts names dist folders after the host: opencode[-native]-windows-x64 or -darwin-<arm64|x64>.
 $exeSuffix = if ($IsWindows) { '.exe' } else { '' }
 $distPlatform = if ($IsWindows) { 'windows-x64' } else {

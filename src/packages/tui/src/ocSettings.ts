@@ -157,7 +157,13 @@ export function persistOcConfig(
       error += String(chunk)
     })
     child.on("error", (cause) => {
-      toast.show({ message: `Failed to set oc setting: ${cause.message}`, variant: "error" })
+      const missing = (cause as NodeJS.ErrnoException).code === "ENOENT" && Global.native && !bunDev
+      toast.show({
+        message: missing
+          ? `native opencode needs oc beside it: ${executable}`
+          : `Failed to set oc setting: ${cause.message}`,
+        variant: "error",
+      })
       finish(false)
     })
     child.on("exit", (code) => {

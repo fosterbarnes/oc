@@ -131,6 +131,50 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-20 (~04:29) - v0.2.400 steakhousesVibration - Roast fixes WP3-WP6: installer, security, release, docs - Claude Opus 5.5, low (workers: Sonnet 5.5 high, medium x2); Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified (installer, release, ChatGPT browser login, and resident launcher fallback not run live)
+- Version: 0.2.400
+- Plan: `~/.config/opencode/plans/oc-roast-fixes.md` WP3, WP4, WP5, WP6 (6.4 stays the user's).
+- Fixed 3.1 `.scripts/install.ps1`: stops oc/opencode processes only after the build and artifact checks, and only those whose `Path` is under `$installDir` (case-insensitive; null Path skipped). Stock opencode elsewhere keeps running.
+- Fixed 3.2 `install.ps1`: `cursor-runtime` is backed up, removed before the copy (Copy-Item -Recurse merged into the old folder), and restored on failure.
+- Fixed 3.3 `sidebarTools.tsx`: 150 ms trailing debounce on file and message events; session select stays immediate.
+- Fixed 4.1 `plugin/openai/codex.ts`: ChatGPT login callback binds `127.0.0.1` (was all interfaces), cancel fetch too; `redirect_uri` stays `localhost` (browsers fall back from ::1).
+- Fixed 4.2 `config/resident.ts` `listenerIsOc`: the secret goes to the port only when saved state matches and is alive, or the listener pid (`residentListenerPid`) runs our or the saved executable. Risk: platforms without a listener lookup (Linux) refuse any launch that misses the fast path.
+- Fixed 4.2 follow-up after the 18:20 revive failed on both machines (Mac WezTerm hung, PC window closed): `listenerIsOc` ran a synchronous listener lookup (PC pwsh ~600 ms, Mac lsof ~50 ms) on every ready-loop attempt that missed the fast path. It now skips the lookup when the port is unbound (`portInUse`) and runs it with `residentListenerPidAsync` (`Bun.spawn`), so the launcher's event loop and intro stay live. Instrumented 18:34 revive (Mac 2 tabs) and mirror (PC 1 tab) did not reproduce: one observe per launcher, fast path, `reuse`; cause of the 18:20 failure unconfirmed. Follow-up checks: typecheck clean; revive, config/oc, cli/oc, launcherSafety, serve-process 85 pass, 11 skip, 0 fail; 22:46 Mac revive of the fixed build attached (this session) and the 22:48 PC mirror left a server and an attached oc running. Notes: `~/.config/opencode/plans/2026-11-20-debug-revive.md`.
+- Fixed 4.3 `cli/cmd/oc.ts`: `oc oc server start` and `--restart-server` print `{url}` only; `startup.ts` discards the output; octray not checked (no local checkout).
+- Fixed 4.4 `claude-code/cliArgs.ts`: a read-only spawn with an unknown CLI version throws (turn error via `turnStream.ts` catch) instead of dropping `--restricted`; `permissionPresets.test.ts` updated (intended change).
+- Added 5.1 `.scripts/pushRelease.ps1`: fails on an existing local or origin tag and on a dirty tree, before staging. `UPSTREAM-SYNC.md` notes `remote.upstream.tagOpt --no-tags`.
+- Added 5.2 hidden `--source-tree` flag (`src/index.ts`, prints `InstallationSourceTree`, empty from source); pushRelease compares each host-runnable binary with `HEAD^{tree}`. Mac zips on a Windows host get a warning, not a check.
+- Fixed 5.3 `script/build.ts`: release zips and tarballs go to repo-root `.release/` (gitignored, `$releaseFolder` in `scriptHelper.ps1`), so `rm -rf dist` no longer deletes Mac zips; pushRelease reads `.release/` and warns when Mac zips are missing. `SCRIPTS.md` updated.
+- Added 5.4 `tui/src/ocSettings.ts`: native opencode without a sibling `oc` toasts `native opencode needs oc beside it: <path>`. 5.5 README: install says build from source until the first release; "Latest release" line and TODO comment removed; native zip described as the `/update` payload.
+- Fixed 6.1 FORK.md: removed the false no-merge-base line and README line-count row, recounted the status table (13/64/41/6/0 = 124), restamped 2026-11-20 (v0.2.399), updated sync/favorites/pool rows. 6.2 SECURITY.md: export/sync redaction wording, Mirror section, Cursor desktop token fallback, Releases (GitHub digest only). 6.3 `docs/dev/testing.md` "Known failures" section (Mac-only TODO copied in); `AGENTS.md` and `docs/dev/v0.3.0.md` point at it.
+- Updated wiki clone (not pushed): `Keybinds.md`, `Configuration.md` (favorites and hidden models in tui.json and synced; recents per machine).
+- Fixed flaky `tui/test/context/local.test.ts` (from v0.2.399): it read tui.json before the last list key (category colors) was saved; it now waits for it. Failed 1 of 4 full-suite runs before, 0 of 3 after.
+- MISTAKE: two workers made their first edits with Python scripts (`install.ps1`, README.md, FORK.md). TODO: the Claude Code hook does not cover oc subagents' bash; an oc-side guard is still missing.
+- Verification: PowerShell parser on install.ps1, pushRelease.ps1, scriptHelper.ps1: 0 errors; opencode permissionPresets, cliArgs, config/oc 83 pass 0 fail (workers also ran launcherSafety, codex: 129 pass); whole tui suite 804 pass, 0 fail x3; `bun turbo typecheck --force` 16/16 uncached; no em dashes in added lines; `--source-tree` probe from source exits 0. Known: `.scripts/tests/installDir.tests.ps1` fails on macOS (Windows-only expectation, untouched code). Not run: install.ps1, a release, ChatGPT browser login, resident launch without saved state.
+
+### User
+Installer
+- Installing oc from source no longer closes a separate stock OpenCode, and it stops oc only after the build succeeded.
+- A failed install now also restores the Cursor runtime folder, and an install no longer leaves old Cursor runtime files behind.
+
+Security
+- The ChatGPT login page listens only on this machine.
+- oc no longer sends its server password to an unknown program holding its port, and `oc oc server start` no longer prints it.
+- Claude Code's read-only mode refuses to start when the Claude CLI version cannot be read, instead of quietly running with fewer limits.
+
+Releases and docs
+- Release zips are kept in `.release/`, so a Windows build no longer deletes Mac zips; a release stops early if its tag already exists or the tree is not clean, and checks each binary was built from the tagged source.
+- The README now says to build from source until the first release; SECURITY.md covers export redaction, mirror, the Cursor token fallback, and release checks.
+
+Sidebar and settings
+- The sidebar no longer rescans scripts and files on every single file change during big checkouts.
+- Native opencode explains when `oc` is missing beside it.
+
+---
+
 ## 2026-11-20 (~02:04) - v0.2.399 fruitGatana - Roast fixes WP2 plus favorites in tui.json - Claude Opus 5.5, low (workers: Opus 5.5 high, Sonnet 5.5 high x2); Implementation
 
 ### Agent

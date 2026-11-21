@@ -12,6 +12,7 @@ upstream fixes are cherry-picked into the customized parent by hand.
 - Upstream branch: `v1`
 - Parent remote: `https://github.com/fosterbarnes/oc`
 - Parent branch: `main`
+- `git config remote.upstream.tagOpt --no-tags` is set on any checkout with an `upstream` remote, so upstream's tags are not fetched (they would clash with oc's `v<version>` release tags).
 
 ## Workflow
 

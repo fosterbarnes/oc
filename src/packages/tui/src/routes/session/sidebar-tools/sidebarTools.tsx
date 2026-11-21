@@ -613,7 +613,14 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     return commands
   })
   useBindings(() => ({ commands: sidebarCommands() }))
-  onCleanup(event.on("file.watcher.updated", refresh))
+  // File and message events arrive in bursts; refresh re-reads scripts and the file tree synchronously.
+  let refreshTimer: ReturnType<typeof setTimeout> | undefined
+  const refreshSoon = () => {
+    clearTimeout(refreshTimer)
+    refreshTimer = setTimeout(refresh, 150)
+  }
+  onCleanup(() => clearTimeout(refreshTimer))
+  onCleanup(event.on("file.watcher.updated", refreshSoon))
   onCleanup(
     event.on("tui.session.select", () =>
       queueMicrotask(() => {
@@ -624,7 +631,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   )
   onCleanup(
     event.on("message.updated", (evt) => {
-      queueMicrotask(refresh)
+      refreshSoon()
       const info = evt.properties.info
       if (info.role !== "assistant" || info.time.completed === undefined) return
       const provider = usageProviderForModel(info.providerID)

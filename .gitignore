@@ -47,3 +47,4 @@ desktop.ini
 .installer/ocSetup/bin/
 .installer/ocSetup/obj/
 /buildNotes.txt
+/.release/

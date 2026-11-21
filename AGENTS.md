@@ -185,7 +185,7 @@ const table = sqliteTable("session", {
 - `packages/opencode/test/preload.ts` sets a 30 s default timeout (Bun ignores `[test] timeout` in `bunfig.toml`), but Bun applies it only to the first test file of a run (checked on 1.4.2, 2026-11-18). A single-file `bun test <file>` needs no `--timeout`; a multi-file or whole-suite run needs `--timeout 30000` (as `bun run test` and `.scripts/test.ps1` pass), or later files time out at 5 s. Other packages still default to 5 s unless their `test` script passes one.
 - Verification follows `principles.md` and the `verify` skill. Broader suites are user-driven through `.scripts/test.ps1`; there is no CI.
 - Probes: scratch tests go in `src/packages/<pkg>/test/tmp/verify/` (ignored by the `tmp` rule in `.gitignore`). Run with `bun test test/tmp/verify/<file>` from the package dir, then delete the folder and confirm with `Test-Path`. TUI probes: `openPane(fixture)` from `test/provider/claude-code/paneFixture.ts` under `OC_TUI_PANE=1` (`type`, `paste`, `click`, `waitFor`, `screen`); see `tuiPane.test.ts` for use. Harness probes: fake-model scenarios against `TestLLMServer`. Never build or install.
-- Failing tests, fake-model, pane, perf, and cleanup rules: `docs/dev/testing.md`. There is no known-failures list: a failing test is fixed in the same change.
+- Failing tests, fake-model, pane, perf, and cleanup rules: `docs/dev/testing.md`. A failing test is fixed in the same change; failures not yet fixed are listed once, in its "Known failures" section.
 
 ## Session Runtime (Hybrid V1/V2)
 

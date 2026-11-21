@@ -219,13 +219,30 @@ async function readResidentState(): Promise<ResidentState | undefined> {
   }
 }
 
+// True when the process listening on the port runs our executable (or the saved state's), so the resident
+// secret may be sent to it. Unknown listeners, and platforms without a listener lookup, are treated as foreign.
+async function listenerIsOc(hostname: string, port: number, state: ResidentState | undefined) {
+  // Nothing bound yet (server still starting): no listener to trust, so skip the process lookup.
+  if (!(await portInUse(hostname, port))) return false
+  const pid = await residentListenerPidAsync(hostname, port)
+  if (!pid) return false
+  const live = (await TuiLedger.listProcessesAsync().catch(() => [])).find((item) => item.pid === pid)
+  if (!live?.executable) return false
+  return [executablePath(), state?.executable].some(
+    (executable) => executable && TuiLedger.sameExecutable(live.executable, executable),
+  )
+}
+
 async function observeResident(url: string, secret: string, hostname: string, port: number) {
   const state = await readResidentState()
-  const healthy = await serverHealthy(url, secret)
   const matches = state?.hostname === hostname && state?.port === port
   // Async snapshot: the launcher intro animates while this runs.
   const processes = state?.pid && state.created ? await TuiLedger.listProcessesAsync() : undefined
   const alive = state?.pid ? isPidAlive(state.pid, state, processes && (() => processes)) : false
+  // The secret goes only to our own server: matching live state says so; otherwise the listener must be an
+  // oc process. /global/health needs auth, so an unauthenticated probe cannot identify oc.
+  const trusted = (matches && alive) || (await listenerIsOc(hostname, port, state))
+  const healthy = trusted ? await serverHealthy(url, secret) : false
   const action = residentLaunchAction({
     healthy,
     hasState: state !== undefined,
@@ -425,28 +442,54 @@ export function parseLsofListeners(text: string) {
   ).rows
 }
 
-function residentListenerPid(hostname: string, port: number) {
-  if (process.platform === "darwin") {
-    const result = Bun.spawnSync(["/usr/sbin/lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], {
-      stdout: "pipe",
-      stderr: "pipe",
-    })
-    return uniqueListenerPid(hostname, port, parseLsofListeners(result.stdout.toString()))
-  }
+function listenerLookup(port: number) {
+  const options = {
+    stdout: "pipe",
+    stderr: "pipe",
+    windowsHide: true,
+    env: { ...process.env, OC_LISTEN_PORT: String(port) },
+  } as const
+  if (process.platform === "darwin")
+    return { command: ["/usr/sbin/lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-Fpn"], options }
   if (process.platform !== "win32") return undefined
-  const result = Bun.spawnSync(
-    [
+  return {
+    command: [
       "pwsh",
       "-NoProfile",
       "-NonInteractive",
       "-Command",
       "$ErrorActionPreference = 'Stop'; ConvertTo-Json -InputObject @(Get-NetTCPConnection -State Listen -LocalPort $env:OC_LISTEN_PORT | ForEach-Object { @{ address = $_.LocalAddress; port = [int]$_.LocalPort; pid = [int]$_.OwningProcess } }) -Compress",
     ],
-    { stdout: "pipe", stderr: "pipe", windowsHide: true, env: { ...process.env, OC_LISTEN_PORT: String(port) } },
-  )
-  if (result.exitCode !== 0) return undefined
+    options,
+  }
+}
+
+function residentListenerPid(hostname: string, port: number) {
+  const lookup = listenerLookup(port)
+  if (!lookup) return undefined
+  const result = Bun.spawnSync(lookup.command, lookup.options)
+  return parseListenerOutput(hostname, port, result.exitCode, result.stdout.toString())
+}
+
+// Same lookup off the event loop: the launcher intro animates while the ready loops run, and the
+// Windows pwsh hop takes ~0.6 s.
+async function residentListenerPidAsync(hostname: string, port: number) {
+  const lookup = listenerLookup(port)
+  if (!lookup) return undefined
   try {
-    const parsed: unknown = JSON.parse(result.stdout.toString())
+    const child = Bun.spawn(lookup.command, lookup.options)
+    const [stdout, exitCode] = await Promise.all([new Response(child.stdout).text(), child.exited])
+    return parseListenerOutput(hostname, port, exitCode, stdout)
+  } catch {
+    return undefined
+  }
+}
+
+function parseListenerOutput(hostname: string, port: number, exitCode: number | null, stdout: string) {
+  if (process.platform === "darwin") return uniqueListenerPid(hostname, port, parseLsofListeners(stdout))
+  if (exitCode !== 0) return undefined
+  try {
+    const parsed: unknown = JSON.parse(stdout)
     if (!Array.isArray(parsed)) return undefined
     const rows = parsed.flatMap((row: unknown) => {
       if (typeof row !== "object" || row === null || !("address" in row) || !("port" in row) || !("pid" in row))

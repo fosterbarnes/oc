@@ -18,18 +18,6 @@ $ocBinary = $ocDistBinary
 $nativeBinary = $nativeDistBinary
 $cursorRuntime = Join-Path (Split-Path -Parent $ocDistBinary) 'cursor-runtime'
 Write-Host "Installing to $installDir"
-$processNames = @('opencode', 'oc', 'occ')
-$running = @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })
-if ($running) {
-    Write-Host 'Stopping running oc and opencode processes...'
-    $running | Stop-Process -Force
-    $deadline = (Get-Date).AddSeconds(30)
-    while (@($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue })) {
-        if ((Get-Date) -gt $deadline) { throw 'oc or opencode is still running after Stop-Process.' }
-        Start-Sleep -Milliseconds 200
-    }
-}
-
 if (-not $NoBuild) {
     $buildArgs = @()
     if ($SkipBunInstall) { $buildArgs += '-SkipInstall' }
@@ -46,6 +34,25 @@ foreach ($file in $required) {
 }
 if ($installOc -and !(Test-Path -LiteralPath $cursorRuntime -PathType Container)) {
     throw "Packaged Cursor runtime not found: $cursorRuntime. Run build.ps1 first."
+}
+
+# Stop only oc/opencode processes running from the install folder, after the build and artifact checks
+# (stock opencode elsewhere keeps running). A null Path means the process is not inspectable: skip it.
+$processNames = @('opencode', 'oc', 'occ')
+$installRoot = [IO.Path]::GetFullPath($installDir).TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+function getInstalledProcesses {
+    @($processNames | ForEach-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue } |
+        Where-Object { $_.Path -and [IO.Path]::GetFullPath($_.Path).StartsWith($installRoot, [StringComparison]::OrdinalIgnoreCase) })
+}
+$running = getInstalledProcesses
+if ($running) {
+    Write-Host "Stopping running oc and opencode processes under $installDir..."
+    $running | Stop-Process -Force
+    $deadline = (Get-Date).AddSeconds(30)
+    while (getInstalledProcesses) {
+        if ((Get-Date) -gt $deadline) { throw 'oc or opencode is still running after Stop-Process.' }
+        Start-Sleep -Milliseconds 200
+    }
 }
 
 New-Item -ItemType Directory -Path $installDir -Force | Out-Null
@@ -93,6 +100,13 @@ foreach ($target in $backupTargets) {
         $backedUp += $target
     }
 }
+# cursor-runtime is a folder: Copy-Item -Recurse onto an existing one merges, so back it up, remove it before the copy, restore it on failure.
+$installedRuntime = Join-Path $installDir 'cursor-runtime'
+$backedUpRuntime = $installOc -and (Test-Path -LiteralPath $installedRuntime -PathType Container)
+if ($backedUpRuntime) {
+    if (-not (Test-Path -LiteralPath $backupDir)) { New-Item -ItemType Directory -Path $backupDir -Force | Out-Null }
+    Copy-Item -LiteralPath $installedRuntime -Destination (Join-Path $backupDir 'cursor-runtime') -Recurse
+}
 foreach ($old in @(Get-ChildItem -LiteralPath $installDir -Directory -Filter 'backup-*' | Sort-Object Name -Descending | Select-Object -Skip 3)) {
     Remove-Item -LiteralPath $old.FullName -Recurse -Force
 }
@@ -106,6 +120,8 @@ try {
         if (Test-Path -LiteralPath $occLink) { Remove-Item -LiteralPath $occLink -Force }
         if (Test-Path -LiteralPath $occLink -PathType Leaf) { throw "Could not remove $occLink before install." }
         replaceFile $ocBinary $ocDestination
+        if (Test-Path -LiteralPath $installedRuntime) { Remove-Item -LiteralPath $installedRuntime -Recurse -Force }
+        if (Test-Path -LiteralPath $installedRuntime) { throw "Could not remove $installedRuntime before install." }
         Copy-Item -LiteralPath $cursorRuntime -Destination $installDir -Recurse -Force
         New-Item -ItemType HardLink -Path $occLink -Target $ocDestination -Force | Out-Null
         # Verify link identity (same file, not byte equality): fsutil on Windows, inode on macOS.
@@ -130,6 +146,10 @@ try {
     foreach ($target in $backedUp) {
         $saved = Join-Path $backupDir ([IO.Path]::GetFileName($target))
         if (Test-Path -LiteralPath $saved -PathType Leaf) { Copy-Item -LiteralPath $saved -Destination $target -Force }
+    }
+    if ($backedUpRuntime) {
+        if (Test-Path -LiteralPath $installedRuntime) { Remove-Item -LiteralPath $installedRuntime -Recurse -Force }
+        Copy-Item -LiteralPath (Join-Path $backupDir 'cursor-runtime') -Destination $installDir -Recurse -Force
     }
     if ($backedUp -contains $occLink) {
         if (Test-Path -LiteralPath $occLink) { Remove-Item -LiteralPath $occLink -Force }

@@ -4,8 +4,6 @@ Custom fork of opencode that focuses on building on existing features simply and
 
 Not ready for widespread use until 0.3.0. oc works on Windows 10 and 11, and on macOS (Apple Silicon; newer and less tested, no installer yet). Linux is not supported yet. Full Windows, macOS, and Linux support ships on or before 0.3.0.
 
-Latest release: [releases](https://github.com/fosterbarnes/oc/releases/latest)
-
 ## Standout features
 
 - Claude Code models in `/models`, using your own Claude Code login ([how](https://github.com/fosterbarnes/oc/wiki/Claude-Code))
@@ -86,22 +84,16 @@ WezTerm is the recommended terminal for oc. It is what the maintainer uses daily
 
 ## Install
 
-<!-- TODO(release): no release has been published yet, so neither the setup exe nor the zip is
-on Releases. The zip has oc.exe but not occ.exe. Update these steps when the first setup exe is published. -->
+No release has been published yet, so build oc from source: see [Developing](https://github.com/fosterbarnes/oc/wiki/Developing) on the wiki.
 
-Run `oc_v<version>_windows-x64-setup.exe` from [Releases](https://github.com/fosterbarnes/oc/releases).
+After the first release, install with `oc_v<version>_windows-x64-setup.exe` from [Releases](https://github.com/fosterbarnes/oc/releases).
 It installs oc for your user, then opens **oc Dependency Installer** to install what oc uses (PowerShell 7,
 Git, Node.js, Everything, WezTerm, the Claude Code and Codex CLIs, and optionally Cursor and the
 desktop apps)
 ([how](https://github.com/fosterbarnes/oc/wiki/Install#setup-exe)).
 
-Or install from the zip:
-
-1. Download `opencode-v<version>-<tag>-windows-x64.zip` from [Releases](https://github.com/fosterbarnes/oc/releases).
-   It has `oc.exe` but not `occ.exe`. (The `-native-windows-x64` zip holds stock `opencode.exe` only.)
-2. Extract it to a folder you keep, for example `%LOCALAPPDATA%\oc`.
-3. Add that folder to your PATH.
-4. Open a new PowerShell 7 window and run `oc`.
+The release zips are not an install: `opencode-v<version>-<tag>-windows-x64.zip` has `oc.exe` but not `occ.exe`, and
+the `-native-windows-x64` zip is the `/update` payload (`opencode.exe` only). For oc, use the setup exe or build from source.
 
 The first launch starts the background server. Later launches connect to it, so they open faster.
 

@@ -523,6 +523,8 @@ test("favorite categories persist assignments, rename and reorder, preserving mo
     expect(model.favoriteCategoryColors()).toEqual({ Coding: "#a78bfa" })
     await wait(() => !!(readTui().model_favorite_categories as string[] | undefined)?.includes("Coding"))
     await wait(() => JSON.stringify(readTuiLists().favorite) === JSON.stringify(model.favorite()))
+    // Each list is its own tui.json key, saved one after another: wait for the last one too.
+    await wait(() => JSON.stringify(readTuiLists().favoriteCategoryColors) === JSON.stringify({ Coding: "#a78bfa" }))
     expect(readTuiLists()).toEqual({
       favorite: [...model.favorite()],
       favoriteCategories: ["Research", "Coding"],

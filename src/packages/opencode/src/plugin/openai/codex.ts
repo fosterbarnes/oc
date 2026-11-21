@@ -251,7 +251,7 @@ async function startOAuthServer(): Promise<{ port: number; redirectUri: string }
 async function listenOAuthServer(server: ReturnType<typeof createServer>) {
   if (await bindOAuthServer(server, OAUTH_PORT, 1)) return OAUTH_PORT
   // Another login (a stale OpenCode or Codex CLI) usually holds the port; ask it to cancel, then retry.
-  await fetch(`http://localhost:${OAUTH_PORT}/cancel`, { signal: AbortSignal.timeout(2000) }).catch(() => undefined)
+  await fetch(`http://127.0.0.1:${OAUTH_PORT}/cancel`, { signal: AbortSignal.timeout(2000) }).catch(() => undefined)
   await sleep(OAUTH_BIND_RETRY_MS)
   if (await bindOAuthServer(server, OAUTH_PORT, OAUTH_BIND_ATTEMPTS - 1)) return OAUTH_PORT
   if (await bindOAuthServer(server, OAUTH_FALLBACK_PORT, OAUTH_BIND_ATTEMPTS)) return OAUTH_FALLBACK_PORT
@@ -264,7 +264,9 @@ async function listenOAuthServer(server: ReturnType<typeof createServer>) {
 async function bindOAuthServer(server: ReturnType<typeof createServer>, port: number, attempts: number) {
   const error = await new Promise<NodeJS.ErrnoException | undefined>((resolve) => {
     server.once("error", resolve)
-    server.listen(port, () => {
+    // Loopback only: the login server must not answer the LAN (its /cancel route needs no auth). The
+    // redirect URI stays on localhost; a browser that tries ::1 first gets a refusal and falls back to 127.0.0.1.
+    server.listen(port, "127.0.0.1", () => {
       server.off("error", resolve)
       resolve(undefined)
     })

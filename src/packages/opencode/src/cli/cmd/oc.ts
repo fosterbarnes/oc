@@ -535,7 +535,7 @@ export const OcCommand = cmd({
         command: "server start",
         describe: "start or reuse the resident OpenCode server",
         handler: async () => {
-          console.log(JSON.stringify(await Resident.startServer()))
+          console.log(JSON.stringify({ url: (await Resident.startServer()).url }))
         },
       })
       .command(LaunchCommand)
@@ -597,7 +597,7 @@ export const OcCommand = cmd({
       (args as Record<string, unknown>)["kill-server"] || (args as Record<string, unknown>)["shutdown-server"],
     )
     if (doRestart) {
-      console.log(JSON.stringify(await Resident.restartServer()))
+      console.log(JSON.stringify({ url: (await Resident.restartServer()).url }))
       return
     }
     if (doKill) {
