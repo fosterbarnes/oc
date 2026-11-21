@@ -131,6 +131,28 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-21 (~18:26) - v0.2.401 bicepVape - Paste images into question answers - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.401
+- Added `saveImage`, `imageFileSuffix`, and `imageFileName` (plus `IMAGE_EXTENSIONS`) to `core/src/util/imageDir.ts`; `opencode/src/session/prompt.ts` `writeImage` now uses the shared naming, so the TUI and the server name files the same way and identical bytes still reuse one file.
+- `tui/src/editorPaste.ts`: an image paste now goes to a field's handler registered in `imagePasteTargets` (WeakMap); unregistered fields show a toast instead of dropping the image silently. Added `pasteImageFromEvent` for terminals that send an image as an empty bracketed paste.
+- `tui/src/routes/session/question.tsx`: the custom-answer and dismiss textareas register an image handler that saves to `imageDir` right away and inserts `[Image N]`. `reply()` and `reject()` expand labels through the exported pure `expandImages` to `[Image N saved at <path>]`, which covers live replies, restored-question follow-ups, and Claude Code's `mcp__opencode_proxy__question`. No SDK or schema change.
+- Removed the 7 `DEBUG-TEMP` paste probe lines from `/debug`; none remain.
+- Pass cleanup: `pasteImageFromEvent` now steps in only for a zero-byte paste in a registered field, so whitespace-only text pastes keep their default; refreshed the `imageDir` comment; removed a stray blank line in `prompt.ts`. Typecheck (core, tui, opencode) and `tui/test/clipboard.test.ts` pass again after the cleanup.
+- Not done: no local-or-remote guard for `oc attach` to a remote server (the saved path is on the client machine). The plan made the guard conditional on an existing cheap check, and none was looked for.
+- Plan: `~/.config/opencode/plans/2026-11-21-questionImagePaste.md`.
+- Verification: `bun run typecheck` passes in core, tui, and opencode. Probe tests (deleted afterwards) checked `saveImage` naming, dedupe, and mime extension, and `expandImages` with known, deleted, unknown, and multiple labels. `opencode/test/session/prompt.test.ts -t image` passes (3), and the tui clipboard tests pass (13). Live (revived v0.2.401, macOS, Claude Code via `mcp__opencode_proxy__question`): Cmd+V of a screenshot into "Type your own answer" came back as `[Image 1 saved at ~/.local/share/opencode/images/20261121-232802-a03c8046.png]`, and the agent read the image without a permission prompt. Not checked live: the dismiss-with-message field and the toast in other fields.
+- MISTAKE: the `/debug` instrumentation was written with an inline python heredoc into `src/`. Use the Edit tool for project files.
+
+### User
+Questions
+- You can now paste an image into a question's "Type your own answer" or "dismiss with message" field; it shows as `[Image 1]`, and the agent receives the saved image path with your answer.
+- Pasting an image into another text field, such as a dialog, now shows a short notice instead of doing nothing.
+
+---
+
 ## 2026-11-20 (~04:29) - v0.2.400 steakhousesVibration - Roast fixes WP3-WP6: installer, security, release, docs - Claude Opus 5.5, low (workers: Sonnet 5.5 high, medium x2); Implementation
 
 ### Agent

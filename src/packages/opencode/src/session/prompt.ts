@@ -4,7 +4,6 @@ import { ConfigCommandV1 } from "@opencode-ai/core/v1/config/command"
 import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import os from "os"
-import { createHash } from "node:crypto"
 import { isDeepEqual } from "remeda"
 import { SessionID, MessageID, PartID } from "./schema"
 import { claudeSteerSinks, isClaudeCodeProvider, STEERED_METADATA_KEY } from "@/provider/claude-code/shared"
@@ -51,7 +50,7 @@ import { LLM } from "./llm"
 import { Shell } from "@opencode-ai/core/shell"
 import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { imageDir } from "@opencode-ai/core/util/imageDir"
+import { imageDir, imageFileName, imageFileSuffix } from "@opencode-ai/core/util/imageDir"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
 import { decodeDataUrl } from "@/util/data-url"
@@ -167,15 +166,6 @@ export function continuedTurnRules(user: SessionV1.User, timeline: SessionV1.Wit
   }
 }
 
-const IMAGE_EXTENSIONS: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/gif": "gif",
-  "image/webp": "webp",
-  "image/avif": "avif",
-  "image/svg+xml": "svg",
-}
-
 function commandRules(command: Command.Info) {
   return {
     turnPermission: Permission.fromConfig(command.permission ?? {}),
@@ -189,21 +179,19 @@ function commandHeader(name: string, body: string) {
 
 type PromptFilePart = Extract<PromptInput["parts"][number], { type: "file" }>
 
-// Writes pasted image bytes into the image folder and returns the file path. The hash in the name
-// makes identical bytes reuse the existing file instead of writing a second copy.
+// Writes pasted image bytes into the image folder and returns the file path. Naming is shared with
+// the TUI's `saveImage` (core/util/imageDir): identical bytes reuse the existing file.
 const writeImage = Effect.fn("SessionPrompt.writeImage")(function* (
   fsys: FSUtil.Interface,
   dir: string,
   bytes: Uint8Array,
   mime: string,
 ) {
-  const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 8)
-  const suffix = `-${hash}.${IMAGE_EXTENSIONS[mime] ?? "png"}`
+  const suffix = imageFileSuffix(bytes, mime)
   yield* fsys.ensureDir(dir)
   const existing = (yield* fsys.readDirectoryEntries(dir)).find((entry) => entry.name.endsWith(suffix))
   if (existing) return path.join(dir, existing.name)
-  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15)
-  const file = path.join(dir, `${stamp}${suffix}`)
+  const file = path.join(dir, imageFileName(suffix))
   yield* fsys.writeWithDirs(file, bytes)
   return file
 })

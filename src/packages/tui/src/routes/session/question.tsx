@@ -1,7 +1,7 @@
 import { createStore } from "solid-js/store"
 import { createEffect, createMemo, createSignal, For, onCleanup, Show } from "solid-js"
 import { useRenderer } from "@opentui/solid"
-import type { TextareaRenderable } from "@opentui/core"
+import type { PasteEvent, TextareaRenderable } from "@opentui/core"
 import { selectedForeground, tint, useTheme } from "../../context/theme"
 import type { QuestionAnswer, QuestionRequest, Session } from "@opencode-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
@@ -11,8 +11,21 @@ import { useBindings, useOpencodeModeStack } from "../../keymap"
 import { useDialog } from "../../ui/dialog"
 import { useToast } from "../../ui/toast"
 import { errorMessage } from "../../util/error"
+import { imagePasteTargets, pasteImageFromEvent, type PastedImage } from "../../editorPaste"
+import { useClipboard } from "../../context/clipboard"
+import { useSync } from "../../context/sync"
+import { imageDir, saveImage } from "@opencode-ai/core/util/imageDir"
 
 const QUESTION_MODE = "question"
+
+// Pasted images show as `[Image N]` in the field; on send, each label still in the text becomes
+// `[Image N saved at <path>]` so the agent can read the file. Unknown labels stay as typed.
+export function expandImages(text: string, images: ReadonlyMap<string, string>) {
+  return text.replace(/\[Image \d+\]/g, (label) => {
+    const file = images.get(label)
+    return file ? `${label.slice(0, -1)} saved at ${file}]` : label
+  })
+}
 
 export function questionAnswerText(request: QuestionRequest, answers: QuestionAnswer[]) {
   const formatted = request.questions
@@ -55,6 +68,22 @@ export function QuestionPrompt(props: {
   let textarea: TextareaRenderable | undefined
   let dismissInput: TextareaRenderable | undefined
 
+  const clipboard = useClipboard()
+  const sync = useSync()
+  const images = new Map<string, string>()
+  // Saved before the label goes in: the clipboard's temp png is overwritten by the next paste.
+  function pasteImage(field: TextareaRenderable, image: PastedImage) {
+    const dir = imageDir(sync.data.config.attachment?.image?.save_dir)
+    void saveImage(dir, Buffer.from(image.data, "base64"), image.mime)
+      .then((file) => {
+        if (field.isDestroyed) return
+        const label = `[Image ${images.size + 1}]`
+        images.set(label, file)
+        field.insertText(`${label} `)
+      })
+      .catch(toast.error)
+  }
+
   const question = createMemo(() => questions()[store.tab])
   const confirm = createMemo(() => !single() && store.tab === questions().length)
   const options = createMemo(() => question()?.options ?? [])
@@ -68,8 +97,9 @@ export function QuestionPrompt(props: {
     return store.answers[store.tab]?.includes(value) ?? false
   })
 
-  function reply(answers: QuestionAnswer[]) {
+  function reply(picked: QuestionAnswer[]) {
     if (sending()) return
+    const answers = picked.map((answer) => answer.map((text) => expandImages(text, images)))
     const onDismiss = props.onDismiss
     setSending(true)
     // A restored question has no live request; the answer goes back as a follow-up message instead.
@@ -118,7 +148,7 @@ export function QuestionPrompt(props: {
           requestID: props.request.id,
           directory: props.directory,
           workspace: props.workspace,
-          message: message?.trim() || undefined,
+          message: expandImages(message?.trim() ?? "", images) || undefined,
         },
         { throwOnError: true },
       )
@@ -530,12 +560,14 @@ export function QuestionPrompt(props: {
                         ref={(val: TextareaRenderable) => {
                           textarea = val
                           val.traits = { status: "ANSWER" }
+                          imagePasteTargets.set(val, (image) => pasteImage(val, image))
                           queueMicrotask(() => {
                             val.focus()
                             val.gotoLineEnd()
                           })
                         }}
                         initialValue={input()}
+                        onPaste={(event: PasteEvent) => pasteImageFromEvent(event, textarea, clipboard)}
                         placeholder="Type your own answer"
                         placeholderColor={theme.textMuted}
                         minHeight={1}
@@ -587,8 +619,10 @@ export function QuestionPrompt(props: {
               ref={(val: TextareaRenderable) => {
                 dismissInput = val
                 val.traits = { status: "DISMISS" }
+                imagePasteTargets.set(val, (image) => pasteImage(val, image))
                 queueMicrotask(() => val.focus())
               }}
+              onPaste={(event: PasteEvent) => pasteImageFromEvent(event, dismissInput, clipboard)}
               placeholder="Message the agent continues with"
               placeholderColor={theme.textMuted}
               minHeight={1}
