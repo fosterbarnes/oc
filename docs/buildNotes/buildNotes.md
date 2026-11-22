@@ -131,6 +131,41 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-21 (~20:46) - v0.2.405 infectiousChains - Active slash command back in the prompt meta row as Build/imp - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified
+- Version: 0.2.405 infectiousChains (not bumped again: version already changed since the last commit)
+- Reverted the 19:37 chip: deleted `component/prompt/activeCommandStrip.tsx`, and `<QueueStrip>` is again the only child of its `<Show>` in `component/prompt/index.tsx`. The user said the chip looked out of place
+- Changed the meta row in `component/prompt/index.tsx`: the agent label and the active command are one `<text flexShrink={0} wrapMode="none">`, with `/name` as a `<span>` in `theme.secondary`. The result reads `Build/imp`, never wraps, and the model `<text>` (already `truncate`) gives up space first. Shell mode shows `Shell` with no command
+- Plan: `~/.config/opencode/plans/activeCommandChip.md` (rewritten); mockup `~/.config/opencode/mockups/activeCommandPlacement2.html` option D2
+- Verification: `bun run typecheck` in tui clean; `bun test test/prompt test/promptQueueLoop.test.ts` 41 pass / 0 fail; `<Show>`+`<span>` inside `<text>` matches the existing `ui/dialog-select.tsx:939`. Live TUI look not checked
+
+### User
+Prompt
+- The chip above the prompt is gone; the active command shows again next to the agent, as `Build/imp`.
+- The command part is colored, and it stays on one line; the model name shortens instead.
+
+---
+
+## 2026-11-21 (~19:37) - v0.2.405 infectiousChains - Active slash command moves to a chip above the prompt - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified
+- Version: 0.2.405 infectiousChains
+- Added `src/packages/tui/src/component/prompt/activeCommandStrip.tsx`: one-line chip ` /<name> ` (bg `backgroundElement`, fg `secondary`, `wrapMode="none"` + `truncate`), rendered just before `QueueStrip` outside the anchor box so autocomplete keeps its position
+- Removed the `/{name}` text from the agent/model meta row in `component/prompt/index.tsx`. Before, it wrapped to two lines and squeezed the model name
+- Shown only in normal mode (hidden in shell mode), whenever `activeCommand()` is set, the same rule as before
+- Plan: `~/.config/opencode/plans/activeCommandChip.md`; mockup `~/.config/opencode/mockups/activeCommandPlacement.html` (option A, but on its own row instead of sharing the QUEUED line)
+- Verification: `bun run typecheck` in tui clean; `bun test test/prompt test/promptQueueLoop.test.ts` 41 pass / 0 fail. Live TUI look not checked
+
+### User
+Prompt
+- The active slash command (like `/second-opinion`) now shows as a small chip above the prompt instead of in the row under it.
+- The row under the prompt shows agent, model, and variant on one line again.
+
+---
+
 ## 2026-11-21 (~19:12) - v0.2.404 bozzoDodger - Esc then Enter interrupts the turn and sends the draft - Claude Opus 5.5, low; Implementation
 
 ### Agent

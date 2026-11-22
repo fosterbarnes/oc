@@ -2189,12 +2189,15 @@ export function Prompt(props: PromptProps) {
                 <Show when={local.agent.current()} fallback={<box height={1} />}>
                   {(agent) => (
                     <>
-                      <text fg={fadeColor(highlight(), agentMetaAlpha())}>
+                      {/* Agent and active command as one token (`Build/imp`) so it never wraps; the model truncates first. */}
+                      <text flexShrink={0} wrapMode="none" fg={fadeColor(highlight(), agentMetaAlpha())}>
                         {store.mode === "shell" ? "Shell" : local.agent.label(agent().name)}
+                        <Show when={store.mode === "normal" && active()}>
+                          {(name) => (
+                            <span style={{ fg: fadeColor(theme.secondary, agentMetaAlpha()) }}>/{name()}</span>
+                          )}
+                        </Show>
                       </text>
-                      <Show when={store.mode === "normal" && active()}>
-                        {(name) => <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>/{name()}</text>}
-                      </Show>
                       <Show when={store.mode === "normal" && local.permission.mode === "auto" && !narrow()}>
                         <text fg={fadeColor(theme.textMuted, agentMetaAlpha())}>auto</text>
                       </Show>
