@@ -33,45 +33,6 @@ export function shortResetDate(ms: number, nowMs: number): string {
   return days < 7 ? `${WEEKDAYS[date.getDay()]} ${clock}` : `${date.getMonth() + 1}/${date.getDate()}`
 }
 
-/** Spelled-out window name for the usage menu: `5-hour`, `Weekly`, `Monthly`, or `N-day`; empty when unknown. */
-export function windowName(minutes: number | null | undefined): string {
-  if (!minutes || minutes <= 0) return ""
-  if (minutes === 10_080) return "Weekly"
-  const days = minutes / 1440
-  if (days >= 28 && days <= 31) return "Monthly"
-  if (days < 1) return `${Math.round(minutes / 60)}-hour`
-  return `${Math.round(days)}-day`
-}
-
-/** Full reset date in local time with the time left, e.g. `Sunday, October 11, 2026 at 2:58 AM (in 1 day, 4 hours)`. */
-export function fullResetDate(ms: number, nowMs: number): string {
-  const date = Locale.format(ms, {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  })
-  const remaining = ms - nowMs
-  if (remaining <= 0) return `${date} (reset passed)`
-  const totalMinutes = Math.floor(remaining / 60_000)
-  if (totalMinutes === 0) return `${date} (in less than a minute)`
-  const days = Math.floor(totalMinutes / 1440)
-  const hours = Math.floor((totalMinutes % 1440) / 60)
-  const minutes = totalMinutes % 60
-  const parts = (
-    [
-      [days, "day"],
-      [hours, "hour"],
-      [minutes, "minute"],
-    ] as const
-  )
-    .filter(([count]) => count > 0)
-    .map(([count, unit]) => `${count} ${unit}${count === 1 ? "" : "s"}`)
-  return `${date} (in ${parts.join(", ")})`
-}
-
 export function orderUsageWindows(windows: [UsageWindow, UsageWindow]): [UsageWindow, UsageWindow] {
   return [...windows].sort(
     (first, second) => (first.minutes ?? Number.POSITIVE_INFINITY) - (second.minutes ?? Number.POSITIVE_INFINITY),

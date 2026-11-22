@@ -199,7 +199,7 @@ export function describeRateLimit(info: RateLimitInfo): RateLimitReport | null {
     return { key, level: "warn", message, transcript: `\n${RATE_LIMIT_MARKER} ${message}\n` }
   }
 
-  if (info.status === "allowed_warning" || info.overageStatus === "allowed_warning") {
+  if (info.status === "allowed_warning") {
     const used = info.utilization === undefined ? "" : ` (${Math.round(info.utilization * 100)}% used)`
     return {
       key,
@@ -207,6 +207,16 @@ export function describeRateLimit(info: RateLimitInfo): RateLimitReport | null {
       message: `Approaching the usage limit${window ? ` for ${window}` : ""}${used}${
         resets ? `, resets at ${resets}` : ""
       }.`,
+      transcript: null,
+    }
+  }
+
+  // The window itself is still allowed; only paid extra usage is near its cap.
+  if (info.overageStatus === "allowed_warning") {
+    return {
+      key,
+      level: "notice",
+      message: `Approaching the extra usage limit${overageResets ? `, resets at ${overageResets}` : ""}.`,
       transcript: null,
     }
   }

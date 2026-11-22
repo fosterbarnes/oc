@@ -10,7 +10,8 @@ export function updateUsageSnapshot<T extends { ok: boolean }>(
   next: UsageSnapshot<T>,
   nowMs: number,
 ): UsageSnapshot<T> {
-  if (!next.ok && previous.ok) return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
+  if (!next.ok && previous.ok)
+    return { ...previous, stale: true, ...(next.metadata ? { metadata: next.metadata } : {}) }
   if (!next.ok) return next
   return { ...next, fetchedAt: next.fetchedAt ?? nowMs, source: next.source ?? "live", stale: next.source === "cache" }
 }
@@ -26,7 +27,7 @@ export type UsageProbeMetadata = {
 export type UsageWindow = {
   usedPercent: number | null
   resetAt: string | null
-  /** Epoch milliseconds of the reset, for the full date in the usage menu. */
+  /** Epoch milliseconds of the reset. */
   resetMs: number | null
   minutes: number | null
   /** True when 0% comes from a passed reset, not a live reading. */
@@ -38,8 +39,12 @@ export type UsageWindow = {
 }
 
 export function usageWindowStale(window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, now: number) {
-  return window.expired === true || window.cached === true || snapshot.stale === true ||
+  return (
+    window.expired === true ||
+    window.cached === true ||
+    snapshot.stale === true ||
     (window.resetMs !== null && window.resetMs <= now) ||
     (window.fetchedAt === undefined && snapshot.source === "cache") ||
     now - (window.fetchedAt ?? snapshot.fetchedAt ?? 0) > 300_000
+  )
 }

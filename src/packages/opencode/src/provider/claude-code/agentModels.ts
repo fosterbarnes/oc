@@ -58,24 +58,27 @@ export type AgentRecord = {
 // One registry per project: the resident server boots this plugin once per
 // project directory, and each project reads its own `.opencode/agents`.
 const registries = new Map<string | undefined, Record<string, AgentRecord>>()
-let defaultSubagentModel: string | undefined
+// Per project like the registry: one project's config must not clear another's default.
+const defaultSubagentModels = new Map<string | undefined, string>()
 
 export function setAgentRegistry(records: Record<string, AgentRecord>, directory?: string): void {
   registries.set(directory, records)
 }
 
 /** `undefined` (the default) means no implicit override for any agent. */
-export function setDefaultSubagentModel(model: string | undefined): void {
-  defaultSubagentModel = model?.trim() || undefined
+export function setDefaultSubagentModel(model: string | undefined, directory?: string): void {
+  const trimmed = model?.trim()
+  if (trimmed) defaultSubagentModels.set(directory, trimmed)
+  else defaultSubagentModels.delete(directory)
 }
 
-export function getDefaultSubagentModel(): string | undefined {
-  return defaultSubagentModel
+export function getDefaultSubagentModel(directory?: string): string | undefined {
+  return defaultSubagentModels.get(directory)
 }
 
 export function _resetAgentRegistryForTests(): void {
   registries.clear()
-  defaultSubagentModel = undefined
+  defaultSubagentModels.clear()
 }
 
 /** `claude-opus-5-fast@work` -> `@work`; a default-account id has none. */
@@ -143,7 +146,7 @@ export function resolveAgentModel(
   if (!record) return modelId
   if (record.model?.includes("/")) return modelId
 
-  const fallback = overrides?.records ? overrides.defaultSubagentModel : defaultSubagentModel
+  const fallback = overrides?.records ? overrides.defaultSubagentModel : defaultSubagentModels.get(overrides?.directory)
   const declared = record.forceModel?.trim()
   const wanted = declared || (record.mode === "subagent" ? fallback : undefined)
   if (!wanted) return modelId

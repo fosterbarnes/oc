@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Per-turn cost and cache stats: the pure formatter and the `turnStats` option
  * default.

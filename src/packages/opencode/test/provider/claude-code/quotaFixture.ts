@@ -212,11 +212,16 @@ export function waitProviderUsageUpdated(
   match: (value: UsageInfo) => boolean,
   label: string,
 ) {
-  return readGlobalEvent(events, timeoutMs, (payload) => {
-    if (payload.type !== "provider.usage.updated") return false
-    const info = usageInfo(payload)
-    return match(info)
-  }, label).pipe(Effect.map(usageInfo))
+  return readGlobalEvent(
+    events,
+    timeoutMs,
+    (payload) => {
+      if (payload.type !== "provider.usage.updated") return false
+      const info = usageInfo(payload)
+      return match(info)
+    },
+    label,
+  ).pipe(Effect.map(usageInfo))
 }
 
 export function fetchProviderUsageSnapshot(baseUrl: string, project: string) {
@@ -243,15 +248,20 @@ export const openChatQuota = Effect.fnUntraced(function* (fixture: CliFixture) {
     },
   })
   const sdk = createOpencodeClient({ baseUrl: server.url, directory: project, throwOnError: true })
-  const sessionID = (yield* Effect.promise(() => sdk.session.create({ title: "quotaUsage" }, { throwOnError: true }))).data
-    .id
+  const sessionID = (yield* Effect.promise(() => sdk.session.create({ title: "quotaUsage" }, { throwOnError: true })))
+    .data.id
   return { project, server, sdk, sessionID, releasePath }
 })
 
 export const runQuotaStreamIntegration = Effect.fnUntraced(function* (fixture: CliFixture) {
   const chat = yield* openChatQuota(fixture)
   const events = yield* openGlobalEventStream(chat.sdk)
-  yield* readGlobalEvent(events, 60_000, (payload) => payload.type === "server.connected", "server.connected never arrived")
+  yield* readGlobalEvent(
+    events,
+    60_000,
+    (payload) => payload.type === "server.connected",
+    "server.connected never arrived",
+  )
   const model = { providerID: "claude-code", modelID: "claude-sonnet-4-5" }
   const turn = yield* Effect.promise(() =>
     chat.sdk.session.prompt(
@@ -270,9 +280,16 @@ export const runQuotaStreamIntegration = Effect.fnUntraced(function* (fixture: C
   )
   const snapshot = yield* pollWithTimeout(
     fetchProviderUsageSnapshot(chat.server.url, chat.project).pipe(
-      Effect.map((body) => body.some((info) => info.providerID === "claude-code" &&
-        usageWindowPercent(info, "five_hour") === 12.5 && usageWindowPercent(info, "seven_day") === 8.25)
-        ? body : undefined),
+      Effect.map((body) =>
+        body.some(
+          (info) =>
+            info.providerID === "claude-code" &&
+            usageWindowPercent(info, "five_hour") === 12.5 &&
+            usageWindowPercent(info, "seven_day") === 8.25,
+        )
+          ? body
+          : undefined,
+      ),
     ),
     "GET /provider/usage never reflected the streamed hourly quota",
     "30 seconds",
@@ -287,5 +304,3 @@ export const runQuotaStreamIntegration = Effect.fnUntraced(function* (fixture: C
   yield* Fiber.join(turn)
   return { chat, first, snapshot }
 })
-
-export const QUOTA_MENU_HOURLY_UPDATED = "5-hour: 18.5% used, 81.5% remaining"

@@ -115,17 +115,22 @@ export function splitCommandTools(
   dialect: HostToolDialect = "v1",
 ) {
   const offered = modelToolNames(modelTools) ?? new Set<string>()
+  // A tool the host has no counterpart for (`null`, e.g. V2 todowrite) cannot be denied there, so
+  // the plan alone decides, as in `nativeToolsDeniedByHost`.
   const native = new Set(
     plan.native.filter((id) => {
       const name = toolNameForHost(id, dialect)
-      return name !== null && offered.has(name) && CLAUDE_NATIVE_TOOLS[id] !== undefined
+      return (name === null || offered.has(name)) && CLAUDE_NATIVE_TOOLS[id] !== undefined
     }),
   )
-  // Claude's own Bash runs background jobs itself, so oc's job controls go with oc's shell.
-  const replaced = new Set(
-    [...native, ...(native.has("bash") ? ["bgStatus", "bgKill"] : [])].map((id) => toolNameForHost(id, dialect)),
-  )
   const harnessOnly = new Set(plan.native.filter((id) => CLAUDE_HARNESS_ONLY_TOOLS[id] !== undefined))
+  // Claude's own Bash runs background jobs itself, so oc's job controls go with oc's shell. A
+  // harness-only built-in the plan keeps (WebSearch) also replaces oc's tool when oc offers one.
+  const replaced = new Set(
+    [...native, ...harnessOnly, ...(native.has("bash") ? ["bgStatus", "bgKill"] : [])].map((id) =>
+      toolNameForHost(id, dialect),
+    ),
+  )
   return {
     forwarded: [...offered].filter((name) => !replaced.has(name)),
     kept: [...native, ...harnessOnly].flatMap((id) => CLAUDE_NATIVE_TOOLS[id] ?? CLAUDE_HARNESS_ONLY_TOOLS[id]),

@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Unit tests for hasNewUserContent in src/provider/claude-code/callOptions.ts.
  */

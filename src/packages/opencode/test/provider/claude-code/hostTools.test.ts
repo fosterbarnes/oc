@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Tool calls leave the plugin in opencode 1.x's vocabulary. On opencode 2.x the
  * stream is rewritten at its edge (src/hostTools.ts); on 1.x nothing changes.

@@ -18,11 +18,6 @@ export const USAGE_PROVIDER_OPTIONS: { id: UsageProviderId; title: string }[] = 
 // Providers with a paid plan line in the sidebar, each with its billing page.
 export const USAGE_PLAN_PROVIDERS = ["openai", "claude-code", "cursor"] as const
 export type UsagePlanProvider = (typeof USAGE_PLAN_PROVIDERS)[number]
-export const USAGE_PLAN_NAMES: Record<UsagePlanProvider, string> = {
-  openai: "Codex",
-  "claude-code": "Claude",
-  cursor: "Cursor",
-}
 export const USAGE_BILLING_URLS: Record<UsagePlanProvider, string> = {
   openai: "https://chatgpt.com/#settings/Subscription",
   "claude-code": "https://claude.ai/settings/billing",

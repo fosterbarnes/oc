@@ -276,9 +276,13 @@ export function createScheduler(options: SchedulerOptions) {
     if (!pending.size) return result
     const cli = await checkWarmupCli(input.cliPath)
     if (!cli.available) {
+      // Ticks only add new occurrences, so a cleared slot would never come back: keep it, so a CLI
+      // check that fails once (PATH, antivirus) retries. The send deadline needs this machine's
+      // standby rank, which comes from peers read only once the CLI works, so `run` judges it
+      // then; the catch-up horizon bounds what waits here.
       log.warn("claude warm-up CLI unavailable; sends skipped", { error: cli.error })
+      for (const [key, item] of pending) if (now - item.base > CATCHUP_MS) pending.delete(key)
       result.skipped += pending.size
-      pending.clear()
       return result
     }
     const inventory = await listConnected({
@@ -295,7 +299,7 @@ export function createScheduler(options: SchedulerOptions) {
         ])
       : [LOCAL_HOST, [] as PeerView[]]
 
-    const work: Array<{ item: Pending; dir: string; deadline: number; rank: number }> = []
+    const work: Array<{ key: string; item: Pending; dir: string; deadline: number; rank: number }> = []
     for (const [key, item] of pending) {
       const slot = String(item.at)
       const claimedBy = views.filter((view) => view.claims[item.email]?.[slot] !== undefined)
@@ -335,11 +339,11 @@ export function createScheduler(options: SchedulerOptions) {
       }
       if (now < due) continue
       pending.delete(key)
-      work.push({ item, dir, deadline, rank })
+      work.push({ key, item, dir, deadline, rank })
     }
 
     const wall = options.clock ?? Date.now
-    await eachLimit(work, SEND_CONCURRENCY, async ({ item, dir, deadline, rank }) => {
+    await eachLimit(work, SEND_CONCURRENCY, async ({ key, item, dir, deadline, rank }) => {
       const late = () => wall() > deadline
       if (input.signal?.aborted) {
         result.skipped += 1
@@ -355,8 +359,15 @@ export function createScheduler(options: SchedulerOptions) {
         result.skipped += 1
         return
       }
+      // No answer (timeout, CLI hiccup) is transient: requeue so a later tick retries until the
+      // deadline. Ticks only add new occurrences, so a dropped slot would never send.
+      if (!email) {
+        pending.set(key, item)
+        result.skipped += 1
+        return
+      }
       // Send only to the scheduled account: a folder signed in to another one meanwhile never sends.
-      if (!email || emailKey(email) !== item.email) {
+      if (emailKey(email) !== item.email) {
         result.skipped += 1
         return
       }
@@ -400,8 +411,9 @@ export function createScheduler(options: SchedulerOptions) {
         signal: input.signal,
         tracker: options.tracker,
       }).catch((): SendResult => ({ outcome: "failed", detail: "send threw" }))
-      // A shutdown that raced the send leaves no outcome noise behind.
-      if (input.signal?.aborted) {
+      // A shutdown that raced the send leaves no outcome noise behind, but a prompt that went out
+      // is still recorded: its claim stays, so nothing would ever send or record it again.
+      if (input.signal?.aborted && send.outcome !== "sent") {
         result.skipped += 1
         return
       }

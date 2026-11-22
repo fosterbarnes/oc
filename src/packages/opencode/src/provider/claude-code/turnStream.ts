@@ -276,6 +276,8 @@ class ClaudeTurn {
   /** `post_tokens` of a `/compact` boundary: its turn makes no model call, so this is the only size it has. */
   private compactedTokens: number | undefined
   private resultMeta: ReturnType<typeof resultMetadata> | Record<string, never> = {}
+  /** Cost of this step's results so far; an auto-continued or steered step has several. */
+  private turnCostUsd: number | undefined
   /** Subtype of a failing `result`, so the finish reports an error rather than a clean stop. */
   private resultFailure: string | undefined
   private resultIsError = false
@@ -472,9 +474,7 @@ class ClaudeTurn {
     const plan = await this.planSpawnFor()
     const live = getActiveProcess(this.sk)
     if (live) {
-      if (plan.proxyServer && plan.proxyServer !== live.proxyServer) void plan.proxyServer.close()
-      if (plan.systemPromptFile && plan.systemPromptFile !== live.systemPromptFile)
-        void unlink(plan.systemPromptFile).catch(() => {})
+      discardPlan(plan, live)
       return live
     }
     return this.spawn(plan)
@@ -643,6 +643,8 @@ class ClaudeTurn {
       `\n> **Claude account switched:** ${poolAccountLabel(previous)} hit its usage limit; continuing ${followed ? "the same Claude conversation " : ""}on ${poolAccountLabel(next)}.\n`,
     )
     const plan = await this.planSpawnFor()
+    // Nothing spawns this plan now, and only a child's exit releases its proxy and prompt file.
+    if (this.closed || this.autoContinue.aborted) discardPlan(plan)
     if (this.closed) return
     if (this.autoContinue.aborted) return this.finish()
     this.cliArgs = plan.cliArgs
@@ -788,7 +790,11 @@ class ClaudeTurn {
    */
   private replayUnattendedOutput(attachAutonomous: boolean): string[] {
     const all = takeUnattendedLines(this.activeProcess!)
-    const start = attachAutonomous ? all.lines.findLastIndex(isInitLine) : -1
+    const init = all.lines.findLastIndex(isInitLine)
+    // The line cap can drop the turn's own `init` while its later lines (even its `result`) stay.
+    // Everything kept then came after that init, so all of it is this turn's; replaying it only as
+    // narration would leave the turn waiting on a CLI that already finished.
+    const start = !attachAutonomous ? -1 : init >= 0 ? init : all.dropped > 0 ? 0 : -1
     const live = start < 0 ? [] : all.lines.slice(start)
     const unattended = { lines: start < 0 ? all.lines : all.lines.slice(0, start), dropped: all.dropped }
     if (unattended.lines.length === 0 && unattended.dropped === 0) return live
@@ -903,6 +909,11 @@ class ClaudeTurn {
         if (note) this.out.note(note)
         return
       }
+      case "message_start":
+        // Whether thinking streamed is per API call: a later call in the same turn (after a tool
+        // result) whose CLI build strips thinking_delta still needs its thinking recovered.
+        if (!outer.parent_tool_use_id) this.hadThinkingTextFromStream = false
+        return
       case "content_block_start":
         return this.onBlockStart(msg)
       case "content_block_delta":
@@ -925,7 +936,9 @@ class ClaudeTurn {
         return
       }
       case "assistant":
-        this.onAssistant(msg)
+        // A subagent's own calls (inside a Task) are not the parent's: their usage and stop
+        // reason must not become the parent's finish or trigger its auto-continue.
+        if (!outer.parent_tool_use_id) this.onAssistant(msg)
         return this.reportLiveUsage(outer)
       case "user":
         // A compaction turn's summary also arrives as a replay; `onUser` handles that.
@@ -1250,6 +1263,9 @@ class ClaudeTurn {
   }
 
   private readToolResults(msg: ClaudeStreamMessage) {
+    // Ending the denied turn waits for the whole message: a sibling result in it (a parallel CLI
+    // Read) still needs its tool-result, or that row reports aborted.
+    let denied = false
     for (const block of msg.message?.content ?? []) {
       if (block.type !== "tool_result" || !block.tool_use_id) continue
       const id = block.tool_use_id
@@ -1259,7 +1275,7 @@ class ClaudeTurn {
       if (this.proxyToolUseIds.delete(id) || this.skipResultForIds.has(id)) {
         // Settled either way; a call left here would hold off every later preempt.
         this.toolCallNames.delete(id)
-        if (this.denialTimer) return void this.endDeniedTurn()
+        if (this.denialTimer) denied = true
         continue
       }
       const resultText = toolResultText(block.content)
@@ -1288,6 +1304,7 @@ class ClaudeTurn {
       this.noteTool()
       log.info("tool result emitted", { toolUseId: id, name, isError })
     }
+    if (denied) this.endDeniedTurn()
   }
 
   /**
@@ -1305,6 +1322,7 @@ class ClaudeTurn {
 
   private onResult(msg: ClaudeStreamMessage) {
     if (this.steering.retired) return this.finish()
+    this.steering.noteResult()
     this.clearResultFallback()
     this.resultIsError = msg.is_error === true
     this.beginTextAccountSwitch(msg)
@@ -1380,7 +1398,10 @@ class ClaudeTurn {
     }
 
     const turnStats = extractTurnStats(msg)
-    const turnCostUsd = turnCostFromTotal(msg.session_id, msg.total_cost_usd, this.cliArgs.includes("--resume"))
+    // Each result's diff covers only its own segment (the baseline moves every time), so add them.
+    const segmentCost = turnCostFromTotal(msg.session_id, msg.total_cost_usd, this.cliArgs.includes("--resume"))
+    if (segmentCost !== undefined) this.turnCostUsd = (this.turnCostUsd ?? 0) + segmentCost
+    const turnCostUsd = this.turnCostUsd
     this.resultMeta = { ...resultMetadata(msg), ...(turnCostUsd === undefined ? {} : { turnCostUsd }) }
     log.info("conversation result", {
       sessionId: msg.session_id,
@@ -1413,7 +1434,7 @@ class ClaudeTurn {
     // A steer written after Claude's last tool call is still in stdin: the CLI
     // runs it as its next turn, which this step keeps streaming until that `result`.
     this.steering.flush()
-    if (!this.autoContinue.aborted && !this.toolDenied && this.steering.hasUnread) {
+    if (!this.autoContinue.aborted && !this.toolDenied && this.steering.owesTurn) {
       this.turnCompleted = false
       if (this.activeProcess) noteTurnStarted(this.activeProcess)
       this.startResultFallback()
@@ -1588,6 +1609,9 @@ class ClaudeTurn {
     // The `result` just consumed marked the CLI idle; this puts it back to work.
     if (this.activeProcess) noteTurnStarted(this.activeProcess)
     this.proc.stdin?.write(makeAutoContinueMessage() + "\n")
+    // `onResult` cleared the inactivity watchdog; re-arm it as the unread-steer path does, or a CLI
+    // that never answers the nudge holds the stream and child open until an abort.
+    this.startResultFallback()
     return true
   }
 
@@ -1816,7 +1840,8 @@ class ClaudeTurn {
       this.out.enqueue({
         type: "finish",
         finishReason: crashed ? toFinishReason("error") : this.finishReason(),
-        usage: toUsage(),
+        // An aborted or crashed turn still used the context its last call reported.
+        usage: toUsage(contextUsage(this.lastCall)),
         providerMetadata: { "claude-code": this.resultMeta },
       })
       this.out.close()
@@ -2010,14 +2035,28 @@ class ClaudeTurn {
     this.lineEmitter.off("line", this.onLine)
     this.lineEmitter.off("close", this.onClose)
     this.proc.off("error", this.onProcError)
-    const respawned = await respawnActiveProcess(
-      this.sk,
-      this.config.cliPath,
-      this.cliArgs,
-      this.turn.cwd,
-      this.config.ignoreAnthropicApiKey,
-    )
-    if (this.closed) return
+    let respawned: Awaited<ReturnType<typeof respawnActiveProcess>>
+    try {
+      respawned = await respawnActiveProcess(
+        this.sk,
+        this.config.cliPath,
+        this.cliArgs,
+        this.turn.cwd,
+        this.config.ignoreAnthropicApiKey,
+      )
+    } catch (error) {
+      // Listeners are already off, so nothing else would end this turn.
+      log.error("respawn failed (start watchdog)", { sessionKey: this.sk, error: String(error) })
+      if (!this.closed) this.failTurn(`Restarting the silent Claude process failed: ${String(error)}`)
+      return
+    }
+    if (this.closed) {
+      // Aborted while respawning: the replacement is marked mid-turn but was never sent this turn,
+      // so it would never emit a result and every later turn would wait on it. Its exit handler
+      // releases the map entry.
+      respawned?.proc.kill()
+      return
+    }
     if (!respawned) {
       log.error("no active process to respawn (start watchdog); ending turn", { sessionKey: this.sk })
       return this.failTurn("No active claude process to respawn after start watchdog timeout.")
@@ -2108,6 +2147,13 @@ class ClaudeTurn {
 
 function emptyWindow() {
   return { text: "", lastText: "", reasoning: false, tool: false, proxy: false }
+}
+
+/** Release a spawn plan no child will own: its proxy server and prompt file, unless `keep` shares them. */
+function discardPlan(plan: Awaited<ReturnType<typeof planSpawn>>, keep?: ActiveProcess) {
+  if (plan.proxyServer && plan.proxyServer !== keep?.proxyServer) void plan.proxyServer.close()
+  if (plan.systemPromptFile && plan.systemPromptFile !== keep?.systemPromptFile)
+    void unlink(plan.systemPromptFile).catch(() => {})
 }
 
 function envMs(name: string, fallback: number) {

@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { denyMessageForTool, isAskUserQuestionTool } from "@/provider/claude-code/askUserQuestion.js"

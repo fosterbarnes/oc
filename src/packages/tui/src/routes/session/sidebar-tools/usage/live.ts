@@ -2,7 +2,7 @@ import type { ProviderUsage } from "@opencode-ai/core/provider-usage"
 import { updateClaudeSnapshot, type ClaudeCodeUsage } from "./claude"
 import { compactResetDate } from "./format"
 import type { OpenAIUsage } from "./probes"
-import { updateUsageSnapshot, usageWindowStale, type UsageSnapshot, type UsageWindow } from "./snapshot"
+import { updateUsageSnapshot, type UsageSnapshot, type UsageWindow } from "./snapshot"
 
 const unknownWindow = (): UsageWindow => ({ usedPercent: null, resetAt: null, resetMs: null, minutes: null })
 
@@ -77,24 +77,32 @@ export function applyOpenAIObservation(
   if (previous.accountID && previous.accountID !== observation.accountID) return previous
   const windows = observation.windows.filter((window) => window.id === "primary" || window.id === "secondary")
   if (!windows.length) return previous
-  const base = previous.ok ? previous : {
-    ok: true as const,
-    accountID: observation.accountID,
-    primary: unknownWindow(),
-    secondary: unknownWindow(),
-  }
+  const base = previous.ok
+    ? previous
+    : {
+        ok: true as const,
+        accountID: observation.accountID,
+        primary: unknownWindow(),
+        secondary: unknownWindow(),
+      }
   return {
     ...base,
     accountID: observation.accountID,
     fetchedAt: Math.max(previous.fetchedAt ?? 0, observation.observedAt),
     source: "live",
     stale: false,
-    primary: windows.filter((window) => window.id === "primary").reduce(
-      (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity), base.primary,
-    ),
-    secondary: windows.filter((window) => window.id === "secondary").reduce(
-      (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity), base.secondary,
-    ),
+    primary: windows
+      .filter((window) => window.id === "primary")
+      .reduce(
+        (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity),
+        base.primary,
+      ),
+    secondary: windows
+      .filter((window) => window.id === "secondary")
+      .reduce(
+        (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity),
+        base.secondary,
+      ),
   }
 }
 
@@ -107,16 +115,26 @@ export function applyClaudeObservation(
     if (!previous.accounts.some((account) => account.id === observation.accountID)) return previous
     return {
       ...previous,
-      accounts: previous.accounts.map((account) => account.id === observation.accountID
-        ? { ...account, usage: applyClaudeObservation(account.usage.ok ? account.usage : {
-          ok: true,
-          accountID: account.id,
-          fetchedAt: 0,
-          source: "cache",
-          fiveHour: unknownWindow(),
-          weekly: unknownWindow(),
-        }, observation) }
-        : account),
+      accounts: previous.accounts.map((account) =>
+        account.id === observation.accountID
+          ? {
+              ...account,
+              usage: applyClaudeObservation(
+                account.usage.ok
+                  ? account.usage
+                  : {
+                      ok: true,
+                      accountID: account.id,
+                      fetchedAt: 0,
+                      source: "cache",
+                      fiveHour: unknownWindow(),
+                      weekly: unknownWindow(),
+                    },
+                observation,
+              ),
+            }
+          : account,
+      ),
     }
   }
   if (previous.accountID !== observation.accountID) return previous
@@ -127,22 +145,17 @@ export function applyClaudeObservation(
     fetchedAt: Math.max(previous.fetchedAt, observation.observedAt),
     source: "live",
     stale: false,
-    fiveHour: windows.filter((window) => window.id === "five_hour").reduce(
-      (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity), previous.fiveHour,
-    ),
-    weekly: windows.filter((window) => window.id === "seven_day").reduce(
-      (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity), previous.weekly,
-    ),
+    fiveHour: windows
+      .filter((window) => window.id === "five_hour")
+      .reduce(
+        (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity),
+        previous.fiveHour,
+      ),
+    weekly: windows
+      .filter((window) => window.id === "seven_day")
+      .reduce(
+        (old, window) => mergeUsageWindow(old, observedWindow(window, observation.observedAt), Infinity),
+        previous.weekly,
+      ),
   }
-}
-
-export function usageReadingDetails(window: UsageWindow, snapshot: UsageSnapshot<{ ok: boolean }>, now: number) {
-  if (window.expired || (window.resetMs !== null && window.resetMs <= now))
-    return ["Reset passed; awaiting a current reading"]
-  const at = window.fetchedAt ?? snapshot.fetchedAt
-  if (at === undefined || window.usedPercent === null) return []
-  const age = Math.max(0, Math.floor((now - at) / 1000))
-  const elapsed = age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`
-  return [`${usageWindowStale(window, snapshot, now) ? "Last known reading" : "Updated"} ${elapsed} ago`,
-    ...(snapshot.metadata?.status === 429 ? ["Usage endpoint rate limited"] : [])]
 }

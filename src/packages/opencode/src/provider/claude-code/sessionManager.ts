@@ -106,6 +106,8 @@ export interface ActiveProcess {
    * background task finished) until an oc turn attaches to it.
    */
   autonomousTurn?: boolean
+  /** Counts wake requests, so a late failure of an older one cannot clear a newer wake's flag. */
+  wakeSeq?: number
   /**
    * CLI tasks started and not yet reported finished, id -> backgrounded. They die with this
    * child; while any run, the child keeps its account (`workingAccount`). See `noteTaskLine`.
@@ -187,6 +189,14 @@ function requestWakeTurn(ap: ActiveProcess) {
   ap.autonomousTurn = true
   ap.turnInFlight = true
   log.notice("claude started a turn between oc turns; waking the session", { sessionID: target.sessionID })
+  // No oc turn will attach to clear the flag when the wake fails, and a stuck flag makes the
+  // stdout handler skip every later init, so later background completions would never wake.
+  const seq = (ap.wakeSeq ?? 0) + 1
+  ap.wakeSeq = seq
+  const failed = (error: unknown) => {
+    if (ap.wakeSeq === seq) ap.autonomousTurn = false
+    log.warn("wake prompt failed", { error: String(error) })
+  }
   void client
     .post({
       url: `/session/${target.sessionID}/prompt_async?directory=${encodeURIComponent(target.directory)}`,
@@ -198,8 +208,8 @@ function requestWakeTurn(ap: ActiveProcess) {
       },
     })
     .then((response) => {
-      if (response.error !== undefined) log.warn("wake prompt failed", { error: String(response.error) })
-    })
+      if (response.error !== undefined) failed(response.error)
+    }, failed)
 }
 
 // The CLI writes its own diagnostics to stderr, which is where the reason a
@@ -722,12 +732,22 @@ async function stopChildProcess(proc: ChildProcess, options: StopOptions = {}): 
   return forcedExit
 }
 
+// Stops whose child is detached but not yet exited. A second caller (retire racing an account
+// switch) must wait for the same exit, or it would spawn a new child beside the live one.
+const pendingStops = new Map<string, Promise<boolean>>()
+
 export async function deleteActiveProcessAndWait(key: string, options: StopOptions = {}): Promise<boolean> {
   const ap = activeProcesses.get(key)
+  if (!ap) return (await pendingStops.get(key)) ?? true
   // Queued stdin work must die before closing the proxy can release a tool boundary.
-  if (options.forceKill) ap?.proc.kill("SIGKILL")
+  if (options.forceKill) ap.proc.kill("SIGKILL")
   detachActiveProcess(key)
-  if (!ap || (await stopChildProcess(ap.proc, options))) return true
+  const stop = stopChildProcess(ap.proc, options)
+  pendingStops.set(key, stop)
+  const exited = await stop.finally(() => {
+    if (pendingStops.get(key) === stop) pendingStops.delete(key)
+  })
+  if (exited) return true
 
   log.warn("claude process did not exit; its conversation is lost", {
     sessionKey: key,
@@ -745,8 +765,10 @@ export function getClaudeSessionId(key: string): string | undefined {
 function loadedSessions(): Map<string, ClaudeSessionRecord> {
   const stamp = fileStamp(SESSIONS_FILE)
   if (stamp === sessionsStamp) return claudeSessions
-  sessionsStamp = stamp
   const text = readSessionsFile()
+  // Unreadable (a Windows lock, a permission error) is not empty: keep memory and retry next read.
+  if (text === null) return claudeSessions
+  sessionsStamp = stamp
   const parsed = text ? parseSessionsFile(text) : []
   if (!parsed) {
     // Memory stays: keep the bad file aside and restore the file from memory.
@@ -759,14 +781,14 @@ function loadedSessions(): Map<string, ClaudeSessionRecord> {
   return claudeSessions
 }
 
-function readSessionsFile(): string | undefined {
+/** The file text, `undefined` when there is no file, `null` when it exists but cannot be read. */
+function readSessionsFile(): string | undefined | null {
   try {
     return readFileSync(SESSIONS_FILE, "utf8")
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      log.warn("cannot read claude sessions file", { file: SESSIONS_FILE, error: String(error) })
-    }
-    return undefined
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined
+    log.warn("cannot read claude sessions file", { file: SESSIONS_FILE, error: String(error) })
+    return null
   }
 }
 
@@ -1079,8 +1101,12 @@ export function spawnClaudeProcess(
   // an error between stream turns (no per-stream listener attached then).
   proc.on("error", (err) => {
     log.error("claude process error", { sessionKey, error: err.message })
-    // A child that never started emits no `exit`, so release its entry here.
-    if (proc.pid === undefined && activeProcesses.get(sessionKey) === ap) detachActiveProcess(sessionKey)
+    // A child that never started emits no `exit`, so release its entry, proxy, and prompt file here.
+    if (proc.pid === undefined && activeProcesses.get(sessionKey) === ap) {
+      detachActiveProcess(sessionKey)
+      void proxyServer?.close()
+      if (systemPromptFile) void unlink(systemPromptFile).catch(() => {})
+    }
   })
 
   // Same baseline for the child's stdin, which is a separate emitter. Every
@@ -1177,13 +1203,20 @@ export function spawnClaudeProcess(
  * conversation lost, so the next turn asks before starting fresh).
  */
 export function appendResumeIfNeeded(sessionKey: string, cliArgs: string[]): string[] {
-  if (cliArgs.includes("--resume") || cliArgs.includes("--session-id")) {
-    return cliArgs
-  }
   const sid = getClaudeSessionId(sessionKey)
   if (!sid) return cliArgs
-  return [...cliArgs, "--resume", sid, ...(isPendingFork(sessionKey) ? ["--fork-session"] : [])]
+  // Flags still naming the stored id are current: a child that went silent before its fork or
+  // drift rewind took effect must retry that same branch.
+  const flag = cliArgs.findIndex((arg) => arg === "--resume" || arg === "--session-id")
+  if (flag >= 0 && cliArgs[flag + 1] === sid) return cliArgs
+  // Otherwise the child already branched (the stored id is the fork's), and re-sending
+  // `--resume <origin> --fork-session` would branch the origin again and drop every turn since.
+  const args = cliArgs.filter((arg, i) => !SESSION_FLAGS.has(arg) && !SESSION_VALUE_FLAGS.has(cliArgs[i - 1] ?? ""))
+  return [...args, "--resume", sid, ...(isPendingFork(sessionKey) ? ["--fork-session"] : [])]
 }
+
+const SESSION_VALUE_FLAGS = new Set(["--resume", "--session-id", "--resume-session-at"])
+const SESSION_FLAGS = new Set([...SESSION_VALUE_FLAGS, "--fork-session"])
 
 /**
  * Replace a wedged reused process with a fresh one, resuming the same
@@ -1235,6 +1268,9 @@ export async function respawnActiveProcess(
   if (!(await stopChildProcess(old.proc))) {
     log.warn("claude process did not exit before respawn; its conversation is lost", { sessionKey })
     markClaudeSessionLost(sessionKey, "the Claude process did not exit when asked to")
+    // No replacement takes these over, and the exit handler that would release them is gone.
+    void old.proxyServer?.close()
+    if (old.systemPromptFile) void unlink(old.systemPromptFile).catch(() => {})
     return undefined
   }
   const replacement = spawnClaudeProcess(

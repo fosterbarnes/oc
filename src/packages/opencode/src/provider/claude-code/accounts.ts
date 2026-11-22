@@ -76,15 +76,16 @@ export function poolAccountIds(accounts: string[] | undefined): string[] {
   // elsewhere, ~/.claude is a separate account.
   const defaultDir = path.resolve(expandHome(process.env.CLAUDE_CONFIG_DIR || "~/.claude"))
   // Windows paths compare case-insensitively; elsewhere exactly.
-  const sameDir = (a: string, b: string) =>
-    process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b
+  const dirKey = (dir: string) => (process.platform === "win32" ? dir.toLowerCase() : dir)
   const ids = (accounts ?? []).map((dir) => {
     const resolved = path.resolve(expandHome(dir))
     // An explicit entry for the default dir (however cased) is that account,
     // not a second pool entry whose limit marks would never meet the default's.
-    return sameDir(resolved, defaultDir) ? DEFAULT_ACCOUNT : resolved
+    return dirKey(resolved) === dirKey(defaultDir) ? DEFAULT_ACCOUNT : resolved
   })
-  return ids.length ? [...new Set(ids)] : [DEFAULT_ACCOUNT]
+  // One dir listed twice in different case is one account, or failover could "switch" onto it.
+  const unique = ids.filter((id, i) => ids.findIndex((other) => dirKey(other) === dirKey(id)) === i)
+  return unique.length ? unique : [DEFAULT_ACCOUNT]
 }
 
 /** The `accounts` entry, as the user wrote it, that resolves to a pool id. */
@@ -489,10 +490,12 @@ export function markAccountLimited(
 ): void {
   ensureLoaded(now, true)
   const until = resetsAtMs !== undefined && resetsAtMs > now ? resetsAtMs : now + UNKNOWN_RESET_MS
-  if (until <= (limitedUntil.get(id) ?? 0)) return
+  const previous = limitedUntil.get(id) ?? 0
+  if (until <= previous) return
   limitedUntil.set(id, until)
   if (reason) limitReasons.set(id, reason)
-  else limitReasons.delete(id)
+  // Extending a live mark (a usage-cache reading after the rejection) keeps the rejection's reason.
+  else if (previous <= now) limitReasons.delete(id)
   persistPool(now)
 }
 
@@ -532,7 +535,8 @@ export function sharesTranscripts(a: string, b: string): boolean {
  */
 export function canonicalAccountId(id: string): string {
   if (id !== DEFAULT_ACCOUNT) return ClaudeUsageCache.configDirId(id)
-  return ClaudeUsageCache.configDirId(expandHome(process.env.CLAUDE_CONFIG_DIR ?? "~/.claude"))
+  // `||` like `poolAccountIds`: an empty CLAUDE_CONFIG_DIR means ~/.claude, not the cwd.
+  return ClaudeUsageCache.configDirId(expandHome(process.env.CLAUDE_CONFIG_DIR || "~/.claude"))
 }
 
 /** Earliest future `limitedUntil` over the given pool ids (all known ids when omitted). */
@@ -639,9 +643,10 @@ export function configureApiAccount(
   apiAccount = key ? { id, apiKey: key } : undefined
   // No pool file means disk is off (tests): leave folders alone too.
   if (!apiAccount || !poolFile || preparedDir === id) return
-  preparedDir = id
   try {
     createAccountDir(id)
+    // Only after success: a failed prepare (Windows symlink EPERM) retries on the next config read.
+    preparedDir = id
   } catch (error) {
     log.warn("cannot prepare the claude-code apiAccount dir", { dir: id, error: String(error) })
   }
@@ -838,6 +843,8 @@ export function poolAccountLabel(id: string): string {
 export function forgetAccount(id: string, now = Date.now()): void {
   ensureLoaded(now, true)
   limitedUntil.delete(id)
+  limitReasons.delete(id)
+  for (const key of modelLimited.keys()) if (key.startsWith(modelKey(id, ""))) modelLimited.delete(key)
   for (const [session, pinned] of sessionAccounts) if (pinned === id) sessionAccounts.delete(session)
   if (currentAccount === id) currentAccount = undefined
   persistPool(now)

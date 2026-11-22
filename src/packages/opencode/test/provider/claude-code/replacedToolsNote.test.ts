@@ -96,7 +96,8 @@ test("the first message to a process whose command replaces Write and Edit names
     expect(note).toContain("`mcp__opencode_proxy__edit`, `mcp__opencode_proxy__write`")
     expect(note).toContain("select:mcp__opencode_proxy__edit,mcp__opencode_proxy__write")
     expect(note).toContain("Edit, Write used earlier")
-    expect(sent[0][0]).toMatchObject({ type: "text", text: "Write the plan." })
+    // The separator keeps the appended note from gluing onto the user's last word.
+    expect(sent[0][0]).toMatchObject({ type: "text", text: "Write the plan.\n\n" })
     expect(sent[1].some((block) => block.text?.includes("mcp__opencode_proxy__"))).toBe(false)
   } finally {
     await deleteActiveProcessAndWait(key)

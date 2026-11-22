@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 // The two hooks the plugin hangs off opencode's V1 plugin API, driven through
 // the real `server()` factory rather than by calling their bodies directly.
 

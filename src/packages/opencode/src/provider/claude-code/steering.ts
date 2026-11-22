@@ -55,6 +55,20 @@ export class Steering {
     return this.written.some((steer) => !steer.read)
   }
 
+  // Read is not answered: a steer the CLI echoes after its `result` (while the finish waits on
+  // todowrite) is running as the CLI's next turn. Cleared at each `result`.
+  private readAfterResult = false
+
+  /** The CLI still owes a turn for a steer: unread, or read after its last `result`. */
+  get owesTurn() {
+    return this.hasUnread || this.readAfterResult
+  }
+
+  /** The CLI ended a turn; steers it read before this were answered in it. */
+  noteResult() {
+    this.readAfterResult = false
+  }
+
   get preempting() {
     return this.preempts[0]
   }
@@ -66,12 +80,14 @@ export class Steering {
   /** Unread steers died with the replaced child; held ones still go out at the next tool boundary. */
   forgetWritten() {
     this.written.length = 0
+    this.readAfterResult = false
   }
 
   /** The turn restarts on another account; oc's loop sends every unread steer after it. Preempts stay. */
   clear() {
     this.written.length = 0
     this.held = []
+    this.readAfterResult = false
   }
 
   /**
@@ -151,6 +167,7 @@ export class Steering {
     const steer = this.written.find((steer) => steer.uuid === msg.uuid && !steer.read)
     if (!steer) return
     steer.read = true
+    this.readAfterResult = true
     log.info("claude consumed steered message", { messageID: steer.messageID, uuid: steer.uuid })
     const ack = steer.delivered().then(
       () => this.host.read(steer.messageID),

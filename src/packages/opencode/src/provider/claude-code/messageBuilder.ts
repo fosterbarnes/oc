@@ -347,7 +347,8 @@ export function getClaudeUserMessage(
     }
   }
 
-  if (content.length === 0) {
+  // With a resume block the message is not empty: a catch-up must still carry the prior exchange.
+  if (content.length === 0 && !resume) {
     // CLI rejects a zero-block message with 400, and Anthropic rejects
     // whitespace-only text blocks - so we need a non-whitespace sentinel.
     // "(empty)" matches the parenthetical meta-note convention this file
@@ -388,7 +389,11 @@ export function getClaudeUserMessage(
  */
 export function appendTextBlock(envelope: string, text: string): string {
   const parsed = JSON.parse(envelope)
-  parsed.message.content.push({ type: "text", text })
+  const content = parsed.message.content as Array<{ type: string; text?: string }>
+  // Same separator as `getClaudeUserMessage`: Claude joins adjacent blocks with nothing between.
+  const last = content.at(-1)
+  if (last?.type === "text" && typeof last.text === "string" && !/\s$/.test(last.text)) last.text += "\n\n"
+  content.push({ type: "text", text })
   return JSON.stringify(parsed)
 }
 

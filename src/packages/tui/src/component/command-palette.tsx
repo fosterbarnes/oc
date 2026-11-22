@@ -47,7 +47,6 @@ const _COMMAND_RANK = rankOf(
     [
       "claude.account",
       "claude.sessionAccount",
-      "sidebar.usage",
       "claude.accounts",
       "claude.failover",
       "claude.apiRollover",

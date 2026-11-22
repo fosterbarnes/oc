@@ -10,7 +10,6 @@ import { pollWithTimeout } from "../../lib/effect"
 import { reply } from "../../lib/llm-server"
 import { expectIsolated, turnHas } from "./chatFixture"
 import { openPane, paneReady, powershell, stopPaneChild } from "./paneFixture"
-import { QUOTA_MENU_HOURLY_UPDATED } from "./quotaFixture"
 
 // The oc palette key: Ctrl+O, or Cmd+O in the macOS preset, which WezTerm sends as a kitty keyboard
 // sequence (codepoint 111, modifier 1 + super 8).
@@ -457,20 +456,16 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
     180_000,
   )
   cliIt.live(
-    "Claude fractional usage updates in the sidebar and Usage menu during a long turn",
+    "Claude fractional usage updates in the sidebar during a long turn",
     (fixture) =>
       Effect.gen(function* () {
         const pane = yield* openPane(fixture, { quotaUsage: true })
         const releasePath = pane.releasePath!
         yield* pane.waitFor("Ask anything")
         yield* pane.type("check quota mid-turn\r")
-        // The grouped layout (default) rounds in the sidebar; the Usage menu keeps the fractions.
+        // The grouped layout (default) rounds fractional readings (12.5% -> 13%, 18.5% -> 19%).
         yield* pane.waitFor("5h", (shown) => /5h\s+13%[\s\S]*wk\s+8%/.test(sidebarColumn(shown)))
-        yield* pane.click("Usage:")
-        yield* pane.waitFor("5-hour: 12.5% used")
         yield* Effect.promise(() => Bun.write(releasePath, "go"))
-        yield* pane.waitFor(QUOTA_MENU_HOURLY_UPDATED)
-        yield* pane.type("\x1b")
         yield* pane.waitFor("5h", (shown) => /5h\s+19%/.test(sidebarColumn(shown)))
         const transcript = yield* pane.waitFor("QUOTA-DONE")
         expect(transcript).toContain("QUOTA-DONE")
@@ -500,14 +495,6 @@ describe.skipIf(!paneReady)("oc TUI in a WezTerm pane", () => {
         yield* pane.click("scripts")
         yield* pane.waitFor("Global script settings", (shown) => shown.includes("Languages"))
         yield* closes("Global script settings")
-        yield* pane.click("Usage:")
-        yield* pane.waitFor("Usage calendar")
-        yield* pane.type("Usage calendar")
-        yield* pane.type("\r")
-        yield* pane.waitFor("Add subscription date...")
-        yield* closes("Add subscription date...")
-        // Esc in the calendar goes back to the Usage menu.
-        yield* closes("Usage calendar")
         yield* pane.type(OC_PALETTE_KEY)
         yield* pane.waitFor("Commands")
         yield* pane.type("Home sort order")

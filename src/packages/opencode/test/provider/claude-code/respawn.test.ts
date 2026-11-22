@@ -115,22 +115,37 @@ test("appendResumeIfNeeded: appends --resume when a conversation id is known", (
   }
 })
 
-test("appendResumeIfNeeded: does not append when --session-id is already present", () => {
+test("appendResumeIfNeeded: replaces a stale --session-id with --resume of the stored id", () => {
   const sk = `sk-hasarg-${Date.now()}`
   setClaudeSessionId(sk, "claude-conv-456")
   try {
     const args = ["--print", "--session-id", "claude-conv-already"]
-    assert.deepEqual(appendResumeIfNeeded(sk, args), args)
+    assert.deepEqual(appendResumeIfNeeded(sk, args), ["--print", "--resume", "claude-conv-456"])
   } finally {
     deleteClaudeSessionId(sk)
   }
 })
 
-test("appendResumeIfNeeded: does not append when --resume is already present", () => {
+// A forked child was spawned with `--resume <origin> --fork-session`; once the fork's own id is
+// stored, a respawn must resume the fork, not branch the origin again and lose post-fork turns.
+test("appendResumeIfNeeded: a respawned fork resumes the fork, not the origin", () => {
   const sk = `sk-hasresume-${Date.now()}`
-  setClaudeSessionId(sk, "claude-conv-457")
+  setClaudeSessionId(sk, "claude-conv-fork")
   try {
-    const args = ["--print", "--resume", "claude-conv-already"]
+    const args = ["--print", "--resume", "claude-conv-origin", "--resume-session-at", "uuid-1", "--fork-session"]
+    assert.deepEqual(appendResumeIfNeeded(sk, args), ["--print", "--resume", "claude-conv-fork"])
+  } finally {
+    deleteClaudeSessionId(sk)
+  }
+})
+
+// A child that went silent before its drift rewind branched leaves the stored id on the origin;
+// the respawn must retry the same rewind, not resume the unrewound origin.
+test("appendResumeIfNeeded: a rewind that never took effect is retried as is", () => {
+  const sk = `sk-rewind-${Date.now()}`
+  setClaudeSessionId(sk, "claude-conv-origin")
+  try {
+    const args = ["--print", "--resume", "claude-conv-origin", "--resume-session-at", "uuid-1", "--fork-session"]
     assert.deepEqual(appendResumeIfNeeded(sk, args), args)
   } finally {
     deleteClaudeSessionId(sk)

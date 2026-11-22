@@ -970,10 +970,16 @@ test("tick: a store that cannot be written never sends", async () => {
 test("tick: an unsupported CLI skips sends without spawning", async () => {
   const r = rig()
   await arm(r)
-  expect(await r.tick(SLOT, { cliPath: "definitely-not-a-claude-binary" })).toEqual({ fired: 0, missed: 0, skipped: 1 })
+  const cliPath = "definitely-not-a-claude-binary"
+  expect(await r.tick(SLOT, { cliPath })).toEqual({ fired: 0, missed: 0, skipped: 1 })
   expect(r.state.sends).toEqual([])
   expect(r.state.auth).toBe(0)
-  expect(r.scheduler.pendingCount()).toBe(0)
+  // The slot stays queued (a standby machine's window runs past rank 0's) so a CLI check that
+  // failed once can retry; `run` applies the real deadline once the CLI answers.
+  expect(r.scheduler.pendingCount()).toBe(1)
+  await r.tick(SLOT + 45 * SEC, { cliPath })
+  await r.tick(SLOT + 90 * SEC, { cliPath })
+  expect(r.scheduler.pendingCount()).toBe(1)
 })
 
 test("tick: an already-aborted tick never probes or spawns", async () => {

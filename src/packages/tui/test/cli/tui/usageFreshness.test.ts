@@ -10,7 +10,7 @@ import {
   type ClaudeCodeUsage,
 } from "../../../src/routes/session/sidebar-tools/usage/claude"
 import { probeCursorUsage } from "../../../src/routes/session/sidebar-tools/usage/cursor"
-import { fullResetDate, formatUsagePercent, windowName } from "../../../src/routes/session/sidebar-tools/usage/format"
+import { formatUsagePercent } from "../../../src/routes/session/sidebar-tools/usage/format"
 import { probeOpenAIUsage, type OpenAIUsage } from "../../../src/routes/session/sidebar-tools/usage/probes"
 import { usageProviderForModel } from "../../../src/routes/session/sidebar-tools/usage/providers"
 import { updateUsageSnapshot, type UsageSnapshot } from "../../../src/routes/session/sidebar-tools/usage/snapshot"
@@ -33,34 +33,6 @@ test("sidebar precision follows the displayed used or remaining value", () => {
   expect(formatUsagePercent(18.567)).toBe("18.6%")
   expect(formatUsagePercent(18.5, false, true)).toBe("19%")
   expect(formatUsagePercent(null)).toBe("unavailable")
-})
-
-test("window names are spelled out for the usage menu", () => {
-  expect([300, 60, 10080, 30 * 1440, 3 * 1440, 90 * 1440, null, 0].map(windowName)).toEqual([
-    "5-hour",
-    "1-hour",
-    "Weekly",
-    "Monthly",
-    "3-day",
-    "90-day",
-    "",
-    "",
-  ])
-})
-
-test("full reset dates spell out the date and the time left in local time", () => {
-  // Built from local components so the expected text does not depend on the machine's time zone.
-  const reset = new Date(2026, 9, 11, 2, 58).valueOf()
-  const at = (day: number, hour: number, minute: number) => new Date(2026, 9, day, hour, minute).valueOf()
-  const date = "Sunday, October 11, 2026 at 02:58"
-  expect(fullResetDate(reset, at(10, 2, 58))).toBe(`${date} (in 1 day)`)
-  expect(fullResetDate(reset, at(10, 22, 58))).toBe(`${date} (in 4 hours)`)
-  expect(fullResetDate(reset, reset - (24 + 3) * 60 * 60_000 - 5 * 60_000)).toBe(
-    `${date} (in 1 day, 3 hours, 5 minutes)`,
-  )
-  expect(fullResetDate(reset, reset - 61_000)).toBe(`${date} (in 1 minute)`)
-  expect(fullResetDate(reset, reset - 30_000)).toBe(`${date} (in less than a minute)`)
-  expect(fullResetDate(reset, reset)).toBe(`${date} (reset passed)`)
 })
 
 test("finished-message provider mapping ignores unknown and inherited names", () => {

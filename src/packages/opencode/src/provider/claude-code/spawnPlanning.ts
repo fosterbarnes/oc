@@ -414,7 +414,13 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
   if (commandPlan) {
     // Each allowed oc tool runs as Claude's built-in when the plan says so, otherwise through the
     // proxy where oc enforces the turn's rules. Directly configured MCP servers stay out.
-    const split = splitCommandTools(commandPlan, modelTools, dialect)
+    // A plan's native websearch means Claude's WebSearch does the job; when config or a denial
+    // turns that built-in off, oc's own websearch (if offered) must stay forwarded instead.
+    const claudeWebSearchOff = config.webSearch === "disabled" || harnessDenied.includes("WebSearch")
+    const plan = claudeWebSearchOff
+      ? { ...commandPlan, native: commandPlan.native.filter((id) => id !== "websearch") }
+      : commandPlan
+    const split = splitCommandTools(plan, modelTools, dialect)
     const forwarded = new Set(split.forwarded)
     // The host already offers the live `question` description; no registry fetch needed.
     const staticDefs = overlayQuestionProxyDescription(
@@ -440,7 +446,11 @@ async function assembleProxyTools(input: Parameters<typeof planSpawn>[0]) {
             : [],
         ),
       ],
-      replaced: Object.keys(CLAUDE_NATIVE_TOOLS).filter((id) => forwarded.has(id)),
+      // `forwarded` holds host names (V2 `shell` for `bash`), so compare through the host's name.
+      replaced: Object.keys(CLAUDE_NATIVE_TOOLS).filter((id) => {
+        const name = toolNameForHost(id, dialect)
+        return name !== null && forwarded.has(name)
+      }),
       // A closed turn lists its built-ins in `--tools`, so nothing else needs turning off.
       cliTools: commandPlan.closed
         ? [
@@ -546,9 +556,12 @@ function gateStaticDefs(
   if (!questionEnabled) return withTask
   // When the gate drops the def the model silently falls back to the
   // deny/markdown path, which looks like the feature is off; log it.
-  log.info("question proxy version gate", { opencodeHasQuestion: live.hasQuestion, kept: live.hasQuestion })
+  // Only a registry that answered without `question` is a version-gate signal; an unanswered
+  // list (no client, a failed fetch) keeps the static def.
+  const kept = live.hasQuestion || !live.resolved
+  log.info("question proxy version gate", { opencodeHasQuestion: live.hasQuestion, resolved: live.resolved, kept })
   return filterQuestionProxyByOpencodeSupport(
     overlayQuestionProxyDescription(withTask, live.hasQuestion ? live.questionDescription : undefined),
-    live.hasQuestion,
+    kept,
   )
 }

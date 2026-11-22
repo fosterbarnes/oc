@@ -279,7 +279,7 @@ export function claudeCodeProviders(
 export async function buildAgentRegistry(config: OpenCodeConfig, directory?: string): Promise<void> {
   const options = config.provider?.[PROVIDER_ID]?.options
   const configured = options?.defaultSubagentModel
-  setDefaultSubagentModel(typeof configured === "string" ? configured : undefined)
+  setDefaultSubagentModel(typeof configured === "string" ? configured : undefined, directory)
   // Markdown agents may or may not reach a plugin's config hook (undocumented
   // either way), so they are read from disk and then overlaid with whatever
   // config does carry, which is authoritative when both describe one agent.
@@ -306,7 +306,7 @@ export async function buildAgentRegistry(config: OpenCodeConfig, directory?: str
   log.debug("agent registry built", {
     directory,
     agents: Object.keys(records).length,
-    defaultSubagentModel: getDefaultSubagentModel(),
+    defaultSubagentModel: getDefaultSubagentModel(directory),
   })
 }
 

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path"
 import { homedir } from "node:os"
 import { createHash } from "node:crypto"
 import { parse as parseJsonc, printParseErrorCode, type ParseError } from "jsonc-parser"
+import { ConfigV2Compat } from "@/config/v2-compat"
 import { log } from "./logger.js"
 
 /**
@@ -263,7 +264,10 @@ interface OpencodeRemoteServer {
 type OpencodeServer = OpencodeLocalServer | OpencodeRemoteServer | { enabled?: boolean }
 
 function extractMcpBlock(config: Record<string, unknown>): Record<string, OpencodeServer> {
-  const mcp = config.mcp
+  if (!config.mcp || typeof config.mcp !== "object" || Array.isArray(config.mcp)) return {}
+  // Lower V2 shapes the way oc's own config load does: a `{ servers, timeout }` envelope flattens
+  // to its servers and `disabled` becomes `enabled: false`, so the names match oc's live tools.
+  const mcp = (ConfigV2Compat.lower({ mcp: config.mcp }).value as { mcp?: unknown }).mcp
   if (!mcp || typeof mcp !== "object" || Array.isArray(mcp)) return {}
   return mcp as Record<string, OpencodeServer>
 }

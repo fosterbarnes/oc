@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * The wire-inactivity watchdog as opencode sees it. A CLI that produces output
  * and then goes quiet without a `result` used to close the turn on a log line
@@ -80,7 +78,7 @@ async function streamParts(lines: unknown[], fallbackMs: number): Promise<any[]>
     } as any)
 
     const parts: any[] = []
-    for await (const part of response.stream) parts.push(part)
+    for await (const part of response.stream as unknown as AsyncIterable<unknown>) parts.push(part)
     return parts
   } finally {
     if (previous === undefined) delete process.env.CLAUDE_CODE_RESULT_FALLBACK_MS

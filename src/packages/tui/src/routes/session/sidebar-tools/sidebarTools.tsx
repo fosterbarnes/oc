@@ -57,15 +57,6 @@ import {
 const DIRECTORY_COLORS = ["#F7E9B5", "#F4E1A0", "#F1D98B", "#EED076", "#EBC861"]
 const DIRECTORY_INDICATOR_COLORS = ["#DCCF99", "#D5C184", "#CEB56F", "#C7A95A", "#C09D45"]
 
-export const USAGE_MENU_COMMAND = {
-  name: "sidebar.usage",
-  title: "Show usage",
-  desc: "Plan usage and limits for each provider",
-  category: "oc",
-  group: "Claude",
-  namespace: "palette",
-}
-
 function directoryColor(depth: number, colors: string[]): string {
   return colors[Math.min(depth, colors.length - 1)]
 }
@@ -530,17 +521,6 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
         category: "Project scripts",
         namespace: "sidebar",
         run: selectScriptSettings,
-      },
-      {
-        ...USAGE_MENU_COMMAND,
-        run: usage.selectUsageMenu,
-      },
-      {
-        name: "sidebar.usage-calendar",
-        title: "Show usage calendar",
-        category: "Sidebar",
-        namespace: "sidebar",
-        run: usage.selectUsageCalendar,
       },
       {
         name: "sidebar.usage-settings",

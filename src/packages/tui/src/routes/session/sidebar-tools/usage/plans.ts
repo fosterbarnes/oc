@@ -1,11 +1,11 @@
 import { readFile } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { nextRenewal, parseUsageDate, startOfDay, type UsageCalendarEvent, type UsageSubscription } from "./calendar"
+import { nextRenewal, parseUsageDate, startOfDay, type UsageSubscription } from "./calendar"
 import { claudeAccountName, isDefaultClaudeDir } from "./claude"
 import type { CursorUsage } from "./cursor"
 import { readAuthContent, type UsageOptions } from "./fetch"
-import { USAGE_BILLING_URLS, USAGE_PLAN_NAMES, type UsagePlanProvider, type UsageProviderId } from "./providers"
+import { USAGE_BILLING_URLS, type UsagePlanProvider, type UsageProviderId } from "./providers"
 import type { UsageSnapshot } from "./snapshot"
 
 const DAY_MS = 86_400_000
@@ -96,13 +96,6 @@ export function resolveUsagePlans(
   ]
 }
 
-/** `Codex Plus`, `Claude Pro (claude2)`: provider, plan, and pooled account name. */
-export function usagePlanLabel(plan: UsagePlan) {
-  return [USAGE_PLAN_NAMES[plan.provider], plan.plan && capitalize(plan.plan), plan.name && `(${plan.name})`]
-    .filter(Boolean)
-    .join(" ")
-}
-
 /**
  * Sidebar text such as `Renews ~11/14 (18d)` (`~` marks an estimate) and the table column's `18d`
  * (`end` once ended, `-` without a date). Urgent within 3 days or once ended.
@@ -119,15 +112,6 @@ export function usagePlanLine(plan: UsagePlan, nowMs: number) {
     short: plan.verb === "ended" ? "end" : `${Math.max(0, days)}d`,
     urgent: plan.verb === "ended" || days <= 3,
   }
-}
-
-/** Calendar events for automatic renewals; manual dates and Cursor's cycle are already on the calendar. */
-export function usagePlanEvents(plans: UsagePlan[], nowMs: number): UsageCalendarEvent[] {
-  return plans.flatMap((plan) =>
-    plan.atMs !== undefined && (plan.source === "login" || plan.source === "estimate") && plan.atMs >= startOfDay(nowMs)
-      ? [{ atMs: plan.atMs, title: `${usagePlanLabel(plan)} renews`, usedPercent: null, stale: false, allDay: true }]
-      : [],
-  )
 }
 
 // A future `until` is exact. A passed one rolls forward from the start day: monthly under 60 days, else yearly.

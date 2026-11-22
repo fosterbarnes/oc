@@ -6,7 +6,7 @@ import { formatUsagePercent } from "./format"
 
 export type UsageLayout = "grouped" | "table"
 export type UsageTone = "text" | "muted" | "accent" | "primary" | "warning" | "error" | "track"
-/** `key` marks a clickable renewal (`plan:<provider>:<account>`). */
+/** `key` marks a clickable segment: a renewal (`plan:<provider>:<account>`) or a note. */
 export type UsageSegment = { text: string; tone: UsageTone; key?: string }
 export type UsageEntry = {
   name: string
@@ -18,6 +18,8 @@ export type UsageEntry = {
   plan?: { text: string; short: string; warn: boolean; key: string }
   /** Replaces the windows when there is no reading, such as `unavailable`. */
   note?: string
+  /** Makes the note clickable (`cursor:sign-in`). */
+  noteKey?: string
   /** Claude and Codex: candidates for the table's shared window columns. */
   table?: boolean
 }
@@ -42,8 +44,8 @@ const tone = (window: UsageEntry["windows"][number]): UsageTone =>
         : window.stale || window.usedPercent === 0
           ? "muted"
           : "text"
-const percent = (window: UsageEntry["windows"][number], remaining: boolean, pad: number): UsageSegment => ({
-  text: (window.usedPercent === null ? "-" : formatUsagePercent(window.usedPercent, remaining, true)).padStart(pad),
+const percent = (window: UsageEntry["windows"][number], pad: number): UsageSegment => ({
+  text: (window.usedPercent === null ? "-" : formatUsagePercent(window.usedPercent, false, true)).padStart(pad),
   tone: tone(window),
 })
 const planSegment = (plan: NonNullable<UsageEntry["plan"]>, text: string): UsageSegment => ({
@@ -52,7 +54,7 @@ const planSegment = (plan: NonNullable<UsageEntry["plan"]>, text: string): Usage
   key: plan.key,
 })
 
-function grouped(entries: UsageEntry[], width: number, options: { remaining: boolean; spacing: boolean }) {
+function grouped(entries: UsageEntry[], width: number, options: { spacing: boolean }) {
   const longest = Math.max(0, ...entries.flatMap((entry) => entry.windows.map((window) => window.reset.length)))
   // `  5h  42%` is 9 columns, the bar 1 + cells, then at least 1 space and the reset. Too narrow: no bar.
   const cells = Math.min(12, width - 11 - longest)
@@ -63,7 +65,7 @@ function grouped(entries: UsageEntry[], width: number, options: { remaining: boo
     ]
     const right =
       entry.note !== undefined
-        ? { text: entry.note, tone: "muted" as const }
+        ? { text: entry.note, tone: "muted" as const, key: entry.noteKey }
         : entry.plan && planSegment(entry.plan, entry.plan.text)
     return [
       ...(options.spacing && index > 0 ? [BLANK] : []),
@@ -84,7 +86,7 @@ function grouped(entries: UsageEntry[], width: number, options: { remaining: boo
                     { text: "━".repeat(cells - filled), tone: "track" },
                   ]
             return rightAlign(
-              [{ text: `  ${window.tag.padEnd(3)}`, tone: "muted" }, percent(window, options.remaining, 4), ...bar],
+              [{ text: `  ${window.tag.padEnd(3)}`, tone: "muted" }, percent(window, 4), ...bar],
               { text: window.reset, tone: "muted" },
               width,
             )
@@ -93,7 +95,7 @@ function grouped(entries: UsageEntry[], width: number, options: { remaining: boo
   })
 }
 
-function table(entries: UsageEntry[], width: number, options: { remaining: boolean; spacing: boolean }) {
+function table(entries: UsageEntry[], width: number, options: { spacing: boolean }) {
   // The first two-window Claude/Codex entry sets the columns; other window pairs would be mislabeled there.
   const tags = entries.find((entry) => entry.table && entry.windows.length === 2)?.windows.map((window) => window.tag)
   const rows = entries.filter(
@@ -114,12 +116,12 @@ function table(entries: UsageEntry[], width: number, options: { remaining: boole
       { text: entry.name.padEnd(nameWidth), tone: "text" },
       entry.active ? { text: " «", tone: "warning" } : { text: "  ", tone: "text" },
     ]
-    if (entry.note !== undefined) return [...head, { text: ` ${entry.note}`, tone: "muted" }]
+    if (entry.note !== undefined) return [...head, { text: ` ${entry.note}`, tone: "muted", key: entry.noteKey }]
     return [
       ...head,
       ...entry.windows.flatMap(
         (window, slot): Line => [
-          percent(window, options.remaining, 5),
+          percent(window, 5),
           ...(times ? [{ text: ` ${window.reset.padEnd(resetWidth[slot])}`, tone: "muted" as const }] : []),
         ],
       ),
@@ -157,7 +159,7 @@ export function usageLines(
   layout: UsageLayout,
   entries: UsageEntry[],
   width: number,
-  options: { remaining: boolean; spacing: boolean },
+  options: { spacing: boolean },
 ): { header: string; lines: Line[] } {
   return layout === "table" ? table(entries, width, options) : { header: "", lines: grouped(entries, width, options) }
 }

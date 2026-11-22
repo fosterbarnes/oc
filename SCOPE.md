@@ -101,3 +101,4 @@ loop; the OpenCode 2 execution engine itself is not brought back.
 | `/bgRun` palette toggle and `bgRun` permission | v0.2.364 | Normal `bash` permission for background runs |
 | Plugin `permission.ask` hook decisions (v0.2.269) | v0.2.373 | Not called, same as upstream 1.x: a hook waiting on the user hid the prompt. Plugins handle the `permission.asked` event and answer through `POST /session/:sessionID/permissions/:permissionID`. |
 | `~/.config/openSidebar` folder and project `.config/openSidebar.json` override | v0.2.364 | `~/.config/opencode/sidebar.json` and per-project state (one-time copy, old files left in place) |
+| Usage menu (sidebar `Usage:` click, palette **Show usage**), usage calendar, used/remaining toggle | v0.2.406 | Sidebar Usage rows only; `usageLayout`, `usageSpacing`, and `usageSubscriptions` (provider plan overrides) in `sidebar.json`; Cursor `sign in` click for the cookie prompt |

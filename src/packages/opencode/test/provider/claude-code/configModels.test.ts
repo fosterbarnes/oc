@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 import assert from "node:assert/strict"
 import { test } from "node:test"
 import { configModelsForProvider, createClaudeCode } from "@/provider/claude-code/index.js"
@@ -23,7 +21,7 @@ test("claudeCodeModels takes prices and limits from the catalog and adds the CLI
   assert.equal(opus.api.npm, "@opencode-ai/claude-code")
   assert.deepEqual(opus.cost, { input: 4, output: 20, cache: { read: 0.2, write: 5 } })
   assert.deepEqual(opus.limit, { context: 1_000_000, output: 128_000 })
-  assert.deepEqual(Object.keys(opus.variants), ["low", "medium", "high", "xhigh", "max"])
+  assert.deepEqual(Object.keys(opus.variants!), ["low", "medium", "high", "xhigh", "max"])
   // The CLI path takes no temperature and no PDF attachments.
   assert.equal(opus.capabilities.temperature, false)
   assert.equal(opus.capabilities.input.pdf, false)

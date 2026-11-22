@@ -131,6 +131,76 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-22 (~05:07) - v0.2.407 fucksssOatley - Fixed 34 Claude Code provider bugs found by a Grok swarm - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed. Same session and version as the entry below (no second bump).
+- Version: 0.2.407
+- Process: 29 Grok hunters (~300-line slices of `provider/claude-code`), 45 cross-model verifiers, Opus spot-checks, Opus wrote every fix, 10 Grok reviewers on the fix diff. Ledger + scorecard: `~/.config/opencode/plans/2026-11-22-grok-claude-code-findings.md` (F-numbers below).
+- Fixed sessionManager: wake POST error/rejection clears `autonomousTurn` (guarded by `wakeSeq`) (F6); unreadable sessions.json (non-ENOENT) keeps memory, retries (F8); `pendingStops` makes a concurrent `deleteActiveProcessAndWait` wait for the same exit (F9); `appendResumeIfNeeded` keeps flags naming the stored id (silent rewind/fork retries) else strips `--resume/--session-id/--resume-session-at/--fork-session` and resumes the stored id (F33); failed respawn stop and failed spawn (no pid) close proxy + unlink prompt file (F34, F35).
+- Fixed accounts: case-insensitive pool dedupe on win32 (F10); `preparedDir` set after success (F12); `forgetAccount` clears `limitReasons` + `modelLimited` for the id (F13); extending a live limit keeps its reason (F36); `canonicalAccountId` uses `||` (F37).
+- Fixed warmup/index: CLI-down keeps pending (bounded by `CATCHUP_MS`; `run` applies rank deadline) (F21); missing email answer requeues (F19); sent prompt recorded even if aborted after (F20).
+- Fixed proxyToolSelection: host-null natives (V2 todowrite) kept (F23); harness-only natives in `replaced` (F22). spawnPlanning: `replaced` via `toolNameForHost` (F17); question proxy kept when registry unresolved (F18); websearch dropped from plan native when Claude's WebSearch is disabled/denied.
+- Fixed messageBuilder: resume block sent instead of `(empty)` (F40); `appendTextBlock` adds `\n\n` separator (F39). cliEvents: overage-only `allowed_warning` gets its own extra-usage notice (F38). mcpBridge: layers lowered via `ConfigV2Compat.lower` (V2 `servers` envelope, `disabled`) (F42, F43). agentModels/index: `defaultSubagentModel` keyed per directory (F46).
+- Fixed turnStream: `message_start` resets `hadThinkingTextFromStream` (F2); subagent `assistant` lines skip `onAssistant` (F25); denied turn ends after the whole tool_result message (F3); abort/crash finish uses `contextUsage(lastCall)` (F5); `turnCostUsd` sums segments per step (F29); auto-continue re-arms result fallback (F28); `respawnSilentProcess` catches respawn errors, kills replacement if closed (F30, F31); `discardPlan` on abort after account-switch plan (F26); dropped `init` with kept lines attaches all kept lines (F24); steering `owesTurn`/`noteResult` keep streaming for a steer read after `result` (F27).
+- Kept F1 (by design: pending proxy calls' tool_results must go to the issuing process). Kept F32 (minor).
+- Tests: intended changes updated: `respawn.test.ts` (2 old "unchanged args" cases replaced by fork-resume + rewind-retry + session-id cases), `warmup.test.ts` unsupported CLI keeps slot, `replacedToolsNote.test.ts` separator. Typed 10 more WIP tests (removed `@ts-nocheck`); 4 casts added by Opus after typecheck.
+- Verification: `bun run typecheck` exit 0; `bun test test/provider/claude-code test/provider/cursor` 909 pass 0 fail (930 incl. skips). No live Claude/Cursor run.
+- Note: user rule: Grok never writes code, only swarm work (hunt, verify, review). Grok 4.6 Low mangled a doc comment while typing a test.
+
+### User
+Claude Code provider fixes
+- Fixed about 34 bugs in Claude Code chats: lost thinking after tool calls, wrong turn costs, hangs after auto-continue or a background wake, leaked temp files, account failover quirks on Windows, warm-up prompts that silently never sent, and MCP servers in the newer config format not reaching Claude.
+- Run `/revive` to pick these up.
+
+---
+
+## 2026-11-22 (~03:17) - v0.2.407 fucksssOatley - Cursor open-Run cap no longer evicts subagents waiting on tools - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug + fix; completed
+- Version: 0.2.407
+- ERROR: 39 parallel Cursor Grok subagents looped (re-read same file, e.g. `turnStream.ts` read 49x; said "review was interrupted"). 16 in parallel worked.
+- Cause: `SessionManager.enforceOpenSessionCap` (`provider/cursor/session.ts`) force-closed oldest non-pumping Run past `DEFAULT_MAX_OPEN_SESSIONS = 24`; a Run held open while oc runs its tool counts as non-pumping. Next step rebased (`languageModel.ts:189-200`, `recovery: rebase`), and `extractPromptHistory(..., toolResults: "trailing")` (`languageModel.ts:521-523`) dropped all earlier tool results, plus "Continue the interrupted turn" text. Each re-read opened a Run and evicted another agent.
+- Fixed `enforceOpenSessionCap`: skip candidates with `pending.size > 0`. Abandoned held Runs still close via pending-tool lease (`scheduleHardDeadline`, `hardCapMs` 600 s). Cap still evicts leaked idle Runs. Comment no longer claims a server-side per-connection ceiling.
+- Note: probe of HTTP/2 SETTINGS: `api2.cursor.sh` maxConcurrentStreams 2^31-1, `agent(n).api5.cursor.sh` 2^32-1. Cap origin: folded cursor plugin, no recorded evidence of a server ceiling.
+- Added `test/provider/cursor/sessionCap.test.ts` (2 tests): awaiting-tools Runs survive cap; leaked idle Run evicted. Fails before fix (`[true,false,false]`), passes after.
+- Risk: rebase recovery is still lossy (`toolResults: "trailing"`); any real stream drop mid-task still makes the agent forget earlier tool results. TODO: decide whether interrupted rebase should replay all tool results like compaction.
+- Note: `bunx tsc` per-worker in parallel is heavy; swarm workers should run only `bun test` and the orchestrator typechecks once.
+- Also typed 4 WIP tests (removed `@ts-nocheck` + banner): `compactionModel` (casts `ConfigV1.Info`, `Provider.Model`, `!`), `askUserQuestion`, `indexHooks`, `hasNewUserContent`; done by Grok 4.7 Low workers, diffs reviewed.
+- Verification: `bun test test/provider/cursor` 133 pass 0 fail; `bun run typecheck` (tsgo) exit 0 in opencode. No live swarm rerun (needs `/revive`).
+
+### User
+Cursor subagents
+- Running many Cursor subagents at once (more than about 24) no longer makes them forget their work and loop; run `/revive` to pick up the fix.
+- Four Claude Code provider test files are now type-checked.
+
+---
+
+## 2026-11-22 (~02:38) - v0.2.406 isaSeedless - Removed the sidebar Usage menu and usage calendar - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified
+- Version: 0.2.406
+- Removed in `sidebarUsage.tsx`: Usage menu (`selectUsageMenu`, `usageMenuOptions`, `PLAN_SOURCE`), plan menu, subscription prompts, calendar dialog, `showRemaining` toggle. User chose "remove menu and calendar" via question tool.
+- Changed: `Usage:` header row now toggles collapse (hover moved to header row); outer box has no click. `SidebarToggle` used without handlers.
+- Added: `UsageEntry.noteKey` (`usage/layout.ts`) so a note is a clickable segment; Cursor note `sign in` + key `cursor:sign-in` opens `promptCursorToken`. Click map `clicks` replaces `billing` map.
+- Removed: `USAGE_MENU_COMMAND` / palette `sidebar.usage`, `sidebar.usage-calendar` (`sidebarTools.tsx`, `command-palette.tsx` rank), `usageCalendarEvents`/`Day`/`Strip`, `UsageCalendarEvent`, `usagePlanLabel`, `usagePlanEvents`, `USAGE_PLAN_NAMES`, `windowName`, `fullResetDate`, `usageReadingDetails`, `remaining` option of `usageLines`.
+- Kept: `usageSubscriptions` setting as file-only plan override (`resolveUsagePlans`), `usageLayout`, `usageSpacing` (sidebar.json only now), palette `Configure usage providers`.
+- Tests: deleted `usagePalette.test.ts`; trimmed `usageCalendar`, `usageFreshness`, `usageLive` tests; `tuiPane.test.ts` fractional test checks sidebar only, menus test drops the Usage click; removed `QUOTA_MENU_HOURLY_UPDATED`.
+- Docs: wiki `Sidebar.md` (Usage bullet, plan dates via `usageSubscriptions`, added `usageLayout`/`usageSpacing` rows, removed calendar section), `FORK.md` row, `SCOPE.md` retired row.
+- Verification: `tsgo --noEmit` clean in tui and opencode; `bun test` usageCalendar/usageFreshness/usageLive/sidebarTools 95 pass, 3 skip. Pane tests (OC_TUI_PANE) and live click not run.
+- Risk: wiki Sidebar settings still names `~/.config/openSidebar` paths retired in v0.2.364 (pre-existing, not fixed).
+
+### User
+Sidebar
+- Clicking `Usage:` in the sidebar now just collapses or expands the section instead of opening a menu.
+- The Usage menu, the Show usage palette entry, and the usage calendar are gone.
+- If Cursor usage needs a login, click its `sign in` text to paste a session cookie.
+- Layout, provider spacing, and manual plan renewal dates are now set only in `sidebar.json`.
+
+---
+
 ## 2026-11-21 (~20:46) - v0.2.405 infectiousChains - Active slash command back in the prompt meta row as Build/imp - Claude Opus 5.5, low; Implementation
 
 ### Agent

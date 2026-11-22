@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
@@ -115,7 +113,7 @@ async function streamIndexReuse() {
     } as any)
 
     const parts: any[] = []
-    for await (const part of response.stream) parts.push(part)
+    for await (const part of response.stream as unknown as AsyncIterable<unknown>) parts.push(part)
     return parts
   } finally {
     await deleteActiveProcessAndWait(sk)

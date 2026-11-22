@@ -5,7 +5,6 @@ import {
   applyOpenAIObservation,
   mergeClaudeProbe,
   mergeOpenAIProbe,
-  usageReadingDetails,
 } from "../../../src/routes/session/sidebar-tools/usage/live"
 import type { ClaudeCodeUsage } from "../../../src/routes/session/sidebar-tools/usage/claude"
 import type { OpenAIUsage } from "../../../src/routes/session/sidebar-tools/usage/probes"
@@ -98,9 +97,8 @@ test("live Codex partial metadata survives a slow probe and rejects another acco
   })
 })
 
-test("reset-pending readings are marked stale immediately and menu states uncertainty", () => {
+test("reset-pending readings are marked stale immediately", () => {
   const snapshot = claude()
   const window = { ...unknown(), usedPercent: 0, fetchedAt: 1_000, resetMs: 3_000 }
   expect(usageWindowStale(window, snapshot, 3_000)).toBe(true)
-  expect(usageReadingDetails(window, snapshot, 3_000)).toEqual(["Reset passed; awaiting a current reading"])
 })

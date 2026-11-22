@@ -1,5 +1,3 @@
-// @ts-nocheck
-// WIP: ported from opencode-claude-code-plugin, which never typechecked its tests; type them as Phase 3 rewrites land.
 /**
  * Regression for the unattended-stdout replay path in
  * src/provider/claude-code/turnStream.ts. When a reused Claude CLI subprocess

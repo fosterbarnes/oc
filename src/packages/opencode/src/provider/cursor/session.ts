@@ -32,10 +32,10 @@ export const DEFAULT_CONTINUATION_POLICY: Readonly<CursorContinuationPolicy> = {
 const MAX_TIMER_MS = 2_147_483_647
 const DEFAULT_TOMBSTONE_TTL_MS = 15 * 60_000
 const DEFAULT_TOMBSTONE_LIMIT = 1_024
-// Well below Cursor's server-side concurrent-Run ceiling per HTTP/2 connection,
-// so a caller that keeps abandoning Runs instead of delivering continuations
-// gets corrected here instead of piling up open streams until Cursor's server
-// force-closes the whole shared connection.
+// Bounds leaked Runs: a caller that keeps abandoning Runs instead of delivering
+// continuations gets corrected here instead of piling up open streams. Runs
+// awaiting tool results are live work and never count against it (Cursor's
+// agent hosts advertise an unbounded HTTP/2 maxConcurrentStreams).
 const DEFAULT_MAX_OPEN_SESSIONS = 24
 
 function positiveInteger(name: string, value: unknown, fallback: number): number {
@@ -336,7 +336,7 @@ export class SessionManager {
         if (this.isPumping(prior)) {
           // A live pull() is mid-await on this stream (nextFrameWithSemanticDeadline
           // or the raw frame iterator). Forcing close() here would reject that await
-          // and propagate a real error to whatever still holds the ReadableStream  - 
+          // and propagate a real error to whatever still holds the ReadableStream  -
           // exactly the kind of self-inflicted failure this cap is meant to prevent.
           // Let it finish or expire on its own (hard deadline / heartbeat failure).
           trace(
@@ -368,21 +368,23 @@ export class SessionManager {
   /**
    * Force-close the oldest idle open session(s) once registration exceeds the
    * cap. Never closes a session with a live pull() mid-await (see the same
-   * guard in the supersede check above) - an unclosable backlog of genuinely
-   * active sessions just means the cap can't be enforced until one finishes.
+   * guard in the supersede check above) or one awaiting tool results: closing
+   * a held continuation forces a lossy history rebase, and many parallel
+   * subagents then evict each other in a loop. Abandoned held Runs expire via
+   * the pending-tool lease (`hardCapMs`) instead.
    */
   private enforceOpenSessionCap(justRegistered: CursorSession): void {
     while (this.sessions.size > this.maxOpenSessions) {
       let oldest: CursorSession | undefined
       for (const candidate of this.sessions) {
-        if (candidate === justRegistered || this.isPumping(candidate)) continue
+        if (candidate === justRegistered || this.isPumping(candidate) || candidate.pending.size > 0) continue
         if (!oldest || candidate.createdAt < oldest.createdAt) oldest = candidate
       }
       if (!oldest) {
         trace(
           `sessionManager.registerSession: open session cap exceeded ` +
             `(${this.sessions.size} > ${this.maxOpenSessions}) but no idle session is ` +
-            `available to close - all remaining sessions are actively pumping`,
+            `available to close - all remaining sessions are pumping or awaiting tool results`,
         )
         return
       }
