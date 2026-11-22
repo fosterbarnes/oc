@@ -10,6 +10,7 @@ import {
   type DesktopCheckResult,
   type DesktopInstallResult,
 } from "./desktopUpdate"
+import { CHATGPT_DESKTOP_MAC, checkMacApp, CLAUDE_DESKTOP_MAC, installMacApp, macAppPresent } from "./macAppUpdate"
 import { checkPowershell, installPowershell, powershellPresent } from "./pwshUpdate"
 import { checkPowershellMac, detectPwshInstall, installPowershellMac, POWERSHELL_MAC_NOTE } from "./pwshUpdateMac"
 import type { DialogContext } from "./ui/dialog"
@@ -171,6 +172,20 @@ const _WINDOWS_APPS = [
 ]
 
 const _MAC_APPS = [
+  ...[
+    { id: "claude_desktop", desc: "Install the latest Claude Desktop app", spec: CLAUDE_DESKTOP_MAC },
+    { id: "chatgpt_desktop", desc: "Install the latest ChatGPT app", spec: CHATGPT_DESKTOP_MAC },
+  ].map(({ id, desc, spec }) =>
+    checkedTarget({
+      id,
+      label: spec.label,
+      desc,
+      note: spec.note,
+      installed: () => macAppPresent(spec),
+      check: () => checkMacApp(spec),
+      install: (version, onLine) => installMacApp(spec, version, onLine),
+    }),
+  ),
   checkedTarget({
     id: "powershell",
     label: "PowerShell",

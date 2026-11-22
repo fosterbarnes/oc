@@ -131,6 +131,37 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-21 (~19:02) - v0.2.403 animalKnows - Update Claude Desktop and ChatGPT Desktop on macOS - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed, live unverified
+- Version: 0.2.403 animalKnows
+- Added `src/packages/tui/src/macAppUpdate.ts`: Mac `.app` updater (`MacAppSpec`, `macAppPresent`, `checkMacApp`, `installMacApp`, `swap`). It reads Claude's Squirrel `RELEASES.json` or ChatGPT's Sparkle appcast (arch-specific; download host pinned), downloads the zip, and runs `ditto -x -k`. The new app must pass `codesign --verify --deep --strict` and `spctl`, and match the installed app's bundle id, version, and Team ID (read from `codesign -dv`, nothing hardcoded). It quits the app via `osascript quit app id` (never kills), waits for ShipIt/Autoupdate, swaps by renames in the same folder with rollback, and reopens the app if it was running. An app oc cannot write, or a ChatGPT whose bundle id is not `com.openai.codex`, returns manual.
+- Changed `thirdPartyUpdates.ts`: `_MAC_APPS` now starts with `claude_desktop` and `chatgpt_desktop` (same ids as Windows), so the palette and Update all list them.
+- Changed `pwshUpdateMac.ts`: exported `download` with an `allowHost` predicate (PowerShell passes `isGithubHost`).
+- Added `test/macAppUpdate.test.ts` (feed parsers, host/https pin, Team ID parse). Added a FORK.md row.
+- Verification:
+  - Ran `bun test` for macAppUpdate, pwshUpdateMac, and weztermUpdate: 12 pass. `tsgo --noEmit` is clean.
+  - Live `checkMacApp` reports Claude Desktop 6.28899.2 -> 6.28899.6 and ChatGPT not installed.
+  - Downloaded both real zips. Both pass codesign and spctl. Claude is `com.anthropic.claudefordesktop`, team Q6L2SF6YDW. ChatGPT is `com.openai.codex`, team 2DC432GLL2, with no SUFeedURL.
+  - Probed `swap` on a dummy bundle: it replaced the app and cleared a leftover `.oc-new`.
+  - Not run: a real end-to-end install from the palette (it quits and replaces the user's Claude.app).
+- Deviation from plan: old ChatGPT detection uses the bundle id instead of `SUFeedURL`, because the current app ships no `SUFeedURL`.
+- Pass fixes:
+  - The app now reopens even when the swap fails.
+  - The temp-dir creation moved inside the try, so a failure can no longer leave the inflight key stuck.
+  - `swap` is private again.
+  - The confirm note now says "reopens it if it was open".
+  - Reran the macAppUpdate and pwshUpdateMac tests (9 pass); the typecheck is clean.
+
+### User
+Third party updates
+- On macOS, the palette now has **Update Claude Desktop** and **Update ChatGPT Desktop**, and **Update all** includes them when they are installed.
+- Updating asks first, quits the app, installs the newer signed version from Anthropic or OpenAI, and reopens the app if it was open.
+- If oc can't write the app, or it's the older ChatGPT app, the summary tells you to update it by hand.
+
+---
+
 ## 2026-11-21 (~18:51) - v0.2.402 mojaveFindlay - OpenCode Go 5h usage row - Claude Opus 5.5, low; Implementation
 
 ### Agent

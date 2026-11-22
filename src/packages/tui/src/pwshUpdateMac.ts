@@ -236,6 +236,7 @@ async function installPkg(version: string, onLine?: (line: string) => void) {
     await download(
       `https://github.com/PowerShell/PowerShell/releases/download/v${version}/powershell-${version}-osx-${arch}.pkg`,
       file,
+      isGithubHost,
       onLine,
     )
     onLine?.(`${STEP_PREFIX}verifying`)
@@ -253,11 +254,17 @@ async function installPkg(version: string, onLine?: (line: string) => void) {
 }
 
 // Same progress lines as the Windows DOWNLOAD_HELPERS, so the progress toast shows a percentage.
-async function download(url: string, file: string, onLine?: (line: string) => void) {
+// `allowHost` vets the host the download ends on after redirects.
+export async function download(
+  url: string,
+  file: string,
+  allowHost: (host: string) => boolean,
+  onLine?: (line: string) => void,
+) {
   onLine?.(`${STEP_PREFIX}downloading`)
   const response = await fetch(url, { signal: AbortSignal.timeout(10 * 60_000) })
   const host = new URL(response.url).hostname
-  if (!isGithubHost(host)) throw new Error(`download redirected to unexpected host '${host}'`)
+  if (!allowHost(host)) throw new Error(`download redirected to unexpected host '${host}'`)
   if (!response.ok || !response.body) throw new Error(`download failed: HTTP ${response.status}`)
   const total = Number(response.headers.get("content-length") ?? 0) || 0
   const writer = Bun.file(file).writer()
