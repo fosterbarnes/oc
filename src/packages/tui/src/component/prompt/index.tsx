@@ -411,6 +411,28 @@ export function Prompt(props: PromptProps) {
     interrupt: 0,
   })
   let abortRequestPending = false
+  let interruptTimer: ReturnType<typeof setTimeout> | undefined
+  onCleanup(() => clearTimeout(interruptTimer))
+  // Esc armed with a draft: Enter stops the busy turn, then sends the draft as a fresh turn. An empty draft or
+  // shell mode keeps Enter's normal behavior, so a stray Enter never kills a turn.
+  const interruptSendArmed = () => store.interrupt > 0 && store.mode === "normal" && store.prompt.input.trim() !== ""
+
+  // Stops the busy turn; background subagents keep running. Resolves once the server runner is idle
+  // (the abort route awaits the cancel), so a prompt sent after it starts a fresh turn. False on failure.
+  async function interruptTurn() {
+    setStore("interrupt", 0)
+    clearTimeout(interruptTimer)
+    if (!props.sessionID || abortRequestPending) return false
+    abortRequestPending = true
+    try {
+      const result = await sdk.client.session.abort({ sessionID: props.sessionID, keepBackground: "true" })
+      return !result.error
+    } catch {
+      return false
+    } finally {
+      abortRequestPending = false
+    }
+  }
 
   createEffect(
     on(
@@ -587,35 +609,38 @@ export function Prompt(props: PromptProps) {
 
           setStore("interrupt", store.interrupt + 1)
 
-          setTimeout(() => {
+          // One timer, so an earlier press cannot disarm a later one early (Esc then Enter relies on it).
+          clearTimeout(interruptTimer)
+          interruptTimer = setTimeout(() => {
             setStore("interrupt", 0)
           }, 5000)
 
           if (store.interrupt >= 2) {
+            // A busy turn stops alone and its background subagents keep running; the next double press,
+            // with the turn idle, stops the subagents (full aborts, so their jobs end without a notice).
+            if (status().type !== "idle") {
+              void interruptTurn()
+              dialog.clear()
+              return
+            }
             if (abortRequestPending) {
               dialog.clear()
               return
             }
             abortRequestPending = true
-            // A busy turn stops alone and its background subagents keep running; the next double press,
-            // with the turn idle, stops the subagents (full aborts, so their jobs end without a notice).
             const children = busyChildren()
-            const request =
-              status().type !== "idle"
-                ? sdk.client.session.abort({ sessionID: props.sessionID, keepBackground: "true" })
-                : Promise.all(children.map((child) => sdk.client.session.abort({ sessionID: child.id }))).then(
-                    (results) => {
-                      const failed = results.filter((result) => result.error).length
-                      if (failed)
-                        toast.show({
-                          message: `Could not stop ${failed} of ${children.length} subagents`,
-                          variant: "error",
-                        })
-                    },
-                  )
-            void request.finally(() => {
-              abortRequestPending = false
-            })
+            void Promise.all(children.map((child) => sdk.client.session.abort({ sessionID: child.id })))
+              .then((results) => {
+                const failed = results.filter((result) => result.error).length
+                if (failed)
+                  toast.show({
+                    message: `Could not stop ${failed} of ${children.length} subagents`,
+                    variant: "error",
+                  })
+              })
+              .finally(() => {
+                abortRequestPending = false
+              })
             setStore("interrupt", 0)
           }
           dialog.clear()
@@ -1495,6 +1520,14 @@ export function Prompt(props: PromptProps) {
     submitting = true
     try {
       await pasting
+      // Esc then Enter: stop the running turn, then send the draft as a new turn instead of a steer.
+      syncDraft()
+      if (props.sessionID && status().type !== "idle" && interruptSendArmed()) {
+        if (!(await interruptTurn())) {
+          toast.show({ message: "Could not stop the turn; your message was not sent", variant: "error" })
+          return false
+        }
+      }
       return await submitInner(stayHome)
     } finally {
       submitting = false
@@ -2309,6 +2342,8 @@ export function Prompt(props: PromptProps) {
                   <span style={{ fg: store.interrupt > 0 ? theme.primary : theme.textMuted }}>
                     {store.interrupt > 0 ? "again to interrupt" : "interrupt"}
                   </span>
+                  <span style={{ fg: theme.text }}>{interruptSendArmed() ? " · enter " : ""}</span>
+                  <span style={{ fg: theme.primary }}>{interruptSendArmed() ? "interrupt & send" : ""}</span>
                 </text>
               </box>
             </Match>

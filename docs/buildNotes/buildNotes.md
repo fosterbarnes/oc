@@ -131,6 +131,27 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-21 (~19:12) - v0.2.404 bozzoDodger - Esc then Enter interrupts the turn and sends the draft - Claude Opus 5.5, low; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; low; Implementation; completed
+- Version: 0.2.404 bozzoDodger
+- Added `interruptSendArmed()` in `src/packages/tui/src/component/prompt/index.tsx`: armed Esc + normal mode + non-empty draft. A first pass used a separate `interruptSend.ts` helper with a unit test; `/pass` inlined it and removed the test, which did not meet the verify keep bar.
+- Changed `submit()` in `src/packages/tui/src/component/prompt/index.tsx`: when the gate holds, it awaits `interruptTurn()` (abort with `keepBackground`) and then runs `submitInner`. The abort route awaits `Runner.cancel`, so the runner is idle before the prompt goes out and starts a fresh turn instead of a steer. If the abort fails, a toast shows, nothing is sent, and the draft stays.
+- Extracted `interruptTurn()`; the double-Esc busy path now uses it. The subagent-only double-Esc path is unchanged.
+- Fixed the Esc arm timer: each press stacked a new 5 s `setTimeout`, so an earlier timer could disarm early. Now one `interruptTimer` is cleared on each press and on cleanup.
+- Footer hint while armed with a draft: `esc again to interrupt · enter interrupt & send`.
+- Plan: `~/.config/opencode/plans/escEnterInterruptSend.md`. No deviations, apart from the hint using dynamic spans (the existing pattern) instead of `<Show>` inside `<text>`.
+- Verification: `tsgo --noEmit` clean in `src/packages/tui`; `bun test test/prompt test/component/queue.test.tsx` 43 pass after `/pass` cleanup. User confirmed Esc→Enter works live in the TUI (v0.2.404). The paused-queue case and both providers were not reported separately.
+
+### User
+Prompt
+- While the agent is working, press Esc and then Enter to stop it and send what you typed as a new message.
+- After the first Esc, the footer shows `enter interrupt & send` when there is text in the box.
+- Enter with an empty box does nothing special, and the second Esc still just interrupts.
+
+---
+
 ## 2026-11-21 (~19:02) - v0.2.403 animalKnows - Update Claude Desktop and ChatGPT Desktop on macOS - Claude Opus 5.5, low; Implementation
 
 ### Agent
