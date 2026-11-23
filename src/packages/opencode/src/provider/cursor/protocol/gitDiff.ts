@@ -410,8 +410,8 @@ function parseUnifiedDiff(text: string): FileDiff[] {
       let removed = 0
       for (const ch of current.chunks) {
         for (const l of ch.lines) {
-          if (l.startsWith("+") && !l.startsWith("+++")) added++
-          else if (l.startsWith("-") && !l.startsWith("---")) removed++
+          if (l.startsWith("+")) added++
+          else if (l.startsWith("-")) removed++
         }
       }
       current.added = added
@@ -432,11 +432,8 @@ function parseUnifiedDiff(text: string): FileDiff[] {
       continue
     }
     if (!current) continue
-    if (line.startsWith("--- ") || line.startsWith("+++ ")) {
-      // part of chunk header, will be captured as chunk line if within hunk
-      // For now ignore outside hunks
-      continue
-    }
+    // File headers come before the first hunk. Inside one, `--- x` is a deleted line `-- x`.
+    if (!currentChunk && (line.startsWith("--- ") || line.startsWith("+++ "))) continue
     const hunk = line.match(/^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/)
     if (hunk) {
       flushChunk()
@@ -472,7 +469,8 @@ function parseNameStatus(text: string): FileDiff[] {
     // status like M, A, D, R100 etc
     const first = status[0] ?? ""
     const from = first === "A" ? "/dev/null" : file
-    const to = first === "D" ? "/dev/null" : file
+    // Renames and copies list `old<TAB>new`.
+    const to = first === "D" ? "/dev/null" : (parts[2] ?? file)
     diffs.push({ from, to, chunks: [], added: 0, removed: 0 })
   }
   return diffs

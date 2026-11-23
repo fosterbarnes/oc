@@ -352,15 +352,19 @@ export function readFileLineCount(filePath: string): number | undefined {
     const buffer = Buffer.allocUnsafe(64 * 1024)
     let totalBytes = 0
     let lines = 1
+    let last = 0
     while (true) {
       const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, null)
       if (bytesRead === 0) break
       totalBytes += bytesRead
+      last = buffer[bytesRead - 1]!
       for (let index = 0; index < bytesRead; index++) {
         if (buffer[index] === 0x0a) lines++
       }
     }
-    return totalBytes === 0 ? 0 : lines
+    if (totalBytes === 0) return 0
+    // A final newline ends the last line rather than starting another, as OpenCode's read counts it.
+    return last === 0x0a ? lines - 1 : lines
   } catch {
     return undefined
   } finally {

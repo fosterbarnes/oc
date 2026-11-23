@@ -3,6 +3,7 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises"
 import net from "node:net"
 import { homedir } from "node:os"
 import path from "node:path"
+import { parse as parseJsonc, type ParseError } from "jsonc-parser"
 import {
   opencodeConfigFileNames,
   opencodeGlobalConfigDirs,
@@ -38,8 +39,10 @@ async function readJsonConfig(dir: string): Promise<OpencodeJson> {
     if (!(await exists(file))) continue
     try {
       const raw = await readFile(file, "utf-8")
-      const stripped = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
-      return JSON.parse(stripped) as OpencodeJson
+      // A real JSONC parser: stripping by regex also cut `/*` inside strings such as URLs.
+      const errors: ParseError[] = []
+      const parsed = parseJsonc(raw, errors, { allowTrailingComma: true }) as OpencodeJson
+      return errors.length ? {} : parsed
     } catch {
       return {}
     }
@@ -88,9 +91,11 @@ function globToRegExp(glob: string): RegExp {
     const c = norm[i]!
     if (c === "*") {
       if (norm[i + 1] === "*") {
-        re += ".*"
         i++
-        if (norm[i + 1] === "/") i++
+        // `**/` spans whole folders only, so `a/**/b.md` does not match `a/xb.md`.
+        const folders = norm[i + 1] === "/"
+        re += folders ? "(?:.*/)?" : ".*"
+        if (folders) i++
       } else {
         re += "[^/]*"
       }
@@ -175,6 +180,12 @@ function isIPv6Blocked(ip: string): boolean {
   if (lower.startsWith("::ffff:")) {
     const v4 = lower.slice("::ffff:".length)
     if (net.isIP(v4) === 4 && isIPv4Blocked(v4)) return true
+  }
+  // URL parsing rewrites `::ffff:127.0.0.1` to this hex form, which still connects to the IPv4 address.
+  const embedded = /^::(?:ffff:)?([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(lower)
+  if (embedded) {
+    const [high, low] = [parseInt(embedded[1]!, 16), parseInt(embedded[2]!, 16)]
+    if (isIPv4Blocked(`${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`)) return true
   }
   return false
 }

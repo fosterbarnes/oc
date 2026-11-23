@@ -100,7 +100,7 @@ async function cycle() {
     if (result.applied.length === 0) continue
     console.log(`sync: applied ${result.applied.length} items from ${peer.name}`)
     reloadPending = true
-    status = { ...status, conflicts: [...status.conflicts, ...result.conflicts] }
+    status = { ...status, conflicts: [...status.conflicts, ...result.conflicts].slice(-50) }
   }
   if (reloadPending && idle()) {
     reloadPending = false

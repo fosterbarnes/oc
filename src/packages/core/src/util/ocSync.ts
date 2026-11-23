@@ -226,7 +226,11 @@ export async function pull(peer: Peer, current: Settings) {
     wanted.filter((entry) => !entry.deleted).map((entry) => entry.id),
   )
   const result = await locked(() => applyPulled(peer, remote.entries, fetched, current.exclude))
-  _etags.set(peer.ip, { etag: response.headers.get("etag") ?? "", exclude })
+  // A wanted item left unapplied must be asked for again: a 304 would hide it until the peer changes.
+  const applied = new Set(result.applied)
+  if (wanted.every((entry) => applied.has(entry.id))) {
+    _etags.set(peer.ip, { etag: response.headers.get("etag") ?? "", exclude })
+  } else _etags.delete(peer.ip)
   return result
 }
 
@@ -286,8 +290,11 @@ export async function applyPulled(
       write.push(restored)
       // Files the peer's version no longer has.
       if (local?.kind === "files" && restored.kind === "files") {
-        const kept = new Set(restored.files.map((file) => file.path))
-        const stale = local.files.filter((file) => !kept.has(file.path))
+        // A case-only rename is one file on Windows and default macOS volumes: removing the old
+        // spelling would delete the file just written.
+        const fold = (file: string) => (process.platform === "linux" ? file : file.toLowerCase())
+        const kept = new Set(restored.files.map((file) => fold(file.path)))
+        const stale = local.files.filter((file) => !kept.has(fold(file.path)))
         if (stale.length) remove.push({ ...local, files: stale })
       }
     }

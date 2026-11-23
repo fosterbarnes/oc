@@ -1,8 +1,8 @@
 /**
  * The text this plugin appends to Claude Code's system prompt: the active oc
- * agent's own prompt plus a short note on oc-only tools. Claude Code's prompt,
- * CLAUDE.md and the repo AGENTS.md (which Claude Code loads itself) cover the
- * rest, so oc's environment, instruction and skill blocks are never forwarded.
+ * agent's own prompt, oc instructions and plugin text the CLI does not load,
+ * and a short note on oc-only tools. Claude Code's prompt, CLAUDE.md and the
+ * repo AGENTS.md cover the rest, so oc's environment and skill blocks stay out.
  */
 import { writeFileSync } from "node:fs"
 import { randomUUID } from "node:crypto"
@@ -136,12 +136,17 @@ function replacedToolsText(replaced: string[]) {
 export function buildAppendedSystemPrompt(options: {
   /** The active oc agent's own prompt. */
   agentPrompt?: string
+  /** oc instructions and plugin text the CLI does not load itself. */
+  instructions?: string
   multiStepHint?: boolean
   /** `buildToolEnvironmentNote` output for this spawn. */
   toolEnvironment?: string
 }): string | undefined {
   const content = [
     options.agentPrompt?.trim(),
+    options.instructions
+      ? `## oc instructions\n\nThese come from the user's oc setup and apply here. Where they name a tool you do not have, use your closest equivalent.\n\n${options.instructions}`
+      : undefined,
     options.toolEnvironment,
     options.multiStepHint ? MULTI_STEP_TASK_HINT : undefined,
   ]

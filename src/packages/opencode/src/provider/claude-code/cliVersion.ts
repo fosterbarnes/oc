@@ -164,6 +164,15 @@ export function cliSupportsPermissionPrompts(v: CliVersion | null): boolean {
 }
 
 /**
+ * Stream-json `PreToolUse` callbacks (toolGuard.ts). 2.1.317 is the oldest binary measured to honor
+ * deny under `--dangerously-skip-permissions` and to block a call whose callback times out.
+ */
+export function cliSupportsToolGuard(v: CliVersion | null): boolean {
+  if (!v) return false
+  return gte(v, { major: 2, minor: 1, patch: 317 })
+}
+
+/**
  * `--thinking` has been part of Claude Code's CLI since the 2.x line.
  * We require a detected 2.0.0+ before passing it; unknown version → skip
  * to avoid crashing a pre-flag binary. Anyone on the 1.x line should

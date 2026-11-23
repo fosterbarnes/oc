@@ -113,6 +113,8 @@ type Prepare = Source | { release: string } | { update: string } | {}
 
 // One build or download at a time per TUI; a second /revive or /update waits for the first.
 let preparing = false
+// A finished build waiting for the reply to end: a second /revive then would install twice.
+let swapWaiting = false
 
 // Shared by the revive slash commands and revive chains (`reviveChain.tsx`). Chains pass the session
 // explicitly (the route may still be Home) and the ReviveResume id of the steps typed after the revive.
@@ -217,7 +219,7 @@ export function useRevive(toast: ToastContext) {
   // `oc oc --revive-prepare` in a hidden helper: the source choice, build, or release download, while
   // this window stays open. Paths to install, [] for a plain restart, undefined when it failed (toasted).
   const prepare = async (request: Prepare) => {
-    if (preparing) {
+    if (preparing || swapWaiting) {
       toast.show({ message: "A revive is already building", variant: "info" })
       return
     }
@@ -276,7 +278,9 @@ export function useRevive(toast: ToastContext) {
     // A reply started during the build finishes first.
     if (options.sessionID && (sync.data.session_status[options.sessionID]?.type ?? "idle") !== "idle") {
       toast.show({ message: "Build ready; restarting after this reply", variant: "info" })
+      swapWaiting = true
       await idle(options.sessionID)
+      swapWaiting = false
     }
     const mirror = options.mirror
     if (mirror) {

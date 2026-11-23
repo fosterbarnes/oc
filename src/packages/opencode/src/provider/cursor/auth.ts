@@ -267,7 +267,9 @@ export async function pollForTokens(
 
     try {
       const url = `${baseUrl}/auth/poll?uuid=${encodeURIComponent(uuid)}&verifier=${encodeURIComponent(verifier)}`
-      const res = await fetch(url, signal ? { signal } : undefined)
+      // Each poll is bounded: one hung request would otherwise outlast the whole attempt budget.
+      const timeout = AbortSignal.timeout(15_000)
+      const res = await fetch(url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout })
 
       if (res.status === 404) {
         failures = 0
@@ -296,6 +298,8 @@ export async function pollForTokens(
       if (err instanceof AuthTimeoutError) throw err
       if (err instanceof AuthPollError) throw err
       if (signal?.aborted) throw new AuthTimeoutError("Poll cancelled")
+      // A slow poll is not a failure: sign-in may still be in progress in the browser.
+      if (err instanceof Error && err.name === "TimeoutError") continue
       failures++
       if (failures >= 3) {
         throw new AuthPollError("Poll failed after 3 consecutive network errors", err)

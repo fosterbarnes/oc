@@ -759,7 +759,12 @@ export function createClaudeWarmupCommands() {
       setBusy(true)
       try {
         const next = await persistWarmupSchedule(sdk.client, payload, state())
-        if (gen !== generation) return
+        if (gen !== generation) {
+          // The dialog closed during the save, which still landed. Reread it: `next` merges a snapshot
+          // from before the save, and reopening with the old schedule would save that back.
+          if (!next.error) void discovery.refresh()
+          return
+        }
         if (next.error) {
           toast.show({ message: next.error, variant: "error" })
           show()

@@ -4,6 +4,7 @@
 import fs from "node:fs/promises"
 import path from "node:path"
 import { Effect, Schema } from "effect"
+import { ProcessTree } from "@opencode-ai/core/util/processTree"
 import { Tool } from "./tool"
 import { CuaDriver } from "./cuaDriver"
 import { ToolID } from "./schema"
@@ -34,7 +35,8 @@ const MAX_TAKEOVER_MINUTES = 30
 
 // Server-wide on purpose: there is one desktop, whichever session drives it.
 let takeoverUntil = 0
-const launched = new Set<number>()
+// pid -> creation time: Windows reuses pids, and only the process oc started may skip the kill prompt.
+const launched = new Map<number, string>()
 
 /** Classify a driver call before it runs. Pure, so the safety rules are testable without a driver. */
 export function policy(tool: string, args: Args, launchedPids: ReadonlySet<number>): Policy {
@@ -55,7 +57,12 @@ function foregroundMarker(value: unknown): boolean {
 }
 
 const gate = Effect.fn("Cua.gate")(function* (ctx: Tool.Context, tool: string, args: Args) {
-  const kind = policy(tool, args, launched)
+  if (tool === "kill_app" && launched.has(Number(args.pid))) {
+    const pid = Number(args.pid)
+    const live = yield* Effect.promise(() => ProcessTree.processIdentity(pid).catch(() => undefined))
+    if (live?.created !== launched.get(pid)) launched.delete(pid)
+  }
+  const kind = policy(tool, args, new Set(launched.keys()))
   if (kind === "deny")
     return yield* Effect.die(new Error(`${tool} is blocked in oc (config, install, recording, and clipboard reads).`))
   // An approved takeover is the user's consent to foreground input until it ends.
@@ -87,7 +94,10 @@ const run = Effect.fn("Cua.run")(function* (ctx: Tool.Context, tool: string, arg
   const text = result.content.flatMap((item) => (item.type === "text" ? [item.text] : [])).join("\n\n")
   if (result.isError) return yield* Effect.die(new Error(text || `cua-driver ${tool} failed.`))
   const pid = (result.structuredContent as { pid?: unknown } | undefined)?.pid
-  if (tool === "launch_app" && typeof pid === "number") launched.add(pid)
+  if (tool === "launch_app" && typeof pid === "number") {
+    const created = (yield* Effect.promise(() => ProcessTree.processIdentity(pid).catch(() => undefined)))?.created
+    if (created) launched.set(pid, created)
+  }
   if (tool === "kill_app") launched.delete(Number(args.pid))
   return {
     title: tool,

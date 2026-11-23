@@ -128,13 +128,14 @@ export async function executeCursorImageSave(
   ctx: ImageSaveToolContext,
 ): Promise<ImageSaveResult | string> {
   const imageId = typeof args.image_id === "string" ? args.image_id : ""
-  if (!imageId) return "No image id was provided, so there is nothing to save."
+  // Refusals throw: a returned string is reported to Cursor as a successful write of the file.
+  if (!imageId) throw new Error("No image id was provided, so there is nothing to save.")
 
   const image = takePendingCursorImage(imageId)
   if (!image) {
     // Expired, already committed, or never existed. Identical response for all
     // three: nothing here should confirm whether an id was ever valid.
-    return "No pending Cursor image matches that id. It may have already been saved or expired."
+    throw new Error("No pending Cursor image matches that id. It may have already been saved or expired.")
   }
 
   const workspace = ctx.worktree || ctx.directory
@@ -144,7 +145,7 @@ export async function executeCursorImageSave(
   )
   if ("error" in contained) {
     trace(`image save: refused path=${JSON.stringify(image.path)} reason=${contained.error}`)
-    return `Refusing to save the generated image: ${contained.error}.`
+    throw new Error(`Refusing to save the generated image: ${contained.error}.`)
   }
 
   // Mirror what OpenCode's own `write` tool does, in the same order: an

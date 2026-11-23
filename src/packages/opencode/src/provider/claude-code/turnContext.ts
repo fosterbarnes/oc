@@ -10,6 +10,7 @@ import {
   resolveAgentAccount,
   resolveOpencodeAgent,
   resolveOpencodeAgentPrompt,
+  resolveOpencodeInstructions,
   resolveSessionAffinity,
 } from "./callOptions.js"
 import { fetchSessionDirectory, getOpencodeProjectDirectory, resolveSpawnCwdFrom } from "./runtimeStatus.js"
@@ -65,6 +66,7 @@ export async function resolveTurnContext(
     modelId,
     variant: readReasoningEffort(options.providerOptions, config.provider),
     agentPrompt: resolveOpencodeAgentPrompt(options.providerOptions, config.provider),
+    instructions: resolveOpencodeInstructions(options.providerOptions, config.provider),
     agentAccount: resolveAgentAccount(options.providerOptions, config.provider),
     compactionMode,
     effectiveModelId,

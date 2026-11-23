@@ -197,7 +197,9 @@ export function createRootPicker(input: {
       (option) => typeof option.value === "string" && isDirectory(option.value),
     )?.value
     pickerInterceptor?.()
-    const pickerID = ++rootPickerSearchGeneration
+    ++rootPickerSearchGeneration
+    // Separate from the search generation: typing bumps that, and the close below must still clean up.
+    const pickerID = ++rootPickerRender
     const interceptor = keymap.intercept("key", (context) => {
       if (
         // cmd+f on macOS, matching the oc layout there (`TuiKeybindPreset.mac`).
@@ -277,6 +279,8 @@ export function createRootPicker(input: {
           typeof option.value === "string" && isDirectory(option.value) ? option.value : undefined
       },
       onSelect: (option: (typeof options)[number]) => {
+        // The help row keeps the dialog open, so the favorite shortcut must stay installed.
+        if (option.value === FAVORITE_HELP) return
         pickerInterceptor?.()
         pickerInterceptor = undefined
         if (typeof option.onSelect === "function") {
@@ -289,7 +293,7 @@ export function createRootPicker(input: {
     dialog.replace(
       () => <DialogSelect {...dialogProps} />,
       () => {
-        if (pickerID !== rootPickerSearchGeneration) return
+        if (pickerID !== rootPickerRender) return
         pickerInterceptor?.()
         pickerInterceptor = undefined
         if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
@@ -298,6 +302,7 @@ export function createRootPicker(input: {
     )
   }
 
+  let rootPickerRender = 0
   const selectRoot = () => renderRootPicker()
   onCleanup(() => {
     rootPickerSearchGeneration += 1

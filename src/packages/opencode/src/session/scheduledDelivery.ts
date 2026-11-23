@@ -19,20 +19,37 @@ export const Claim = Schema.Struct({
 export type Claim = typeof Claim.Type
 const decodeClaim = Schema.decodeUnknownOption(Claim)
 
-const self = Effect.runSync(
-  Effect.cached(
-    Effect.promise(async () => {
-      // Without process identity (Linux), claims recover by the claim age bound.
-      if (!ProcessTree.identitySupported) return { pid: process.pid, created: String(performance.timeOrigin) }
-      const identity = await ProcessTree.processIdentity(process.pid)
-      if (!identity?.created) throw new Error("Scheduler process creation time unavailable")
-      return { pid: identity.pid, created: identity.created }
-    }),
-  ),
-)
+let _self: Promise<{ pid: number; created: string }> | undefined
+
+// Only a success is kept: one failed process lookup must not stop scheduling until restart.
+function self() {
+  _self ??= (async () => {
+    // Without process identity (Linux), claims recover by the claim age bound.
+    if (!ProcessTree.identitySupported) return { pid: process.pid, created: String(performance.timeOrigin) }
+    const identity = await ProcessTree.processIdentity(process.pid)
+    if (!identity?.created) throw new Error("Scheduler process creation time unavailable")
+    return { pid: identity.pid, created: identity.created }
+  })().catch((error: unknown) => {
+    _self = undefined
+    throw error
+  })
+  return _self
+}
 
 export async function owner() {
-  return { ...(await Effect.runPromise(self)), owner: randomUUID() }
+  return { ...(await self()), owner: randomUUID() }
+}
+
+/** One stable owner per caller. Unlike `Effect.cached`, a failed lookup is retried on the next use. */
+export function ownerOnce() {
+  let held: ReturnType<typeof owner> | undefined
+  return Effect.promise(() => {
+    held ??= owner().catch((error: unknown) => {
+      held = undefined
+      throw error
+    })
+    return held
+  })
 }
 
 export function claim(value: unknown) {
@@ -42,7 +59,7 @@ export function claim(value: unknown) {
 
 export async function expired(value: Claim, now: number) {
   if (now - value.at >= CLAIM_MS) return true
-  if (value.pid === process.pid && value.created === (await Effect.runPromise(self)).created) return false
+  if (value.pid === process.pid && value.created === (await self()).created) return false
   if (!ProcessTree.identitySupported) return false
   return (await ProcessTree.processIdentity(value.pid))?.created !== value.created
 }
@@ -100,7 +117,7 @@ export const admit = (
       Effect.catchDefect((cause) => (cause instanceof Skipped ? Effect.succeed(false) : Effect.die(cause))),
     )
 
-/** Versioning closes the read-deadline/subscribe gap; listeners are removed on interruption. */
+/** Versioning closes the read-deadline/subscribe gap; a listener is removed when woken or interrupted. */
 export function makeWake() {
   let version = 0
   const listeners = new Set<() => void>()
@@ -113,7 +130,10 @@ export function makeWake() {
     wait: (seen: number, deadline: number) =>
       Effect.raceFirst(
         Effect.callback<void>((resume) => {
-          const wake = () => resume(Effect.void)
+          const wake = () => {
+            listeners.delete(wake)
+            resume(Effect.void)
+          }
           listeners.add(wake)
           if (seen !== version) wake()
           return Effect.sync(() => {

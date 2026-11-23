@@ -11,6 +11,7 @@ import {
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
   CLAUDE_CODE_EXPLICIT_MODEL_OPTION,
   CLAUDE_CODE_HARNESS_DENIED_OPTION,
+  CLAUDE_CODE_INSTRUCTIONS_OPTION,
   CLAUDE_CODE_PROVIDER_ID,
   CLAUDE_CODE_SESSION_OPTION,
   type CommandToolPlan,
@@ -75,6 +76,11 @@ export function resolveAgentAccount(providerOptions: ProviderOptions, providerKe
 /** The active oc agent's own prompt, appended to Claude Code's system prompt at spawn. */
 export function resolveOpencodeAgentPrompt(providerOptions: ProviderOptions, providerKey: string): string | undefined {
   return hostOption(providerOptions, providerKey, CLAUDE_CODE_AGENT_PROMPT_OPTION)
+}
+
+/** oc's instructions and plugin text that the CLI does not load, appended at spawn on tool turns. */
+export function resolveOpencodeInstructions(providerOptions: ProviderOptions, providerKey: string): string | undefined {
+  return hostOption(providerOptions, providerKey, CLAUDE_CODE_INSTRUCTIONS_OPTION)
 }
 
 /**

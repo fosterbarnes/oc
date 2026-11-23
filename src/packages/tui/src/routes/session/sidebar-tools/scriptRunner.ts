@@ -104,9 +104,11 @@ export function copyToClipboard(text: string): Promise<RunResult> {
 
 export function scriptCommand(script: Script, syntax: PaneSyntax = "pwsh"): string {
   if (!script.filePath) return script.command
-  return [script.launcher.executable, ...launchArgs(script.launcher, script.filePath).map(SYNTAX[syntax].quote)].join(
-    " ",
-  )
+  const quote = SYNTAX[syntax].quote
+  const executable = script.launcher.executable
+  // A path with spaces must be quoted, and PowerShell only runs a quoted path through `&`.
+  const program = /\s/.test(executable) ? `${syntax === "pwsh" ? "& " : ""}${quote(executable)}` : executable
+  return [program, ...launchArgs(script.launcher, script.filePath).map(quote)].join(" ")
 }
 
 export function weztermArgs(
@@ -193,7 +195,8 @@ function spawnWezterm(commandArgs: string[], cwd: string): Promise<{ paneID?: st
   return new Promise((resolve) => {
     const child = spawn(weztermCommand(), commandArgs, {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      // stderr is unread here; a pipe could fill and block the CLI forever.
+      stdio: ["ignore", "pipe", "ignore"],
       windowsHide: true,
     })
     let output = ""

@@ -64,9 +64,10 @@ export type CommandToolPlan = { native: string[]; closed: boolean; deny?: string
 export const CLAUDE_CODE_HARNESS_DENIED_OPTION = "opencodeHarnessDenied"
 // Set when the turn's user message names its model explicitly; agent model overrides then keep it.
 export const CLAUDE_CODE_EXPLICIT_MODEL_OPTION = "opencodeExplicitModel"
-// The agent's own prompt (custom agent prompt, or the `instructionsByModel` base). The only oc
-// system text Claude Code gets; its own prompt, CLAUDE.md and AGENTS.md cover the rest.
+// The agent's own prompt (custom agent prompt, or the `instructionsByModel` base).
 export const CLAUDE_CODE_AGENT_PROMPT_OPTION = "opencodeAgentPrompt"
+// oc instruction files the CLI does not load itself, the message's system text, and plugin additions.
+export const CLAUDE_CODE_INSTRUCTIONS_OPTION = "opencodeInstructions"
 
 // `denied` holds oc's permission or question rejection: the provider ends the turn and passes it on as
 // the tool error, so the processor marks the turn blocked.
@@ -84,6 +85,22 @@ export type HostToolExecutor = ((
   callID: string,
   signal?: AbortSignal,
 ) => Promise<HostToolResult>) & { tools?: ReadonlySet<string> }
+
+/** oc's decision on one Claude built-in call: a denial message, or undefined to let it run. */
+export type ClaudeToolGuard = (
+  tool: string,
+  input: Record<string, unknown>,
+  callID: string,
+  signal: AbortSignal,
+) => Promise<string | undefined>
+const MAX_CLAUDE_TOOL_GUARDS = 512
+// oc session id -> its latest rules. A session evicted here is denied until its next step sets it again.
+export const claudeToolGuards = new Map<string, ClaudeToolGuard>()
+export function setClaudeToolGuard(sessionID: string, guard: ClaudeToolGuard) {
+  claudeToolGuards.delete(sessionID)
+  claudeToolGuards.set(sessionID, guard)
+  if (claudeToolGuards.size > MAX_CLAUDE_TOOL_GUARDS) claudeToolGuards.delete(claudeToolGuards.keys().next().value!)
+}
 
 // oc session id -> its current turn's bound tools. Set by session/llm.ts per stream, so the provider
 // runs proxied calls in-stream with full oc tool context. One active turn per session, so overwrite is safe.

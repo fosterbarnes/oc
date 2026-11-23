@@ -411,9 +411,9 @@ test("tool environment note carries the task and question sections only when liv
   assert.ok(!neither.includes("### Subagents") && !neither.includes("### Asking"))
 })
 
-// Claude Code brings its own prompt, CLAUDE.md and AGENTS.md: the appended
-// file carries the agent prompt and the tool note, nothing else from oc.
-test("appended prompt is the agent prompt, the tool note and the multi-step hint only", () => {
+// Claude Code brings its own prompt, CLAUDE.md and AGENTS.md: without forwarded
+// instructions, the appended file carries only the agent prompt and tool note.
+test("appended prompt without instructions is the agent prompt, tool note and multi-step hint", () => {
   const file = buildAppendedSystemPrompt({
     agentPrompt: "AGENT PROMPT",
     multiStepHint: true,

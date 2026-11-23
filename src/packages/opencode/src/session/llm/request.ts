@@ -21,6 +21,7 @@ import {
   CLAUDE_CODE_COMMAND_PERMISSION_OPTION,
   CLAUDE_CODE_EXPLICIT_MODEL_OPTION,
   CLAUDE_CODE_HARNESS_DENIED_OPTION,
+  CLAUDE_CODE_INSTRUCTIONS_OPTION,
   CLAUDE_CODE_SESSION_OPTION,
   CLAUDE_HARNESS_ONLY_TOOLS,
   CLAUDE_NATIVE_TOOLS,
@@ -85,14 +86,11 @@ export function applyCursorCompactionOption(
 
 export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: PrepareInput) {
   const isOpenaiOauth = input.provider.id === "openai" && input.auth?.type === "oauth"
+  const lead = (input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model))
+    .filter((x) => x)
+    .join("\n")
   const system = [
-    [
-      ...(input.agent.prompt ? [input.agent.prompt] : SystemPrompt.provider(input.model)),
-      ...input.system,
-      ...(input.user.system ? [input.user.system] : []),
-    ]
-      .filter((x) => x)
-      .join("\n"),
+    [lead, ...input.system, ...(input.user.system ? [input.user.system] : [])].filter((x) => x).join("\n"),
   ]
 
   const header = system[0]
@@ -133,6 +131,10 @@ export const prepare = Effect.fn("LLMRequestPrep.prepare")(function* (input: Pre
     options[CLAUDE_CODE_SESSION_OPTION] = input.sessionID
     options[CLAUDE_CODE_AGENT_OPTION] = input.agent.name
     if (input.agent.prompt) options[CLAUDE_CODE_AGENT_PROMPT_OPTION] = input.agent.prompt
+    // Everything after the lead: oc instructions, the message's system text, and plugin additions.
+    const text = system.join("\n\n")
+    const instructions = (text.startsWith(lead) ? text.slice(lead.length) : text).trim()
+    if (instructions && !input.small) options[CLAUDE_CODE_INSTRUCTIONS_OPTION] = instructions
     const plan = commandToolPlan(input.user)
     if (plan) options[CLAUDE_CODE_COMMAND_PERMISSION_OPTION] = JSON.stringify(plan)
     const harnessDenied = harnessToolsDenied(input)

@@ -3,11 +3,21 @@
  * (`--plugin-dir`) whose `skills/<name>` entries are directory junctions to
  * each oc skill folder. Claude Code lists only names and descriptions and
  * loads a skill's body when it is used, so nothing is copied and nothing is
- * pasted into the prompt. Skills the spawning account's own config dir already
- * loads itself (anything under a `<configDir>/skills` folder) are left out so
- * they never appear twice.
+ * pasted into the prompt. Skills under a `.claude/skills` folder, and oc skills
+ * identical to one the spawning account already loads, are left out so they
+ * never appear twice. A different same-name copy stays available as `oc:<name>`.
  */
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
@@ -57,7 +67,7 @@ export function poolSkillsDir(account: string): string {
  * Build (or reuse) the plugin folder for `skills` and return its path, or
  * undefined when no skill needs linking. `root` is a seam for checks.
  * `accountSkillsDir` is the spawning account's own skills folder
- * (poolSkillsDir); skills it already loads are left out.
+ * (poolSkillsDir); identical skills it already loads are left out.
  *
  * One folder per link set under `root`: projects on one resident server can
  * link different skills, and a running `claude` keeps reading its folder, so
@@ -68,10 +78,10 @@ export function ensureSkillPlugin(
   root = path.join(Global.Path.data, "claude-code", "skillPlugin"),
   claudeSkillsDir = path.join(homedir(), ".claude", "skills"),
 ): string | undefined {
-  const native = new Set(existsSync(claudeSkillsDir) ? readdirSync(claudeSkillsDir) : [])
   const links = skills
-    .filter((skill) => SAFE_NAME.test(skill.name) && !native.has(skill.name))
+    .filter((skill) => SAFE_NAME.test(skill.name))
     .filter((skill) => path.isAbsolute(skill.location) && !isClaudeSkill(skill.location))
+    .filter((skill) => !matchesNativeSkill(skill, claudeSkillsDir))
     .map((skill) => ({ name: skill.name, target: path.dirname(skill.location) }))
     .toSorted((a, b) => a.name.localeCompare(b.name))
   if (links.length === 0) return undefined
@@ -100,6 +110,14 @@ export function ensureSkillPlugin(
   }
   log.info("linked oc skills for claude code", { folder, skills: links.length })
   return folder
+}
+
+// A same-name Claude skill replaces oc's only when identical; otherwise `oc:<name>` keeps oc's version.
+function matchesNativeSkill(skill: SkillSource, claudeSkillsDir: string) {
+  const native = path.join(claudeSkillsDir, skill.name, "SKILL.md")
+  if (!existsSync(native) || !existsSync(skill.location)) return false
+  const text = (file: string) => readFileSync(file, "utf8").replace(/\r\n/g, "\n")
+  return text(native) === text(skill.location)
 }
 
 function isClaudeSkill(location: string) {

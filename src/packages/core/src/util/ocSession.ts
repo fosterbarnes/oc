@@ -4,7 +4,7 @@ import path from "path"
 // `crow`, then `crow1`, `crow2`, ... based on existing root session titles.
 export function nextProjectTitle(titles: string[], directory: string) {
   const baseTitle = path.basename(directory) || directory
-  const pattern = new RegExp(`^${baseTitle.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\d*$`)
+  const pattern = new RegExp(`^${baseTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\d*$`)
   const numbers = titles.flatMap((title) => {
     if (!pattern.test(title)) return []
     if (title === baseTitle) return [0]

@@ -77,6 +77,7 @@ function readPorts(proc: ReturnType<typeof spawn>) {
 }
 
 async function start() {
+  const started = generation
   const entry = runtimeEntry()
   await fs.access(entry)
   const token = crypto.randomUUID()
@@ -89,6 +90,12 @@ async function start() {
     proc.kill()
     throw error
   })
+  // Stopped while starting: nothing else holds this process, so it would keep its ports.
+  if (started !== generation) {
+    proc.kill()
+    ports.rl.close()
+    throw new Error("Cursor proxy was stopped during startup")
+  }
   const origin = `http://127.0.0.1:${ports.h2}`
   const health = `http://127.0.0.1:${ports.health}`
   child = { proc, origin, health, token, rl: ports.rl }
@@ -103,13 +110,18 @@ async function start() {
 
 export function ensureCursorProxy() {
   if (child?.proc.exitCode === null) return Promise.resolve(child.origin)
-  starting ??= start().finally(() => {
-    starting = undefined
+  if (starting) return starting
+  const run: Promise<string> = start().finally(() => {
+    if (starting === run) starting = undefined
   })
-  return starting
+  starting = run
+  return run
 }
 
+let generation = 0
+
 export async function stopCursorProxy() {
+  generation++
   const current = child
   child = undefined
   starting = undefined

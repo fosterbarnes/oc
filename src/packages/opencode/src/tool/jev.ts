@@ -164,10 +164,15 @@ export const runClassify: Run<Schema.Schema.Type<typeof ClassifyParameters>> = a
   )
   const results = items.map((item) => {
     const answer = reply.answers[item.key]
-    if (answer?.type !== "choice" || typeof answer.choice !== "string")
+    // The chosen class must carry its own probability: another class's score would auto-accept this label.
+    if (
+      answer?.type !== "choice" ||
+      typeof answer.choice !== "string" ||
+      typeof answer.probabilities?.[answer.choice] !== "number"
+    )
       return { id: item.id, label: null, decision: "review", status: "invalid_response", ...truncated(item) }
     const margin = marginOf(answer.probabilities)
-    const top = answer.probabilities[answer.choice] ?? Math.max(0, ...Object.values(answer.probabilities))
+    const top = answer.probabilities[answer.choice]
     return {
       id: item.id,
       label: answer.choice,

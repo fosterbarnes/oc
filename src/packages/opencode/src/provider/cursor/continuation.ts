@@ -267,7 +267,10 @@ export function deliverContinuationResults(
     } else if (!pending.bridged) {
       try {
         const shellResult =
-          pending.resultField === "shell_stream" || pending.resultField === "background_shell_spawn_result"
+          pending.resultField === "shell_stream" ||
+          pending.resultField === "shell_result" ||
+          pending.resultField === "delete_result" ||
+          pending.resultField === "background_shell_spawn_result"
             ? consumeCursorShellResult(r.toolCallId, r.output)
             : undefined
         const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
@@ -362,9 +365,11 @@ export function deliverContinuationResults(
         }
         const last = frames.at(-1)
         const closed = last
-          ? (decodeMessage("AgentClientMessage", last) as {
-              exec_client_control_message?: { stream_close?: { id?: number } }
-            }).exec_client_control_message?.stream_close?.id === r.execId
+          ? (
+              decodeMessage("AgentClientMessage", last) as {
+                exec_client_control_message?: { stream_close?: { id?: number } }
+              }
+            ).exec_client_control_message?.stream_close?.id === r.execId
           : false
         if (!closed) frames.push(buildExecStreamClose(r.execId))
       } catch (error) {

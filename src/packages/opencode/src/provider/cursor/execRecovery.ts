@@ -85,8 +85,7 @@ export function recoverCorrelatedEditRead(
   try {
     fs.lstatSync(absolutePath)
   } catch (error) {
-    const code =
-      error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined
+    const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined
     if (code !== "ENOENT") return false
     exists = false
   }
@@ -168,6 +167,8 @@ export function recoverCorrelatedEditRead(
 export function rejectMissingReadTarget(pump: CursorPump, parsed: ParsedExecRequest): boolean {
   const session = pump.session
   if (parsed.toolName !== "read") return false
+  // Directory listings also map to `read`; a folder is their valid target, and they reply on another channel.
+  if (parsed.resultField === "ls_result" || parsed.resultField === "pi_ls_result") return false
   const requested = typeof parsed.args.filePath === "string" ? parsed.args.filePath : ""
   if (!requested) return false
   // A scheme-addressed target is the advertised host executor's to resolve,

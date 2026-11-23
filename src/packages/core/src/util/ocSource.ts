@@ -1,5 +1,7 @@
 export * as OcSource from "./ocSource"
 
+import { existsSync } from "node:fs"
+import path from "node:path"
 import { OcRelease } from "./ocRelease"
 
 // TEMPORARY: oc ships no executable releases yet. Until it does, /update syncs the saved /revive source
@@ -13,7 +15,8 @@ export type Status = {
   branch: string
   // Fetched main; /update resets to exactly this commit, so a later push is never applied unseen.
   target: string
-  // Changed tracked files (staged or not). Untracked files are never touched, so they are not listed.
+  // Changed tracked files (staged or not), plus untracked files at a path `target` adds, which
+  // `reset --hard` would overwrite. Other untracked files are never touched, so they are not listed.
   dirty: string[]
   // Local commits not on main / main commits not local.
   ahead: number
@@ -53,12 +56,15 @@ export function unsafe(work: { dirty: string[]; ahead: number }) {
 }
 
 async function localWork(dir: string, target: string) {
-  const dirty = (await git(dir, ["status", "--porcelain", "--untracked-files=no"]))
+  const tracked = (await git(dir, ["status", "--porcelain", "--untracked-files=no"]))
     .split(/\r?\n/)
     .filter(Boolean)
     .map((line) => line.slice(3))
+  const overwritten = (await git(dir, ["diff", "--name-only", "--no-renames", "--diff-filter=A", "-z", "HEAD", target]))
+    .split("\0")
+    .filter((file) => file && existsSync(path.join(dir, file)))
   const ahead = Number((await git(dir, ["rev-list", "--count", `${target}..HEAD`])).trim())
-  return { dirty, ahead }
+  return { dirty: [...tracked, ...overwritten], ahead }
 }
 
 async function git(dir: string, args: string[]) {

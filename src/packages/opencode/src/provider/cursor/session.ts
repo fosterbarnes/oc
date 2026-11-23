@@ -267,6 +267,8 @@ export type CursorSession = {
   progressContinuationAttempts?: number
   /** Host tool calls emitted this turn. */
   progressEmittedHostTools?: number
+  /** The Run's model settings, resent by a progress continuation. */
+  runModelOptions?: { parameterValues?: Array<{ id: string; value: string }>; maxMode?: boolean }
 }
 
 type Tombstone = {

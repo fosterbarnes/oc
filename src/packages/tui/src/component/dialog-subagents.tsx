@@ -32,7 +32,7 @@ function effortRank(variant: string | undefined, variants: string[]) {
 function shortModelName(modelID: string): string {
   let short = modelID
   if (short.startsWith("claude-")) short = short.slice("claude-".length)
-  short = short.replace(/-(\d+)-(\d+)$/, ".$1.$2")
+  short = short.replace(/-(\d+)-(\d+)$/, "-$1.$2")
   return short
 }
 
@@ -62,7 +62,10 @@ export function DialogSubagents(props: { highlight?: string }) {
     () =>
       sdk.client.app
         .agents({}, { throwOnError: true })
-        .then((result) => result.data ?? [])
+        .then((result) => {
+          setLoadError(undefined)
+          return result.data ?? []
+        })
         // Catch so an errored resource never re-throws inside the memo and tears down the dialog.
         .catch((error) => {
           setLoadError(error)

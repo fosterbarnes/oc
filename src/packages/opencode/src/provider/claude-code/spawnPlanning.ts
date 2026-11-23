@@ -12,7 +12,7 @@ import { mergeOpencodeMcp, type RuntimeMcpStatus } from "./mcpBridge.js"
 import { fetchOpencodeToolList, showToast, type OpencodeToolListItem } from "./runtimeStatus.js"
 import { buildAppendedSystemPrompt, buildToolEnvironmentNote, replacedToolsTurnNote } from "./prompts.js"
 import { buildCliArgs, thinkingCliOptions } from "./cliArgs.js"
-import type { CliVersion } from "./cliVersion.js"
+import { cliSupportsToolGuard, type CliVersion } from "./cliVersion.js"
 import { ensureSkillPlugin, fetchOpencodeSkills, poolSkillsDir } from "./skillPlugin.js"
 import { parseModelId } from "./models.js"
 import { createProxyMcpServer, type ProxyMcpServer, type ProxyToolCall } from "./proxyMcp.js"
@@ -331,6 +331,8 @@ export async function planSpawn(input: {
   const systemPrompt = (toolEnvironment?: string) =>
     buildAppendedSystemPrompt({
       agentPrompt: turn.agentPrompt,
+      // Tool turns only: title and other text-only calls stay small.
+      instructions: toolEnvironment ? turn.instructions : undefined,
       multiStepHint: config.multiStepContinuation !== false,
       toolEnvironment,
     })
@@ -355,12 +357,17 @@ export async function planSpawn(input: {
       systemPromptFile,
       proxyServer: null,
       mcpHash: null,
+      toolGuard: false,
     }
   }
 
   // Started alongside the tool plan; only used when that plan leaves Claude's `Skill` on.
   const skillsFetch = fetchOpencodeSkills(turn.directory)
   const tools = await assembleProxyTools(input)
+  if (!cliSupportsToolGuard(input.cliVersion))
+    log.warn("this claude CLI is older than 2.1.317, so oc's pattern rules do not cover its built-in tools", {
+      cliVersion: input.cliVersion?.raw ?? "unknown",
+    })
   const skillOn = tools.cliTools ? tools.cliTools.includes("Skill") : !tools.disallowed.includes("Skill")
   const skills = skillOn ? await skillsFetch : undefined
   const proxyServer =
@@ -396,6 +403,7 @@ export async function planSpawn(input: {
     systemPromptFile,
     proxyServer,
     mcpHash: mcp.mcpHash,
+    toolGuard: cliSupportsToolGuard(input.cliVersion),
     // Goes out once, with the new process's first message (turnStream.ts).
     toolNote: tools.replaced.length > 0 ? replacedToolsTurnNote(tools.replaced) : undefined,
   }

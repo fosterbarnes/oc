@@ -130,7 +130,7 @@ export interface Store {
 export function createStore(file: string | null, clock: () => number = Date.now): Store {
   const wake = wakes.get(file) ?? ScheduledDelivery.makeWake()
   wakes.set(file, wake)
-  const owner = Effect.runSync(Effect.cached(Effect.promise(ScheduledDelivery.owner)))
+  const owner = ScheduledDelivery.ownerOnce()
   let identity: Awaited<ReturnType<typeof ScheduledDelivery.owner>> | undefined
   const read = (): State => {
     if (!file) return defaultState()
@@ -157,6 +157,16 @@ export function createStore(file: string | null, clock: () => number = Date.now)
   // so this is a bounded spin, not a queue: a critical section is one small
   // JSON write, and a lock older than STALE_MS is a crashed holder.
   const STALE_MS = 30_000
+  const holderGone = (lock: string) => {
+    const pid = Number(readFileSync(lock, "utf8"))
+    if (!pid) return false
+    try {
+      process.kill(pid, 0)
+      return false
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ESRCH"
+    }
+  }
   const withLock = <T>(action: () => T): T | undefined => {
     if (!file) return action()
     const lock = `${file}.lock`
@@ -171,7 +181,8 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err
         try {
-          if (Date.now() - statSync(lock).mtimeMs > STALE_MS) rmSync(lock, { force: true })
+          // The 5 s wait below is shorter than STALE_MS, so a crashed holder is also detected by its pid.
+          if (Date.now() - statSync(lock).mtimeMs > STALE_MS || holderGone(lock)) rmSync(lock, { force: true })
         } catch {}
         if (Date.now() >= deadline) {
           // Leave queued entries untouched so the next poll can retry safely.

@@ -492,6 +492,7 @@ class ClaudeTurn {
       this.config.ignoreAnthropicApiKey,
       this.turn.reasoningEffort,
       this.account,
+      plan.toolGuard,
     )
     ap.toolCatalogHash = this.input.catalogHash
     ap.settings = this.turn.processSettings
@@ -1981,6 +1982,8 @@ class ClaudeTurn {
     if (this.inStreamCalls > 0 && !this.autoContinue.aborted) return
     this.resultFallbackTimer = setTimeout(() => {
       if (this.closed) return
+      // Waiting on oc's answer, such as a permission prompt, is not a stalled CLI.
+      if (this.activeProcess?.guardPending && !this.autoContinue.aborted) return this.startResultFallback(delayMs)
       log.warn("result fallback timer fired - closing stream without result event", { delayMs })
       // Say so rather than leave a reply that just stops. An abort is exempt:
       // the operator asked for it.

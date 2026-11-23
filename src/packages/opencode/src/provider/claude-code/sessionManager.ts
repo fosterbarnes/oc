@@ -14,6 +14,7 @@ import { getPendingProxyCalls, rejectAllPendingProxyCallsForSession } from "./pr
 import type { ReasoningEffort } from "./types.js"
 import { claudeSpawnEnv } from "./spawnEnv.js"
 import { cliCommand } from "./cliExecutable.js"
+import { handleToolGuardLine, startToolGuard } from "./toolGuard.js"
 import {
   DEFAULT_ACCOUNT,
   apiAccountKey,
@@ -60,6 +61,10 @@ export interface ActiveProcess {
   cliArgs?: string[]
   /** Pool account (accounts.ts) the child is logged in as. */
   account?: string
+  /** oc checks this child's built-in tool calls (toolGuard.ts). */
+  toolGuard?: boolean
+  /** Tool calls waiting on oc's answer, such as a permission prompt; the turn is not stalled. */
+  guardPending?: number
   /**
    * stdout lines the child emitted while no turn had a line listener
    * attached (between opencode turns). Bounded; see `bufferUnattendedLine`.
@@ -1030,6 +1035,7 @@ export function spawnClaudeProcess(
   ignoreAnthropicApiKey?: boolean,
   effort?: ReasoningEffort,
   account?: string,
+  toolGuard?: boolean,
 ): ActiveProcess {
   evictIfNeeded()
   log.info("spawning new claude process", {
@@ -1067,12 +1073,14 @@ export function spawnClaudeProcess(
     cliPath,
     cliArgs: [...cliArgs],
     account,
+    toolGuard,
     unattendedLines: [],
     unattendedDropped: 0,
   }
 
   const rl = createInterface({ input: proc.stdout! })
   rl.on("line", (line: string) => {
+    if (toolGuard && handleToolGuardLine(ap, line)) return
     // Read before `noteTurnLine`, which clears it on the abandoned turn's own `result`.
     const abandoned = ap.turnAbandoned === true
     noteTurnLine(ap, line)
@@ -1126,6 +1134,8 @@ export function spawnClaudeProcess(
     ap.closing = true
     settleTurn(ap)
   })
+  // Sent first: the CLI reads stdin in order, so no user message can run before the guard is on.
+  if (toolGuard) startToolGuard(ap)
 
   proc.on("exit", (code, signal) => {
     log.info("claude process exited", { code, signal, sessionKey })
@@ -1284,6 +1294,7 @@ export async function respawnActiveProcess(
     ignoreAnthropicApiKey,
     old.effort,
     old.account,
+    old.toolGuard,
   )
   if (turnWasInFlight) noteTurnStarted(replacement)
   replacement.toolCatalogHash = old.toolCatalogHash

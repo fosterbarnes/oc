@@ -191,14 +191,19 @@ export async function readTail(file: string, lines: number, maxChars: number) {
   // Read only the end of the log: this runs every second per job and logs can grow without limit.
   const handle = await fs.open(file, "r").catch(() => undefined)
   if (!handle) return ""
-  const size = (await handle.stat()).size
-  const start = Math.max(0, size - TAIL_BYTES)
-  const buf = Buffer.alloc(size - start)
-  const { bytesRead } = await handle.read(buf, 0, buf.length, start)
-  await handle.close()
-  const bytes = buf.subarray(0, bytesRead)
-  const text =
-    bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe ? bytes.toString("utf16le") : bytes.toString("utf8")
+  const { bytes, utf16 } = await (async () => {
+    const size = (await handle.stat()).size
+    // The BOM is at the start of the file, outside the tail of a long log.
+    const head = Buffer.alloc(2)
+    await handle.read(head, 0, 2, 0)
+    const utf16 = size >= 2 && head[0] === 0xff && head[1] === 0xfe
+    const tail = Math.max(0, size - TAIL_BYTES)
+    const start = utf16 ? tail + (tail % 2) : tail
+    const buf = Buffer.alloc(size - start)
+    const { bytesRead } = await handle.read(buf, 0, buf.length, start)
+    return { bytes: buf.subarray(0, bytesRead), utf16 }
+  })().finally(() => handle.close())
+  const text = bytes.toString(utf16 ? "utf16le" : "utf8")
   const rows = stripAnsi(text).split(/\r?\n/)
   if (rows.at(-1) === "") rows.pop()
   return rows.slice(-lines).join("\n").slice(-maxChars)
@@ -224,11 +229,15 @@ const make = Effect.fn("ShellJobs.make")(function* () {
     // Spawn finalizers killed the processes already; record that for jobs the scope cut off.
     Effect.promise(() => {
       _allLive.delete(live)
-      return Promise.all(
-        [...live.values()]
+      return Promise.all([
+        ...[...live.values()]
           .filter((job) => job.info.status === "running")
           .map((job) => writeInfo({ ...job.info, status: "killed", endedAt: Date.now() })),
-      )
+        // The interrupted watch never reaches `endSinks`; an open log would block removing the job folder on Windows.
+        ...[...live.values()]
+          .flatMap((job) => [job.out, job.err])
+          .map((sink) => new Promise<void>((resolve) => sink.end(() => resolve()))),
+      ])
     }),
   )
   yield* Effect.promise(() => recover())

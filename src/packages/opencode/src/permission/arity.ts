@@ -29,6 +29,7 @@ const ARITY: Record<string, number> = {
   cp: 1, // cp source.txt dest.txt
   echo: 1, // echo "hello world"
   env: 1, // env
+  exec: 3, // exec /bin/sh script.sh
   export: 1, // export PATH=/usr/bin
   grep: 1, // grep pattern file.txt
   kill: 1, // kill 1234

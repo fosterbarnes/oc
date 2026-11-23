@@ -176,16 +176,16 @@ async function collectRoot(root: Root, skipped: string[], unread: Set<Source>, p
         paths
           .filter((file) => category !== "theme" || file.endsWith(".json"))
           .filter((file) => !["command", "agent"].includes(category) || file.endsWith(".md"))
-          .map((file) => filesItem(root, base, category, file, [file], category === "code")),
+          .map((file) => filesItem(root, base, category, file, [file], category === "code", unreadable(category))),
       )
     }),
   )
   const instructions = await Promise.all(
     names
       .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-      .map((entry) => filesItem(root, base, "instruction", entry.name, [entry.name], false)),
+      .map((entry) => filesItem(root, base, "instruction", entry.name, [entry.name], false, unreadable("instruction"))),
   )
-  return [...skills, ...files.flat(), ...instructions]
+  return [...skills, ...[...files.flat(), ...instructions].filter((item): item is Found => item !== undefined)]
 }
 
 // One item per folder holding SKILL.md, with every file under it.
@@ -199,16 +199,16 @@ async function collectSkills(
   const names = await listNames(base, dir, unreadable)
   if (names.includes("SKILL.md")) {
     const files = await walk(base, dir, skipped, unreadable)
-    return [
-      await filesItem(
-        root,
-        base,
-        "skill",
-        dir.slice("skills/".length),
-        files,
-        files.some((f) => _SCRIPT_FILE.test(f)),
-      ),
-    ]
+    const item = await filesItem(
+      root,
+      base,
+      "skill",
+      dir.slice("skills/".length),
+      files,
+      files.some((f) => _SCRIPT_FILE.test(f)),
+      unreadable,
+    )
+    return item ? [item] : []
   }
   const children = await Promise.all(
     names
@@ -278,10 +278,22 @@ async function filesItem(
   label: string,
   paths: string[],
   code: boolean,
-): Promise<Found> {
-  const read = await Promise.all(paths.map((rel) => readCached(path.join(base, rel))))
+  unreadable: Unreadable,
+): Promise<Found | undefined> {
+  const read = await Promise.all(
+    paths.map((rel) =>
+      readCached(path.join(base, rel)).catch((error: NodeJS.ErrnoException) => {
+        unreadable(rel, error)
+        return undefined
+      }),
+    ),
+  )
+  // A file deleted or locked since the walk: skip the whole item this scan (`partial` keeps its
+  // state), because an item missing one file would sync as an edit that removes it.
+  const complete = read.filter((entry) => entry !== undefined)
+  if (complete.length !== paths.length) return undefined
   const files = paths.map((rel, index) => {
-    const data = read[index].data
+    const data = complete[index].data
     return data.includes(0)
       ? { path: rel, base64: data.toString("base64") }
       : { path: rel, text: data.toString("utf8") }
@@ -289,7 +301,7 @@ async function filesItem(
   const display = category === "skill" ? label : label.replace(/^[^/]+\//, "")
   return {
     item: { kind: "files", id: filesId(category, root, label), category, label: display, code, root, files },
-    mtime: Math.max(0, ...read.map((entry) => entry.mtimeMs)),
+    mtime: Math.max(0, ...complete.map((entry) => entry.mtimeMs)),
   }
 }
 
@@ -663,7 +675,11 @@ async function applyUnlocked(
   for (const file of new Set(keyEdits.map((item) => item.file))) {
     const target = keyFilePath(file)
     writes.set(target, async () => {
-      const text = await fs.readFile(target, "utf8").catch(() => "{}")
+      // Only a missing file starts empty: treating a locked one as `{}` would replace it with just these keys.
+      const text = await fs.readFile(target, "utf8").catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return "{}"
+        throw error
+      })
       return keyEdits
         .filter((item) => item.file === file)
         .reduce(

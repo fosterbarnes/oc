@@ -11,6 +11,7 @@ import { useToast } from "../ui/toast"
 import { useSDK } from "../context/sdk"
 import { errorMessage } from "../util/error"
 import { persistOcSync } from "../ocSettings"
+import { RELOAD_FAILED, reloadProjects } from "./dialog-import"
 import { nodeByValue, treeOptions, type TreeState } from "./itemTree"
 
 export function DialogSync() {
@@ -56,8 +57,11 @@ export function DialogSync() {
     dialog.replace(() => <DialogSync />)
     await OcItems.undo(conflict.backup)
       .then(async (restored) => {
-        await sdk.client.global.dispose()
-        toast.show({ variant: "success", message: `Restored ${restored ?? 0} files` })
+        const reloaded = await reloadProjects(sdk.client)
+        toast.show({
+          variant: reloaded ? "success" : "warning",
+          message: `Restored ${restored ?? 0} files${reloaded ? "" : RELOAD_FAILED}`,
+        })
       })
       .catch((error) => toast.show({ variant: "error", message: `Restore failed: ${errorMessage(error)}` }))
     void refetch()

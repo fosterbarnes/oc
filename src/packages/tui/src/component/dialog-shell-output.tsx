@@ -45,7 +45,8 @@ export function DialogShellOutput(props: { part: () => ToolPart | undefined }) {
         // Keeps reading after exit while open, so the final flush shows. A missing file (attached to a
         // remote server) leaves the streamed part output in place.
         const poll = async () => {
-          const next = await readJobLogs(outLog, errLog)
+          // A log busy for a moment on Windows must not end the polling.
+          const next = await readJobLogs(outLog, errLog).catch(() => undefined)
           if (disposed) return
           if (next) setLogs(next)
           timer = setTimeout(poll, 1000)
@@ -150,9 +151,11 @@ export async function readJobLogs(outLog: string, errLog?: string, bytes = LOG_B
 async function readTail(path: string, bytes: number) {
   const file = Bun.file(path)
   if (!(await file.exists())) return
-  const start = Math.max(0, file.size - bytes)
+  // Windows PowerShell can write UTF-16LE with a byte order mark, which sits at the start of the file.
+  const head = new Uint8Array(await file.slice(0, 2).arrayBuffer())
+  const utf16 = head[0] === 0xff && head[1] === 0xfe
+  const tail = Math.max(0, file.size - bytes)
+  const start = utf16 ? tail + (tail % 2) : tail
   const data = new Uint8Array(await file.slice(start).arrayBuffer())
-  // Windows PowerShell can write UTF-16LE with a byte order mark.
-  const utf16 = start === 0 && data[0] === 0xff && data[1] === 0xfe
   return { text: new TextDecoder(utf16 ? "utf-16le" : "utf-8").decode(data), cut: start > 0 }
 }

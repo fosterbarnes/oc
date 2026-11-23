@@ -111,16 +111,29 @@ export async function claim(sessionID: string, pid: number, now = Date.now(), di
         throw error
       },
     )
-    if (!won) continue
-    const file = Bun.file(source)
-    const body = (await file.exists()) ? ((await file.json()) as Body) : undefined
-    const own = state === "ready" && body?.writerPid === pid
-    if (body && !own) await fs.rm(source)
-    await fs.rm(lock)
-    if (!body || own) continue
-    return { body, send: state === "ready" && now - at <= READY_TTL_MS }
+    if (!won) {
+      // A claimer that died holding the lock must not block this chain forever.
+      const held = await fs.stat(lock).catch(() => undefined)
+      if (held && Date.now() - held.mtimeMs > _CLAIM_TTL_MS) await fs.rm(lock, { force: true })
+      continue
+    }
+    const taken = await fs
+      .readFile(source, "utf8")
+      .then((text) => JSON.parse(text) as Body)
+      .catch(() => undefined)
+      .then(async (body) => {
+        const own = state === "ready" && body?.writerPid === pid
+        // An unreadable file can never be sent, so it goes too.
+        if (!own) await fs.rm(source, { force: true })
+        return own ? undefined : body
+      })
+      .finally(() => fs.rm(lock, { force: true }))
+    if (!taken) continue
+    return { body: taken, send: state === "ready" && now - at <= READY_TTL_MS }
   }
 }
+
+const _CLAIM_TTL_MS = 60_000
 
 function file(dir: string, id: string, state: State) {
   return path.join(dir, `${id}.${state}.json`)

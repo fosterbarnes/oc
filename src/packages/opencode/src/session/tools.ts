@@ -26,6 +26,9 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { isRecord } from "@/util/record"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ActiveCommand } from "./activeCommand"
+import { ClaudeToolGuardCheck } from "./claudeToolGuard"
+import { isClaudeCodeProvider, setClaudeToolGuard } from "@/provider/claude-code/shared"
+import { ShellID } from "@/tool/shell/id"
 
 const MCP_RESOURCE_TOOLS = {
   list: "list_mcp_resources",
@@ -113,6 +116,17 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
       ? "The active command does not allow this. If another command fits this request, ask the user to switch with mode_switch instead of asking them to change permissions."
       : undefined
 
+  const ask = (req: Parameters<Tool.Context["ask"]>[0], tool?: PermissionV1.Request["tool"]) =>
+    permission.ask({ ...req, sessionID: input.session.id, tool, ruleset }).pipe(
+      Effect.mapError((error) =>
+        switchHint && error instanceof PermissionV1.DeniedError
+          ? new PermissionV1.DeniedError({ ruleset: error.ruleset, hint: switchHint })
+          : error,
+      ),
+      Effect.orDie,
+      Effect.interruptible,
+    )
+
   const context = (args: Record<string, unknown>, options: ToolExecutionOptions): Tool.Context => ({
     sessionID: input.session.id,
     abort: options.abortSignal!,
@@ -140,31 +154,40 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           },
         }
       }),
-    ask: (req) =>
-      permission
-        .ask({
-          ...req,
-          sessionID: input.session.id,
-          tool: { messageID: input.processor.message.id, callID: options.toolCallId },
-          ruleset,
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            switchHint && error instanceof PermissionV1.DeniedError
-              ? new PermissionV1.DeniedError({ ruleset: error.ruleset, hint: switchHint })
-              : error,
-          ),
-          Effect.orDie,
-          Effect.interruptible,
-        ),
+    ask: (req) => ask(req, { messageID: input.processor.message.id, callID: options.toolCallId }),
   })
 
-  for (const item of yield* registry.tools({
+  const items = yield* registry.tools({
     modelID: ModelV2.ID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
     permission: input.session.permission,
-  })) {
+  })
+  // Outlives this step so a background wake is still checked; holds no message history.
+  if (isClaudeCodeProvider(input.model.providerID)) {
+    const messageID = input.processor.message.id
+    setClaudeToolGuard(
+      input.session.id,
+      ClaudeToolGuardCheck.make({
+        run,
+        shell: items.find((item) => item.id === ShellID.ToolID) as
+          | Parameters<typeof ClaudeToolGuardCheck.make>[0]["shell"]
+          | undefined,
+        context: (callID, signal) => ({
+          sessionID: input.session.id,
+          messageID,
+          callID,
+          abort: signal,
+          agent: input.agent.name,
+          messages: [],
+          metadata: () => Effect.void,
+          ask: (req) => ask(req),
+        }),
+      }),
+    )
+  }
+
+  for (const item of items) {
     if (item.id === "mode_switch" && (input.session.parentID || !active || !ActiveCommand.read(active.parts))) continue
     const schema = ProviderTransform.schema(input.model, ToolJsonSchema.fromTool(item))
     const built: AITool = tool({

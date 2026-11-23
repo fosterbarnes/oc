@@ -278,6 +278,7 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
     toolName: mapped.toolName,
     args: mapped.args,
     resultField,
+    ...(mapped.localError ? { localError: mapped.localError } : {}),
     ...(resultMetadata || mapped.binaryBytes
       ? {
           resultMetadata: {
@@ -322,7 +323,7 @@ export function mapCursorArgsToOpencode(
   toolName: string,
   raw: Record<string, unknown>,
   execVariant?: string,
-): { toolName: string; args: Record<string, unknown>; binaryBytes?: Uint8Array } {
+): { toolName: string; args: Record<string, unknown>; binaryBytes?: Uint8Array; localError?: string } {
   const cleaned: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(raw)) {
     if (v === undefined || v === null) continue
@@ -347,6 +348,8 @@ export function mapCursorArgsToOpencode(
     return {
       toolName: "bash",
       args: target ? { command: deleteShellCommand(target) } : { command: "true" },
+      // Without a path nothing is deleted, so it must not come back as a successful delete.
+      ...(target ? {} : { localError: "Cursor delete request is missing a path." }),
     }
   }
 

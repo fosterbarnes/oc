@@ -115,6 +115,7 @@ function parseLocal(text: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})(?: [A-Za-z]{3})? (\d{2}):(\d{2})/.exec(text.trim())
   if (!match) return undefined
   const [year, month, day, hour, minute] = match.slice(1).map(Number)
+  if (hour > 23 || minute > 59) return undefined
   const date = new Date(year, month - 1, day, hour, minute)
   return date.getMonth() === month - 1 && date.getDate() === day ? date : undefined
 }

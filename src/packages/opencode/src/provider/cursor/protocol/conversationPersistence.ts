@@ -323,9 +323,12 @@ async function readConversationFileWithStatus(
     return value ? { status: "restored", value } : { status: "invalid" }
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined
-    return { status: code === "ENOENT" ? "missing" : "invalid" }
+    // A locked or unreadable file may be valid: "invalid" would make startup pruning delete it.
+    return { status: _UNREADABLE.has(String(code)) ? "missing" : "invalid" }
   }
 }
+
+const _UNREADABLE = new Set(["ENOENT", "EACCES", "EBUSY", "EPERM", "EMFILE", "ENFILE"])
 
 /**
  * Remove an invalid/stale candidate without deleting a fresh atomic replacement.
@@ -430,14 +433,15 @@ async function pruneConversationDirectory(cacheDir: string, now: number): Promis
       if (loaded.status === "invalid") {
         recordStartupDiscard(cacheDir, entry.name, "invalid")
         trace(`conversation persistence: startup discarded invalid snapshot file=${entry.name}`)
-        await discardCacheCandidate(filePath, now)
+        // One locked file must not fail persistence for every session.
+        await discardCacheCandidate(filePath, now).catch(() => undefined)
       } else if (loaded.value && !isFresh(loaded.value, now)) {
         recordStartupDiscard(cacheDir, entry.name, "expired")
         trace(
           `conversation persistence: startup discarded expired snapshot ` +
             `sessionKey=${loaded.value.sessionKey} ageMs=${Math.max(0, now - loaded.value.updatedAt)}`,
         )
-        await discardCacheCandidate(filePath, now)
+        await discardCacheCandidate(filePath, now).catch(() => undefined)
       }
     }),
   )

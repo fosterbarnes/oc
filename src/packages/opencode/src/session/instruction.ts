@@ -33,12 +33,16 @@ function extract(messages: SessionV1.WithParts[]) {
 }
 
 const isUrl = (item: string) => item.startsWith("https://") || item.startsWith("http://")
+const CLAUDE_IMPORT = /(?:^|\s)@(\S+)/g
+const pathKey = (item: string) => (process.platform === "win32" ? path.resolve(item).toLowerCase() : path.resolve(item))
 
 export interface Interface {
   readonly clear: (messageID: MessageID) => Effect.Effect<void>
   /** `model` is `providerID/modelID`; it adds matching `instructionsByModel` files. */
   readonly systemPaths: (model?: string) => Effect.Effect<Set<string>, FSUtil.Error>
   readonly system: (model?: string) => Effect.Effect<string[], FSUtil.Error>
+  /** `system` without the files the Claude Code CLI already loads, so none reach it twice. */
+  readonly claudeCode: (model?: string) => Effect.Effect<string[], FSUtil.Error>
   /** Content of the first matching `{ base }` entry, which replaces the built-in provider prompt. */
   readonly base: (model: string) => Effect.Effect<string | undefined, FSUtil.Error>
   readonly find: (dir: string) => Effect.Effect<string | undefined, FSUtil.Error>
@@ -169,17 +173,37 @@ const layer: Layer.Layer<
       return paths
     })
 
-    const system = Effect.fn("Instruction.system")(function* (model?: string) {
-      const paths = yield* systemPaths(model)
+    const render = Effect.fnUntraced(function* (paths: string[], model?: string) {
       const urls = (yield* entries(model)).filter((item): item is string => typeof item === "string" && isUrl(item))
 
-      const files = yield* Effect.forEach(Array.from(paths), read, { concurrency: 8 })
+      const files = yield* Effect.forEach(paths, read, { concurrency: 8 })
       const remote = yield* Effect.forEach(urls, fetch, { concurrency: 4 })
 
       return [
-        ...Array.from(paths).flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
+        ...paths.flatMap((item, i) => (files[i] ? [`Instructions from: ${item}\n${files[i]}`] : [])),
         ...urls.flatMap((item, i) => (remote[i] ? [`Instructions from: ${item}\n${remote[i]}`] : [])),
       ]
+    })
+
+    const system = Effect.fn("Instruction.system")(function* (model?: string) {
+      return yield* render(Array.from(yield* systemPaths(model)), model)
+    })
+
+    // The CLI loads ~/.claude/CLAUDE.md with its `@` imports and the project's AGENTS.md and CLAUDE.md.
+    const claudeCode = Effect.fn("Instruction.claudeCode")(function* (model?: string) {
+      const ctx = yield* InstanceState.context
+      const memory = path.join(global.home, ".claude", "CLAUDE.md")
+      const imports = Array.from((yield* read(memory)).matchAll(CLAUDE_IMPORT), (match) =>
+        match[1].startsWith("~")
+          ? path.join(global.home, match[1].slice(1))
+          : path.resolve(path.dirname(memory), match[1]),
+      )
+      const project = yield* Effect.forEach(["AGENTS.md", "CLAUDE.md"], (file) =>
+        fs.findUp(file, ctx.directory, ctx.worktree).pipe(Effect.catch(() => Effect.succeed([] as string[]))),
+      )
+      const loaded = new Set([memory, ...imports, ...project.flat()].map(pathKey))
+      const paths = Array.from(yield* systemPaths(model)).filter((item) => !loaded.has(pathKey(item)))
+      return yield* render(paths, model)
     })
 
     const base = Effect.fn("Instruction.base")(function* (model: string) {
@@ -244,7 +268,7 @@ const layer: Layer.Layer<
       return results
     })
 
-    return Service.of({ clear, systemPaths, system, base, find, resolve })
+    return Service.of({ clear, systemPaths, system, claudeCode, base, find, resolve })
   }),
 )
 

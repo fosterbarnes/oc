@@ -214,7 +214,7 @@ async function doStreamImpl(
   return {
     stream: new ReadableStream<V3Part>({
       async pull(controller) {
-        // The outer try is a safety net for any throw that escapes pump()  - 
+        // The outer try is a safety net for any throw that escapes pump()  -
         // e.g. an unhandled decode/gunzip error or a frames-iterator throw on
         // a non-200 HTTP/2 response. Without it the pull promise rejects, the
         // ReadableStream errors, and the session is never cleaned up.
@@ -650,7 +650,7 @@ async function startSession(
     ? (requestContext.tools as Array<Record<string, unknown>>)
     : []
   // CLI parity: echo the last conversation_checkpoint_update as conversation_state.
-  // After compaction or an unsafe checkpoint reset there is no checkpoint  - 
+  // After compaction or an unsafe checkpoint reset there is no checkpoint  -
   // seed a new Cursor conversation from OpenCode's authoritative history.
   const reqBytes = buildRunRequest({
     text: userText,
@@ -788,6 +788,7 @@ async function startSession(
     progressAssistantText: "",
     progressContinuationAttempts: 0,
     progressEmittedHostTools: 0,
+    runModelOptions: { parameterValues, maxMode },
   }
   sessionManager.registerSession(session)
   let heartbeatWritePending = false

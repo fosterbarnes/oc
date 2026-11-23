@@ -105,7 +105,7 @@ async function revivePipeline(context: Revive.ReviveContext) {
     ...(context.window ? { window: context.window } : {}),
   }
   // One install at a time per installation: the file swap and server start are shared.
-  const { tabs, failure } = await withInstallLock(installs ? installDir : undefined, async () => {
+  const { tabs, failure, recovered } = await withInstallLock(installs ? installDir : undefined, async () => {
     const sources = output ? await log.step("Checking build output", () => Revive.installSources(output)) : undefined
     // Ctrl+C from here would leave oc stopped or half installed.
     const ignore = () => {}
@@ -144,9 +144,18 @@ async function revivePipeline(context: Revive.ReviveContext) {
       (error: unknown) => ({ error }),
     )
     process.off("SIGINT", ignore)
-    if (failure && !context.supervisorPid && !context.native)
-      await log.step("Starting server again", () => startServer())
-    return { tabs, failure }
+    // A second failure must not skip the terminal restarter below: it is the only way back to a window.
+    const recovered =
+      !failure ||
+      !!context.supervisorPid ||
+      !!context.native ||
+      (await log
+        .step("Starting server again", () => startServer())
+        .then(
+          () => true,
+          () => false,
+        ))
+    return { tabs, failure, recovered }
   })
   // A hosting launcher shows the error and reattaches. A hidden helper has no window left, so it
   // still reopens the terminal on the old version before reporting.
@@ -160,7 +169,8 @@ async function revivePipeline(context: Revive.ReviveContext) {
         ...(bun ? [process.argv[1]] : []),
         "oc",
         "--revive-terminal",
-        Revive.encode({ ...restart, tabs }),
+        // Without `installDir` the restarter keeps the `.old-*` files: oc is down and may need them by hand.
+        Revive.encode({ ...restart, ...(recovered ? {} : { installDir: undefined }), tabs }),
       ]),
     ),
   )

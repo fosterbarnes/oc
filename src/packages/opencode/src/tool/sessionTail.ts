@@ -22,25 +22,31 @@ export function renderSessionTail(
   let end = own.length
   if (params.before) {
     const index = own.findIndex((message) => message.info.id === params.before)
-    if (index >= 0) end = index
+    // A stale cursor would otherwise return the latest page again, so paging never ends.
+    if (index < 0) return { output: `(no message ${params.before} in this session)`, truncated: false }
+    end = index
   }
   const slice = own.slice(Math.max(0, end - limit), end)
   const lines: string[] = []
   let chars = 0
   let truncated = slice.length < end
-  for (const message of slice) {
+  // Newest first, so the budget drops the oldest messages rather than the ones just said.
+  for (const message of slice.toReversed()) {
     const bits: string[] = []
     for (const part of message.parts) {
       if (part.type !== "text" || !part.text) continue
+      if (part.text.length > PART_CLIP) truncated = true
       const text = part.text.length > PART_CLIP ? part.text.slice(0, PART_CLIP) + "..." : part.text
       bits.push(text)
     }
     const line = `${message.info.role} ${message.info.id}: ${bits.join("\n")}`
     if (chars + line.length > BUDGET) {
       truncated = true
+      // Many parts can exceed the budget alone: show the start of the newest message, not nothing.
+      if (lines.length === 0) lines.unshift(line.slice(0, BUDGET) + "...")
       break
     }
-    lines.push(line)
+    lines.unshift(line)
     chars += line.length + 1
   }
   const output = lines.join("\n") || "(no messages)"

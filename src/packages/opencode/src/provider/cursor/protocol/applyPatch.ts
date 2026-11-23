@@ -92,7 +92,7 @@ export type UpdateChunk = {
 }
 
 /**
- * Whole-file write as `*** Add File:`. Valid whether or not the target exists  - 
+ * Whole-file write as `*** Add File:`. Valid whether or not the target exists  -
  * OpenCode's add case overwrites unconditionally.
  */
 export function buildAddFilePatch(filePath: string, content: string): string {
@@ -155,9 +155,12 @@ export function planSubstringEdit(
 
     const before = source.slice(start, offset)
     const after = source.slice(offset + oldString.length, end)
+    const original = source.slice(start, end)
+    const replaced = before + newString + after
     chunks.push({
-      oldLines: splitLines(source.slice(start, end)),
-      newLines: splitLines(before + newString + after),
+      oldLines: splitLines(original),
+      // Only a line break the matched range ended with is implied. One the replacement adds is content.
+      newLines: original.endsWith("\n") ? splitLines(replaced) : replaced.split("\n"),
     })
   }
   return { ok: true, chunks }
@@ -173,6 +176,8 @@ function splitLines(text: string): string[] {
 }
 
 function lineStart(source: string, offset: number): number {
+  // lastIndexOf clamps a negative position to 0, which would match a newline at offset 0.
+  if (offset === 0) return 0
   const at = source.lastIndexOf("\n", offset - 1)
   return at === -1 ? 0 : at + 1
 }

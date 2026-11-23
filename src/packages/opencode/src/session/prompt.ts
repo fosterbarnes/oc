@@ -1722,14 +1722,14 @@ const layer = Layer.effect(
             yield* plugin.trigger("experimental.chat.messages.transform", {}, { messages: msgs })
 
             const modelKey = `${model.providerID}/${model.id}`
-            // Claude Code brings its own environment, instructions and skills and takes only the agent prompt.
+            // Claude Code brings its own environment and skills; oc adds the instructions it does not load.
             const claudeCode = isClaudeCodeProvider(model.providerID)
             // Claude Agent keeps oc's instructions and skills but uses Claude Code's prompt and environment.
             const claudeAgent = model.providerID === CLAUDE_AGENT_PROVIDER_ID
             const [skills, env, instructions, base, mcpInstructions, modelMsgs, forkSourceID] = yield* Effect.all([
               claudeCode ? Effect.succeed(undefined) : sys.skills(agent),
               claudeCode || claudeAgent ? Effect.succeed([]) : sys.environment(model),
-              claudeCode ? Effect.succeed([]) : instruction.system(modelKey).pipe(Effect.orDie),
+              (claudeCode ? instruction.claudeCode(modelKey) : instruction.system(modelKey)).pipe(Effect.orDie),
               agent.prompt || claudeAgent ? Effect.succeed(undefined) : instruction.base(modelKey).pipe(Effect.orDie),
               claudeCode ? Effect.succeed(undefined) : sys.mcp(agent, turnPermission),
               MessageV2.toModelMessagesEffect(msgs, model),

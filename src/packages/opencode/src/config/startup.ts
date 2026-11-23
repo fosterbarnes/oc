@@ -30,14 +30,15 @@ export function context() {
 
 // Windows: an immutable pwsh launcher plus an HKCU Run value naming it. macOS: an immutable
 // LaunchAgent plist; the registered value is its text, copied into ~/Library/LaunchAgents.
-export function plan(input: ReturnType<typeof context>) {
+export function plan(input: ReturnType<typeof context>, enabling = true) {
   if (input.platform !== "win32" && input.platform !== "darwin")
     throw new Error(
       "Sign-in startup is supported only on Windows and macOS. Use your operating system's user service manager.",
     )
   if (input.platform === "win32" && !input.powershell)
     throw new Error("Install PowerShell 7 (pwsh) before enabling Windows sign-in startup.")
-  if (input.env.OPENCODE_CONFIG_CONTENT)
+  // Inline config cannot be carried into a login item, but must not block removing one.
+  if (enabling && input.env.OPENCODE_CONFIG_CONTENT)
     throw new Error("Save inline OPENCODE_CONFIG_CONTENT to a file and use OPENCODE_CONFIG before enabling startup.")
   const env = {
     ...movedXdgDirs(input),
@@ -211,7 +212,7 @@ export function update<T>(
 ) {
   const run = pending.then(async () => {
     if (typeof enabled !== "boolean") throw new Error("Sign-in startup requires a boolean.")
-    const next = plan(options.context ?? context())
+    const next = plan(options.context ?? context(), enabled)
     const registration = options.registry ?? registry
     const previous = await registration.read(next.name)
     const desired = enabled ? next.command : undefined

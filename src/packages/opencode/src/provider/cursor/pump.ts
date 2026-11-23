@@ -186,7 +186,7 @@ export class CursorPump {
     try {
       while (true) {
         // Consumer cancelled / closed the ReadableStream. Stop reading Cursor
-        // frames so a continuation doStream can resume the same iterator  - 
+        // frames so a continuation doStream can resume the same iterator  -
         // keeping the loop alive would discard frames the next pump needs.
         if (this.streamClosed) {
           trace(`pump: stream closed (consumer cancelled) pending=${session.pending.size}`)
@@ -511,7 +511,12 @@ export class CursorPump {
     if (counters) {
       trace(formatTurnUsageValidation(counters, usage, tokenDetails, contextSource))
       trace(
-        formatCursorCacheDiagnostics(counters, tokenDetails, this.cacheDiagnostics.priorTokenDetails, this.cacheDiagnostics),
+        formatCursorCacheDiagnostics(
+          counters,
+          tokenDetails,
+          this.cacheDiagnostics.priorTokenDetails,
+          this.cacheDiagnostics,
+        ),
       )
     }
     this.safeEnqueue({
@@ -560,11 +565,10 @@ export class CursorPump {
           tools: session.toolCatalog ?? [],
           toolDescriptors,
           action: "user",
+          ...session.runModelOptions,
         })
         await writeWithBackpressure(session.stream, continuationBytes, "progress continuation")
-        trace(
-          `progress continuation: sent attempt=${session.progressContinuationAttempts} promptLen=${prompt.length}`,
-        )
+        trace(`progress continuation: sent attempt=${session.progressContinuationAttempts} promptLen=${prompt.length}`)
       } catch (error) {
         trace(`progress continuation: write FAILED err=${(error as Error).message}`)
         // Fall through to ordinary finish/close on write failure
@@ -628,9 +632,7 @@ export class CursorPump {
       const variant = Object.keys(toolCall).find((k) => k.endsWith("_tool_call")) ?? "?"
       const display = parseDisplayToolCall(callId, toolCall)
       const editPath =
-        display?.variant === "edit_tool_call" && typeof display.args.path === "string"
-          ? display.args.path
-          : undefined
+        display?.variant === "edit_tool_call" && typeof display.args.path === "string" ? display.args.path : undefined
       if (editPath) {
         const editToolCalls = session.editToolCalls ?? (session.editToolCalls = new Map())
         editToolCalls.set(callId, { path: editPath })
@@ -827,9 +829,7 @@ export class CursorPump {
             session.editToolCalls?.delete(displayCallId)
           }
           if (remapped) {
-            trace(
-              `exec: preserved edit intent callId=${displayCallId} ` + `path=${JSON.stringify(editCall.path)}`,
-            )
+            trace(`exec: preserved edit intent callId=${displayCallId} ` + `path=${JSON.stringify(editCall.path)}`)
           }
         }
         // Hosts that advertise `apply_patch` in place of `edit`/`write` (see
@@ -867,8 +867,7 @@ export class CursorPump {
         if (binaryWrite) {
           if (!this.advertisedToolNameSet.has(CURSOR_IMAGE_SAVE_TOOL)) {
             const reason =
-              "This OpenCode agent cannot write binary file content. " +
-              "Do not retry this write with the same bytes."
+              "This OpenCode agent cannot write binary file content. " + "Do not retry this write with the same bytes."
             if (!rejectExec(this, parsed, reason, "binary write unsupported")) return true
             return false
           }
@@ -961,9 +960,7 @@ export class CursorPump {
           parsed.resultMetadata,
         )
         // tc.input is already a JSON string (LanguageModelV3ToolCall.input).
-        trace(
-          `exec: EMITTED tool-call toolCallId=${tc.toolCallId} toolName=${tc.toolName} inputLen=${tc.input.length}`,
-        )
+        trace(`exec: EMITTED tool-call toolCallId=${tc.toolCallId} toolName=${tc.toolName} inputLen=${tc.input.length}`)
         // Close open text/reasoning spans before tool-call (required by AI SDK V3).
         this.closeOpenSpans()
         this.safeEnqueue({
@@ -1017,9 +1014,7 @@ export class CursorPump {
       const hex = Array.from(payload.subarray(0, 48))
         .map((x) => x.toString(16).padStart(2, "0"))
         .join("")
-      trace(
-        `exec UNMAPPED: id=${esmId} variant=${variantDescription} keys=[${Object.keys(esm).join(",")}] hex=${hex}`,
-      )
+      trace(`exec UNMAPPED: id=${esmId} variant=${variantDescription} keys=[${Object.keys(esm).join(",")}] hex=${hex}`)
       this.failRunProtocol(
         `Unsupported Cursor exec variant ${variantDescription} (id=${esmId})`,
         RUN_REQUEST_UNSUPPORTED,
@@ -1220,11 +1215,7 @@ export class CursorPump {
     const handled = handleKvServerMessage(kv, session)
     if (handled) {
       try {
-        await writeWithBackpressure(
-          session.stream,
-          handled.reply,
-          `KV ${handled.kind}_blob reply id=${handled.id}`,
-        )
+        await writeWithBackpressure(session.stream, handled.reply, `KV ${handled.kind}_blob reply id=${handled.id}`)
         trace(
           `kv replied: kind=${handled.kind} id=${handled.id} blobId=${handled.blobIdHex.slice(0, 16)}... ` +
             `found=${handled.found} echoed=${!!handled.echoed} ` +
@@ -1340,4 +1331,3 @@ export function spanEndParts(opts: {
   if (opts.textStarted) out.push({ type: "text-end", id: opts.textId })
   return out
 }
-

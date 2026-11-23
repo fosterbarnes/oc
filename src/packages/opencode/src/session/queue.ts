@@ -160,7 +160,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const lock = Semaphore.makeUnsafe(1)
-    const identity = yield* Effect.cached(Effect.promise(ScheduledDelivery.owner))
+    const identity = ScheduledDelivery.ownerOnce()
     const owned = new Map<MessageID, ScheduledDelivery.Claim>()
     const claimed = (row: typeof SessionQueueTable.$inferSelect) =>
       ScheduledDelivery.claim(Reflect.get(row.payload, "deliveryClaim"))

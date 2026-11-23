@@ -17,7 +17,7 @@ test("ensureSkillPlugin links oc skills, skips Claude Code's own, and rebuilds o
   const sources = path.join(tmp.path, "ocSkills")
   const claudeSkills = path.join(tmp.path, "claudeSkills")
   const plugin = path.join(tmp.path, "plugin")
-  mkdirSync(path.join(claudeSkills, "shared"), { recursive: true })
+  skill(claudeSkills, "shared")
   const notes = skill(sources, "build-notes", "base")
   const models = skill(sources, "available-models")
   const shared = skill(sources, "shared")
@@ -47,6 +47,17 @@ test("ensureSkillPlugin links oc skills, skips Claude Code's own, and rebuilds o
   expect(
     ensureSkillPlugin([shared, { name: "customize-opencode", location: "<built-in>" }], plugin, claudeSkills),
   ).toBeUndefined()
+})
+
+test("a different same-name Claude skill does not hide oc's version", async () => {
+  await using tmp = await tmpdir()
+  const claudeSkills = path.join(tmp.path, "claudeSkills")
+  const stale = skill(claudeSkills, "build-notes")
+  writeFileSync(stale.location, "---\nname: build-notes\n---\n# older\n")
+  const current = skill(path.join(tmp.path, "ocSkills"), "build-notes")
+
+  const folder = ensureSkillPlugin([current], path.join(tmp.path, "plugin"), claudeSkills)!
+  expect(readFileSync(path.join(folder, "skills", "build-notes", "SKILL.md"), "utf8")).toContain("# build-notes")
 })
 
 test("poolSkillsDir points at the spawning account's own skills folder", () => {

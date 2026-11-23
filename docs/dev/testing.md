@@ -23,3 +23,5 @@ The one list of tests that fail today and are not fixed. Remove an entry in the 
 - Mac-only (recorded 2026-11-18): `buildNotesChanged.tests.ps1` and `installDir.tests.ps1` (Windows path literals); tui `dependencies.test.ts` "finds Git Bash"; tui `openSidebar.test.ts` pooled-live (real Keychain); `test/provider/claude-code` per this file.
 - opencode suite one-offs on macOS (2026-11-18): unreproduced, listed in that day's build notes.
 - Shell-dependent: `steering.test.ts` "cancel retires written unread input after visible content" (see above): run it from PowerShell.
+- Intermittent, opencode (recorded 2026-11-23): `session/prompt.test.ts` "@<agent>:<level> resolves to an agent part that keeps the level" (`resolvePromptParts` pushes parts from unbounded concurrent lookups, so their order varies); `session/scheduledResume.test.ts` first test hit Windows `EPERM` on its atomic rename once and passed on rerun.
+- Windows, tui (recorded 2026-11-22, same on clean v0.2.407): `questionRestored.test.tsx` 4 tests (no Sync provider around `QuestionPrompt`); `pwshUpdateMac.test.ts` "classifies each install method by its real path" (POSIX path literals).

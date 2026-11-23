@@ -39,6 +39,8 @@ describe.skipIf(!cliPath)("Claude command-turn permission enforcement", () => {
                   permission: {
                     read: "allow",
                     bash: "allow",
+                    // The plans folder is outside the project, and oc's rule now covers Claude's Write too.
+                    external_directory: "allow",
                     edit: { "*": "allow", [`${plans.replaceAll("\\", "/")}/mockups/**`]: "deny" },
                   },
                 },

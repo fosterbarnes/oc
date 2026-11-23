@@ -115,7 +115,12 @@ async function connect() {
     await client.close()
     throw new Error(`cua-driver ${version} is older than ${MIN_VERSION}. Update it with \`cua-driver update --apply\`.`)
   }
-  const next = { client, tools: await listTools(client) }
+  // Closed on failure: the next call spawns a new driver, so this one would be orphaned.
+  const tools = await listTools(client).catch(async (error: unknown) => {
+    await client.close().catch(() => undefined)
+    throw error
+  })
+  const next = { client, tools }
   client.onclose = () => {
     if (connection?.client === client) connection = undefined
   }

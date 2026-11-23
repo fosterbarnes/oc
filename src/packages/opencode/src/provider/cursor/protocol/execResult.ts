@@ -240,11 +240,17 @@ export function buildTypedExecResult(
       // when the request was remapped away from `write`.
       const remappedPath = str(resultMetadata?.path)
       if (error) return { error: { path: remappedPath ?? "", error } }
+      // The tool's output is a one-line message: measure the written file, not that text.
+      const written =
+        remappedPath ?? extractPathTag(output) ?? /^Wrote file successfully: (.+)$/m.exec(output)?.[1]?.trim() ?? ""
+      const statPath = written && resultRoot ? path.resolve(resultRoot, written) : written
+      const lines = readFileLineCount(statPath)
       return {
         success: {
-          path: remappedPath ?? extractPathTag(output) ?? "",
-          lines_created: countLines(output),
-          file_size: output.length,
+          path: written,
+          lines_created: lines ?? countLines(output),
+          // `lines` is undefined only when the file could not be read; an empty file is a real size 0.
+          file_size: lines === undefined ? output.length : readFileSize(statPath),
         },
       }
     }
@@ -269,6 +275,10 @@ export function buildTypedExecResult(
       return { success: { output } }
     case "delete_result":
       if (error) return { error: { path: "", error } }
+      // Deletes run through bash, which reports a failing command as a normal result.
+      if (shellOutcome?.kind === "exit" && shellOutcome.code !== 0) {
+        return { error: { path: "", error: output || `Delete failed with exit code ${shellOutcome.code}` } }
+      }
       return { success: { path: "", deleted_file: "" } }
     case "background_shell_spawn_result": {
       const command = str(resultMetadata?.command) ?? ""

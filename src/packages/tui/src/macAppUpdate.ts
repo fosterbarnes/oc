@@ -210,8 +210,9 @@ export async function installMacApp(
   } catch (cause) {
     return { ok: false, alreadyRunning: false, message: `Failed to update ${spec.label}: ${errorText(cause)}` }
   } finally {
-    if (dir) await rm(dir, { recursive: true, force: true })
     inflight.delete(key)
+    // A leftover temp folder must not replace the install's result.
+    if (dir) await rm(dir, { recursive: true, force: true }).catch(() => undefined)
   }
 }
 
@@ -244,9 +245,11 @@ async function install(spec: MacAppSpec, expectedVersion: string, dir: string, o
   onLine?.(`${STEP_PREFIX}installing`)
   const wasRunning = await isRunning(app)
   if (wasRunning) await quit(spec, app, bundleId)
-  // Quitting lets Squirrel's ShipIt or Sparkle's Autoupdate install an update it already fetched.
-  await waitFor(async () => !(await anyRunning(["ShipIt", "Autoupdate"])), 30_000)
   try {
+    // Quitting lets Squirrel's ShipIt or Sparkle's Autoupdate install an update it already fetched.
+    // Swapping the app while one still runs could leave it half replaced.
+    if (!(await waitFor(async () => !(await anyRunning(["ShipIt", "Autoupdate"])), 30_000)))
+      throw new Error("the app's own updater is still running; try again shortly")
     const current = await appVersion(app)
     if (compareDesktopVersions(current, expectedVersion) < 0) await swap(app, fresh)
   } finally {

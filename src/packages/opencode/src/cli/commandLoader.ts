@@ -31,6 +31,7 @@ const ALIASES = {
 
 const VALUE_OPTIONS = new Set([
   "--log-level",
+  "--log-channels",
   "--model",
   "-m",
   "--session",
@@ -103,7 +104,7 @@ export function resolveCommandToLoad(args: readonly string[]): CommandToLoad {
       continue
     }
     if (COMMANDS.has(arg)) return arg as CommandToLoad
-    if (arg in ALIASES) return ALIASES[arg as keyof typeof ALIASES]
+    if (Object.hasOwn(ALIASES, arg)) return ALIASES[arg as keyof typeof ALIASES]
     return "tui"
   }
   return "tui"

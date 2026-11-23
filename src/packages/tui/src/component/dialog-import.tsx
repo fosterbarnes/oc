@@ -81,10 +81,10 @@ function DialogImportPick(props: { source: string; entries: OcItems.Entry[]; sam
     dialog.clear()
     await OcItems.apply(chosen.map((entry) => entry.item))
       .then(async (applied) => {
-        await sdk.client.global.dispose()
+        const reloaded = await reloadProjects(sdk.client)
         toast.show({
-          variant: "success",
-          message: `Imported ${chosen.length} items from ${props.source} (${applied.files} files)`,
+          variant: reloaded ? "success" : "warning",
+          message: `Imported ${chosen.length} items from ${props.source} (${applied.files} files)${reloaded ? "" : RELOAD_FAILED}`,
           action: { label: "Undo", run: () => void undoImport(toast, sdk.client) },
         })
       })
@@ -189,8 +189,21 @@ export async function undoImport(toast: ToastContext, client: Client) {
   })
   if (restored === null) return
   if (restored === undefined) return toast.show({ variant: "info", message: "No import to undo" })
-  await client.global.dispose()
-  toast.show({ variant: "success", message: `Undid last import (${restored} files restored)` })
+  const reloaded = await reloadProjects(client)
+  toast.show({
+    variant: reloaded ? "success" : "warning",
+    message: `Undid last import (${restored} files restored)${reloaded ? "" : RELOAD_FAILED}`,
+  })
+}
+
+export const RELOAD_FAILED = ". Open projects did not reload; restart oc to apply it"
+
+// The files are already changed when this runs, so a failed reload is a warning, never a failed import.
+export function reloadProjects(client: Client) {
+  return client.global.dispose({ throwOnError: true }).then(
+    () => true,
+    () => false,
+  )
 }
 
 function defaultExportPath() {

@@ -96,27 +96,35 @@ async function serverSecret() {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error
   }
   const secret = randomBytes(32).toString("base64")
+  // Protected before it takes the real name: a later launch trusts any existing secret file as is.
+  const temporary = `${file}.tmp-${process.pid}`
   // POSIX: owner-only from creation (umask can only remove bits); chmod also fixes an older file.
-  await fs.writeFile(file, secret, { encoding: "ascii", mode: 0o600 })
-  if (process.platform !== "win32") await fs.chmod(file, 0o600)
-  if (process.platform === "win32") {
-    // Called by path: Git's coreutils whoami.exe can come first on PATH and rejects `/user`.
-    const user = Bun.spawnSync(
-      [path.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "whoami.exe"), "/user"],
-      {
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    ).stdout.toString()
-    const sid = user.match(/S-\d-\d+(?:-\d+)+/)?.[0]
-    if (!sid) throw new Error("Failed to determine the current Windows user SID")
-    const result = Bun.spawnSync(["icacls.exe", file, "/inheritance:r", "/grant:r", `*${sid}:F`], {
-      stdout: "pipe",
-      stderr: "pipe",
+  await fs.writeFile(temporary, secret, { encoding: "ascii", mode: 0o600 })
+  await protectSecret(temporary)
+    .then(() => fs.rename(temporary, file))
+    .catch(async (error: unknown) => {
+      await fs.rm(temporary, { force: true })
+      throw error
     })
-    if (result.exitCode !== 0) throw new Error(`Failed to protect resident server secret: ${result.stderr.toString()}`)
-  }
   return secret
+}
+
+async function protectSecret(file: string) {
+  if (process.platform !== "win32") return fs.chmod(file, 0o600)
+  // Called by path: Git's coreutils whoami.exe can come first on PATH and rejects `/user`, and a bare
+  // name would also run an icacls.exe from the current folder.
+  const system32 = path.join(process.env.SystemRoot ?? "C:\\Windows", "System32")
+  const user = Bun.spawnSync([path.join(system32, "whoami.exe"), "/user"], {
+    stdout: "pipe",
+    stderr: "pipe",
+  }).stdout.toString()
+  const sid = user.match(/S-\d-\d+(?:-\d+)+/)?.[0]
+  if (!sid) throw new Error("Failed to determine the current Windows user SID")
+  const result = Bun.spawnSync([path.join(system32, "icacls.exe"), file, "/inheritance:r", "/grant:r", `*${sid}:F`], {
+    stdout: "pipe",
+    stderr: "pipe",
+  })
+  if (result.exitCode !== 0) throw new Error(`Failed to protect resident server secret: ${result.stderr.toString()}`)
 }
 
 async function serverHealthy(url: string, secret: string) {
@@ -609,9 +617,17 @@ export async function forceKill(processes: TuiLedger.Process[]) {
 }
 
 export async function waitForExit(pid: number, timeoutMs: number, identity?: ResidentState) {
+  // A failed process snapshot falls back to the bare pid, which can only over-report "alive".
+  const alive = () => {
+    try {
+      return isPidAlive(pid, identity)
+    } catch {
+      return isPidAlive(pid)
+    }
+  }
   const deadline = Date.now() + timeoutMs
-  while (isPidAlive(pid, identity) && Date.now() < deadline) await Bun.sleep(50)
-  return !isPidAlive(pid, identity)
+  while (alive() && Date.now() < deadline) await Bun.sleep(50)
+  return !alive()
 }
 
 /** An `ifIdle` stop the server refused: sessions, shell jobs, or terminals are running. It keeps serving. */
@@ -729,7 +745,10 @@ export async function shutdownAll(
     if (!record.paneID) continue
     const sameMux = !record.weztermSocket || record.weztermSocket === process.env.WEZTERM_UNIX_SOCKET
     if (sameMux && opts.keepPanes?.includes(record.paneID)) continue
-    killPane(record.paneID, record.weztermSocket)
+    // A pane already gone must not stop the shutdown; `forceKill` below still ends its process.
+    try {
+      killPane(record.paneID, record.weztermSocket)
+    } catch {}
   }
   // TUIs have nothing to save; killing them up front avoids the "Unable to connect" screen while servers stop.
   if (processes !== null) await forceKill(processes.filter((item) => pids.includes(item.pid)))

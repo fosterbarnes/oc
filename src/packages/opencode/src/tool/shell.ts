@@ -774,17 +774,31 @@ export const ShellTool = Tool.define(
                 throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
               }
               const timeout = params.timeout ?? defaultTimeoutMs
-              const ps = Shell.ps(shell)
+              // Set by the Claude tool guard: apply this tool's permission scan to Claude's shell, then stop.
+              const claudeShell = ctx.extra?.claudeShell
+              const scanShell =
+                claudeShell === "powershell"
+                  ? Shell.ps(shell)
+                    ? shell
+                    : "pwsh"
+                  : claudeShell === "bash" && !Shell.posix(shell)
+                    ? (Shell.gitbash() ?? "bash")
+                    : shell
+              const ps = Shell.ps(scanShell)
               yield* Effect.scoped(
                 Effect.gen(function* () {
                   const tree = yield* Effect.acquireRelease(parse(params.command, ps), (tree) =>
                     Effect.sync(() => tree.delete()),
                   )
-                  const scan = yield* collect(tree.rootNode, cwd, ps, shell, instanceCtx)
+                  const scan = yield* collect(tree.rootNode, cwd, ps, scanShell, instanceCtx)
                   if (!containsPath(cwd, instanceCtx)) scan.dirs.add(cwd)
                   yield* ask(ctx, scan, params)
                 }),
               )
+              if (claudeShell) {
+                const metadata: Metadata = { output: "", exit: null, truncated: false }
+                return { title: params.command, metadata, output: "" }
+              }
 
               if (params.background) {
                 return yield* background(
