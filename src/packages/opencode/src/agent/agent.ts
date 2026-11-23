@@ -43,6 +43,8 @@ export const Info = Schema.Struct({
   mode: Schema.Literals(["subagent", "primary", "all"]),
   native: Schema.optional(Schema.Boolean),
   hidden: Schema.optional(Schema.Boolean),
+  // Dispatched read-only (agent/subagent-permissions.ts), like a Cursor `readonly` subagent.
+  readonly: Schema.optional(Schema.Boolean),
   topP: Schema.optional(Schema.Finite),
   temperature: Schema.optional(Schema.Finite),
   color: Schema.optional(Schema.String),
@@ -340,6 +342,7 @@ const layer = Layer.effect(
           item.mode = value.mode ?? item.mode
           item.color = value.color ?? item.color
           item.hidden = value.hidden ?? item.hidden
+          item.readonly = value.readonly ?? item.readonly
           item.name = value.name ?? item.name
           item.steps = value.steps ?? item.steps
           item.tabOrder = value.tab_order ?? item.tabOrder

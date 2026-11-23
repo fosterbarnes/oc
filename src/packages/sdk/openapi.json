@@ -23917,6 +23917,9 @@
           "hidden": {
             "type": "boolean"
           },
+          "readonly": {
+            "type": "boolean"
+          },
           "options": {
             "type": "object"
           },
@@ -26158,6 +26161,9 @@
             "type": "boolean"
           },
           "hidden": {
+            "type": "boolean"
+          },
+          "readonly": {
             "type": "boolean"
           },
           "topP": {

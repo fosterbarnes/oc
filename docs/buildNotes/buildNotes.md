@@ -131,6 +131,43 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-23 (~04:17) - v0.2.410 eggoEnabled - Sync only real files, read-only subagents, Cursor sh commands, sync idle - Claude Opus 5.5, default; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default; Implementation (imp, swarm handoff F4/F29/F54/F76); completed, live unverified. Uncommitted.
+- Version: 0.2.410
+- Fixed F4 `core ocItems.ts`: lstat classifier `classify`/`heldReason`/`heldPath` runs before any readdir or read, top folders and root segments from home included. Held: symlinks, junctions, non file/dir, Windows REPARSE/OFFLINE/RECALL attrs (`GetFileAttributesW` via lazy bun:ffi, `\\?\` prefix), shortcut extensions, `.name.icloud` stubs (held under the real name; `.SKILL.md.icloud` marks a skill), macOS dataless (`blocks==0 && size>0` then `/usr/bin/stat -f %Xf`), Finder alias header. `collect().held` id or prefix -> reason; `isHeld`: exact, `/` child, or `:` prefix. Any held file holds its whole skill. Held key file or `.name.icloud` key stub holds `${file}:`.
+- Fixed F4 `core ocSync.ts`: held ids keep previous state (no tombstone), leave manifest, skipped in `pull` and `applyPulled`; held ids join the `_etags` key.
+- Added held rows: /sync "Not synced", Export "Not exported" (`itemTree.heldOptions`).
+- Changed test (intended): "a dangling link marks its category partial" -> held, not partial.
+- Changed personal: `~/.opencode/commands/agent-push.md` now real file, `~/.claude/skills/agent-push/SKILL.md` links to it (hash unchanged 13074186...; backup `%TEMP%\agentPushSwap-20261123`). `.claude2`/`.claude3` skill copies identical, untouched. File header still says "Not a symlink; edit both" (left: editing changes synced hash).
+- Fixed F29: Cursor `SubagentArgs.readonly` -> `resultMetadata.readonly` -> `pump.ts` `markReadonlySubagentCall(toolCallId)`; `task.ts` takes it by `ctx.callID` (no tool arg). Child gets `READONLY_MARKER_RULE`; `prompt.ts` appends `readonlySubagentRules` last on every turn of a marked session: deny `*`, replay earlier rules for read/grep/glob/list/websearch/webfetch/external_directory (never upgraded), deny read `mcp:*`. Writable child resumed read-only -> refused.
+- Added `readonly` agent field (core `v1/config/agent.ts`, `Agent.Info`): same marker. Not in `options` (those reach LLM request options, `session/llm/request.ts:122`).
+- Added personal `review-*` entries (grok-4.6/4.7, glm-5.3(-flash), gpt-6.2-sol, gpt-6.1-terra) with `readonly: true` in `agents/sub/general.md`; subagents skill names them. Risk: oc before v0.2.410 (installed PC build, Mac 0.2.407) puts `readonly` into options and runs them writable; use only after /revive.
+- Fixed F54 `shellTimeout.ts`: removed `exec /bin/sh <wrapper>` command rewrite and `preferWrapperCommand`; sh/dash/other follow Windows branch (real command, foreground at Cursor window, background refused). bash/zsh unchanged.
+- Fixed F76 `syncPeer.ts`: `idle()` = `ServerIdle.report` (SessionWork via `makeRuntime` shared memoMap, shell jobs, PTYs) + `busyClaudeProcesses` (live child with non-abandoned turn, background tasks, or guardPending). Removed session.status map and 2 h cutoff. Long-open terminal delays reload.
+- Fixed `global-lifecycle.ts`: `stopToolGuardChecks` before `disposeAll` clears stored Claude guards and aborts in-flight checks (deny, not hang on disposed services).
+- Fixed from review: `toolGuard.ts` aborts a callback read after child exit; `sessionManager.ts` LRU and idle eviction spare a child with `guardPending`.
+- Kept (review, reasoned): abandoned turns not busy for reload; task-brief attachments and slash commands inside a read-only child (pre-existing, user-driven); ToolSearch exempt; sentinel parse on foreground output; shell kind vs `Shell.acceptable`.
+- Risk: macOS dataless folders are still listed (files inside held). Key stub check covers only the chosen settings file name.
+- ERROR: `plugin/azure.test.ts` Node run fails `ERR_UNSUPPORTED_ESM_URL_SCHEME` (bundle pulls `processDarwin.ts` bun:ffi); none of this diff in the bundle; logged in `docs/dev/testing.md`.
+- Verification: typecheck core, opencode, tui pass. Full provider/permission/tool/session/server/agent/plugin run 3664 pass, 2 fail (azure known; task readonly test passed alone, file edited mid-run). After review fixes: core ocItems/ocSync 21 pass; claude-code, task, agent, cursor, plugin/cursor 1038 pass 0 fail. Real `claude` CLI guard test with read-only session (fake LLM) passed. Probe: `busyClaudeProcesses` ignores closing/abandoned (deleted). Real config collect: only held item was agent-push link before swap, none after. Agents scan: six review-* parse with `readonly: true`. Not run: live Cursor turn, two-machine sync, macOS, F18, F36, claim verification wave (claims in `%TEMP%\swarm20261123\claims.tsv`, waiting for user go).
+
+### User
+Settings sync and export
+- Sync and Export now skip links, junctions, shortcuts, cloud placeholders, and Finder aliases, and never treat them as deleted.
+- The /sync and Export dialogs list those skipped items with the reason.
+
+Subagents
+- A read-only subagent requested by Cursor can now only read, search, and use web tools, even under a command that allows shell.
+- An agent entry can set `readonly: true` for the same behavior; new `review-*` entries use it after `/revive`.
+
+Cursor and sync
+- Cursor shell commands on sh or dash now show and check the real command.
+- Sync waits for real idle (running sessions, shell jobs, terminals, Claude background work) before reloading projects, instead of guessing from a 2-hour limit.
+
+---
+
 ## 2026-11-23 (~01:51) - v0.2.409 lonelyPigtail - Forward oc rules to Claude Code - Claude Opus 5.5, default; Implementation
 
 ### Agent

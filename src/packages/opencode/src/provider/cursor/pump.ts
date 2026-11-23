@@ -72,6 +72,7 @@ import { workspaceRootFromRequestContext } from "./context/env.js"
 import { progressOnlyContinuationPrompt, shouldContinueProgressOnlyTurn } from "./protocol/progressContinuation.js"
 import { ensureOpencodeProjectDir, opencodeGlobalCacheDir } from "./context/paths.js"
 import { registerCursorShellCall } from "./shellTimeout.js"
+import { markReadonlySubagentCall } from "@/agent/subagent-permissions"
 import { analyzeReplayFrame, AttemptReplaySafety } from "./replaySafety.js"
 import { readAllFieldsStrict } from "./protocol/struct.js"
 import { buildGitDiffReply, executeGitDiff } from "./protocol/gitDiff.js"
@@ -949,6 +950,9 @@ export class CursorPump {
           parsed.resultField === "background_shell_spawn_result"
         ) {
           registerCursorShellCall(tc.toolCallId, parsed.resultMetadata)
+        }
+        if (parsed.resultField === "subagent_result" && parsed.resultMetadata?.readonly === true) {
+          markReadonlySubagentCall(tc.toolCallId)
         }
         // Keep the stream open; the result arrives on the next doStream call.
         sessionManager.registerPending(

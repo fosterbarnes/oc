@@ -342,7 +342,7 @@ export function evictIfNeeded(): void {
   while (activeProcesses.size >= MAX_ACTIVE_PROCESSES) {
     let victimKey: string | undefined
     for (const [key, ap] of activeProcesses) {
-      if (ap.closing || !isTurnInFlight(ap)) {
+      if (ap.closing || !inUse(ap)) {
         victimKey = key
         break
       }
@@ -437,6 +437,24 @@ export function noteTaskLine(ap: ActiveProcess, line: string): void {
 
 export function isTurnInFlight(ap: ActiveProcess): boolean {
   return ap.turnInFlight === true
+}
+
+/** Eviction must spare a child mid-turn or one whose tool call waits on oc's guard (a permission prompt). */
+function inUse(ap: ActiveProcess): boolean {
+  return isTurnInFlight(ap) || (ap.guardPending ?? 0) > 0
+}
+
+/**
+ * Live Claude children doing work oc's session runs may not show: a turn (a wake with no oc turn
+ * attached), CLI background tasks, or a tool call waiting on oc's guard. A closing child counts
+ * for nothing, so a dead one never holds a caller (the sync reload) back.
+ */
+export function busyClaudeProcesses(): number {
+  return [...activeProcesses.values()].filter(
+    (ap) =>
+      !ap.closing &&
+      ((ap.turnInFlight && !ap.turnAbandoned) || (ap.backgroundTasks?.size ?? 0) > 0 || (ap.guardPending ?? 0) > 0),
+  ).length
 }
 
 /** Resolves true once the CLI is idle, false if it stayed busy past the timeout. */
@@ -547,8 +565,8 @@ export function scheduleIdleProcessEviction(key: string, timeoutMs: number | und
   const timer = setTimeout(() => {
     idleEvictionTimers.delete(key)
     if (activeProcesses.get(key) !== scheduledProcess) return
-    if (isTurnInFlight(scheduledProcess)) {
-      log.info("idle timer found a turn in flight; re-arming", { sessionKey: key, timeoutMs })
+    if (inUse(scheduledProcess)) {
+      log.info("idle timer found a turn or guard check in flight; re-arming", { sessionKey: key, timeoutMs })
       scheduleIdleProcessEviction(key, timeoutMs)
       return
     }

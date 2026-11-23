@@ -102,6 +102,44 @@ describe("on disk", () => {
     expect((await state())["command:config:commands/top.md"]?.deleted).toBeUndefined()
   })
 
+  // F4: a folder swapped for a link is held: no tombstone, off the manifest, and a peer's change or
+  // tombstone for it is skipped, so nothing is written through the link.
+  test("a held item keeps its state, leaves the manifest, and survives a pull", async () => {
+    const id = "command:config:commands/locked/inner.md"
+    await rescan()
+    const outside = path.join(root, "outside")
+    await fs.mkdir(outside)
+    await fs.writeFile(path.join(outside, "inner.md"), "private")
+    await fs.rm(path.join(commands(), "locked"), { recursive: true })
+    await fs.symlink(outside, path.join(commands(), "locked"), "junction")
+    const before = (await state())[id]
+    await rescan()
+    expect((await state())[id]).toEqual(before)
+    expect((await OcSync.manifest()).entries.map((entry) => entry.id)).not.toContain(id)
+    const at = Date.now() + 1000
+    const incoming: OcItems.Item = {
+      kind: "files",
+      id: "command:config:commands/locked/new.md",
+      category: "command",
+      label: "new.md",
+      code: false,
+      root: "config",
+      files: [{ path: "commands/locked/new.md", text: "x" }],
+    }
+    const result = await OcSync.applyPulled(
+      peer,
+      [
+        { id, hash: "", at, tags: [], deleted: true },
+        { id: incoming.id, hash: "n", at, tags: [] },
+      ],
+      new Map([[incoming.id, incoming]]),
+      [],
+    )
+    expect(result.applied).toEqual([])
+    expect(await fs.readdir(outside)).toEqual(["inner.md"])
+    expect((await state())[id]).toEqual(before)
+  })
+
   test("a removed folder becomes a tombstone", async () => {
     await rescan()
     await fs.rm(commands(), { recursive: true })

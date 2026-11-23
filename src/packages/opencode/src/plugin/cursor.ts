@@ -42,7 +42,10 @@ import { sessionActivity } from "../provider/cursor/activity.js"
 import { markSessionDirectory, removeSessionDirectory } from "../provider/cursor/sessionDirectory.js"
 import { createOpenCodeWebSearchTool, openCodeWebSearchTool } from "../provider/cursor/webSearchTool.js"
 import { createCursorImageSaveTool, cursorImageSaveTool } from "../provider/cursor/imageSaveTool.js"
-import { createPlanExecutionKickoffText, registerPlanExecutionKickoff } from "../provider/cursor/planExecutionKickoff.js"
+import {
+  createPlanExecutionKickoffText,
+  registerPlanExecutionKickoff,
+} from "../provider/cursor/planExecutionKickoff.js"
 import { CURSOR_PROVIDER_NPM } from "../provider/cursor.js"
 
 export async function loadClassicTools(
@@ -93,21 +96,24 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
 
   // After CreatePlan Yes, queue OpenCode's plan_exit-shaped synthetic turn so
   // implementation starts. Failures stay in the kickoff module (trace only).
-  const unregisterPlanExecutionKickoff = registerPlanExecutionKickoff(input.directory, async ({ sessionID, planPath }) => {
-    await input.client.session.promptAsync({
-      path: { id: sessionID },
-      body: {
-        agent: "build",
-        parts: [
-          {
-            type: "text",
-            text: createPlanExecutionKickoffText(planPath),
-            synthetic: true,
-          },
-        ],
-      },
-    })
-  })
+  const unregisterPlanExecutionKickoff = registerPlanExecutionKickoff(
+    input.directory,
+    async ({ sessionID, planPath }) => {
+      await input.client.session.promptAsync({
+        path: { id: sessionID },
+        body: {
+          agent: "build",
+          parts: [
+            {
+              type: "text",
+              text: createPlanExecutionKickoffText(planPath),
+              synthetic: true,
+            },
+          ],
+        },
+      })
+    },
+  )
 
   // Last access token successfully resolved in this plugin instance. Config's
   // loadModels can only read OpenCode's durable store (auth.json /
@@ -289,9 +295,8 @@ export async function CursorPlugin(input: PluginInput): Promise<Hooks> {
     async "tool.execute.before"(hookInput, output) {
       if (hookInput.tool !== "bash") return
       // bash/zsh retain the original display/permission command and wrap via
-      // shell.env. sh/dash need a short wrapper-file command because their
-      // non-interactive `-c` path ignores BASH_ENV / ZDOTDIR. A refusal (Windows
-      // background/soft-timeout) throws so the tool fails with that error.
+      // shell.env. Other shells run the real command in the foreground; a
+      // refusal (a true background request) throws so the tool fails with it.
       const refusal = prepareCursorShellArgs(hookInput.callID, output.args as Record<string, unknown>)
       if (refusal) throw new Error(refusal)
     },

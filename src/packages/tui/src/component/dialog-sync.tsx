@@ -12,7 +12,7 @@ import { useSDK } from "../context/sdk"
 import { errorMessage } from "../util/error"
 import { persistOcSync } from "../ocSettings"
 import { RELOAD_FAILED, reloadProjects } from "./dialog-import"
-import { nodeByValue, treeOptions, type TreeState } from "./itemTree"
+import { heldOptions, nodeByValue, treeOptions, type TreeState } from "./itemTree"
 
 export function DialogSync() {
   const dialog = useDialog()
@@ -101,7 +101,7 @@ export function DialogSync() {
     const tree = collected.loading
       ? [{ title: "Reading settings", value: "", inert: true, category: "Items" }]
       : treeOptions(nodes(), state, undefined, "Items (enter excludes or includes on this machine)")
-    return [...header, ...peers, ...restores, ...tree]
+    return [...header, ...peers, ...restores, ...tree, ...heldOptions(collected()?.held, "Not synced")]
   })
 
   return (

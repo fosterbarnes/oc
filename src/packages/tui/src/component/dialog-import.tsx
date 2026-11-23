@@ -13,7 +13,7 @@ import { useDialog, type DialogContext } from "../ui/dialog"
 import { useToast, type ToastContext } from "../ui/toast"
 import { useSDK } from "../context/sdk"
 import { errorMessage } from "../util/error"
-import { nodeByValue, pickedState, togglePicked, treeOptions } from "./itemTree"
+import { heldOptions, nodeByValue, pickedState, togglePicked, treeOptions } from "./itemTree"
 
 type Client = ReturnType<typeof useSDK>["client"]
 
@@ -135,7 +135,10 @@ export function DialogExport() {
   const options = createMemo(() => {
     if (collected.loading) return [{ title: "Reading settings", value: "", inert: true }]
     if (collected.error) return [{ title: errorMessage(collected.error), value: "", inert: true }]
-    return treeOptions(nodes(), (node) => pickedState(node, picked()))
+    return [
+      ...treeOptions(nodes(), (node) => pickedState(node, picked())),
+      ...heldOptions(collected()?.held, "Not exported"),
+    ]
   })
 
   async function run() {

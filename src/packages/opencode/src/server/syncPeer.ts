@@ -6,15 +6,19 @@ import os from "node:os"
 import { OcItems } from "@opencode-ai/core/util/ocItems"
 import { OcSync } from "@opencode-ai/core/util/ocSync"
 import { localView, parsePeerView, type PeerSource, type PeerView } from "@/provider/claude-code/warmup/peers"
-import { GlobalBus } from "@/bus/global"
+import { busyClaudeProcesses } from "@/provider/claude-code/sessionManager"
 import { AppRuntime } from "@/effect/app-runtime"
 import { disposeAllInstancesAndEmitGlobalDisposed } from "./global-lifecycle"
+import { SessionWork } from "@opencode-ai/core/session/work"
+import { makeRuntime } from "@/effect/run-service"
+import { ServerIdle } from "./idle"
+
+// The server's own SessionWork (shared memo map), as the TUI worker reads it.
+const sessionWork = makeRuntime(SessionWork.Service, SessionWork.layer)
 
 const _TICK = 20_000
 const _TAILSCALE_TTL = 60_000
 const _BACKOFF = 5 * 60_000
-// A session that never reported idle (crash) stops blocking the reload after this long.
-const _BUSY_LIMIT = 2 * 60 * 60_000
 
 let server: ReturnType<typeof Bun.serve> | undefined
 let tailscale: { at: number; value: Promise<OcSync.TailscaleStatus> } | undefined
@@ -29,7 +33,6 @@ const runsOc = new Set<string>()
 const _MIGRATION_WAIT = 15 * 60_000
 const startedAt = Date.now()
 let reloadPending = false
-const busy = new Map<string, number>()
 const backoff = new Map<string, number>()
 // Peers that answered at least once; machines without oc never show up in the status.
 const known = new Map<string, OcSync.PeerStatus>()
@@ -37,12 +40,6 @@ const logged = new Map<string, string>()
 let status: OcSync.Status = { enabled: false, updated: 0, peers: [], conflicts: [] }
 
 export function start() {
-  GlobalBus.on("event", (event) => {
-    if (event.payload?.type !== "session.status") return
-    const id = String(event.payload.properties?.sessionID)
-    if (event.payload.properties?.status?.type === "idle") busy.delete(id)
-    else busy.set(id, Date.now())
-  })
   void OcSync.readStatus().then((saved) => {
     status = { ...status, conflicts: saved.conflicts }
     void tick()
@@ -102,7 +99,7 @@ async function cycle() {
     reloadPending = true
     status = { ...status, conflicts: [...status.conflicts, ...result.conflicts].slice(-50) }
   }
-  if (reloadPending && idle()) {
+  if (reloadPending && (await idle())) {
     reloadPending = false
     await AppRuntime.runPromise(disposeAllInstancesAndEmitGlobalDisposed({ swallowErrors: true }))
   }
@@ -123,9 +120,11 @@ function save(next: Partial<OcSync.Status>) {
   return OcSync.writeStatus(status)
 }
 
-function idle() {
-  const now = Date.now()
-  return [...busy.values()].every((since) => now - since > _BUSY_LIMIT)
+// Real work, not a status guess: session runs, shell jobs, and terminals (ServerIdle) are counted
+// while running and released when they end, and Claude children report their own turns, tasks, and
+// guard checks. A long-open terminal delays the reload until it closes.
+async function idle() {
+  return !ServerIdle.isBusy(await sessionWork.runPromise(() => ServerIdle.report())) && busyClaudeProcesses() === 0
 }
 
 // One log line per new message for a key, not one per tick.

@@ -32,7 +32,13 @@ export type Status = { enabled: boolean; updated: number; error?: string; peers:
 // peer; `hash !== base` means a local edit no peer has yet.
 type StateEntry = { hash: string; local?: string; at: number; tags: OcItems.Tag[]; base?: string; deleted?: true }
 type State = Record<string, StateEntry>
-type Scan = { state: State; raw: Map<string, OcItems.Item>; wire: Map<string, OcItems.Item> }
+// `held`: ids this machine never reads (links, shortcuts, cloud placeholders; `OcItems.isHeld`).
+type Scan = {
+  state: State
+  raw: Map<string, OcItems.Item>
+  wire: Map<string, OcItems.Item>
+  held: ReadonlyMap<string, string>
+}
 
 const _SCAN_REUSE = 2_000
 const _KEEP_BACKUPS = 200
@@ -133,12 +139,13 @@ async function rescan(): Promise<Scan> {
     if (OcItems.machineOnly(id)) continue
     // Tombstones never expire (about 100 bytes each): a peer that was offline for months, or one
     // that excluded the item meanwhile, must not bring a deleted item back. An unreadable root, an
-    // unreadable folder or entry under a category (`partial`, keyed `category:root`), or a half-saved
-    // settings file keeps its items as they were.
+    // unreadable folder or entry under a category (`partial`, keyed `category:root`), a half-saved
+    // settings file, or a held item keeps its items as they were.
     if (
       previous.deleted ||
       collected.unread.has(OcItems.sourceOf(id)) ||
-      collected.partial.has(id.split(":", 2).join(":"))
+      collected.partial.has(id.split(":", 2).join(":")) ||
+      OcItems.isHeld(id, collected.held)
     ) {
       next[id] = previous
       continue
@@ -146,7 +153,7 @@ async function rescan(): Promise<Scan> {
     next[id] = { hash: "", at: Math.max(now, previous.at + 1), tags: previous.tags, base: previous.base, deleted: true }
   }
   if (JSON.stringify(next) !== JSON.stringify(state)) await writeJson("state.json", next)
-  const result = { state: next, raw, wire }
+  const result = { state: next, raw, wire, held: collected.held }
   _last = { at: Date.now(), scan: result }
   return result
 }
@@ -154,12 +161,12 @@ async function rescan(): Promise<Scan> {
 // --- Serving side ---
 
 // Items this machine excludes stay on this machine: they are neither pulled here nor offered to
-// peers. A peer reads a missing entry as "nothing to do", never as a delete.
+// peers. A peer reads a missing entry as "nothing to do", never as a delete. Held items stay off too.
 export async function manifest(): Promise<Manifest> {
   const result = await scan()
   const exclude = settings().exclude
   const entries = Object.entries(result.state)
-    .filter(([id, entry]) => !OcItems.excluded(id, entry.tags, exclude))
+    .filter(([id, entry]) => !OcItems.excluded(id, entry.tags, exclude) && !OcItems.isHeld(id, result.held))
     .map(([id, entry]): ManifestEntry => {
       const base = { id, hash: entry.hash, at: entry.at, tags: entry.tags }
       return entry.deleted ? { ...base, deleted: true } : base
@@ -204,7 +211,10 @@ const _etags = new Map<string, { etag: string; exclude: string }>()
 // Fetches a peer's manifest (304 when unchanged since the last full apply), then its newer items,
 // and applies them. Returns the applied ids and the local edits it overwrote.
 export async function pull(peer: Peer, current: Settings) {
-  const exclude = JSON.stringify(current.exclude)
+  const before = await scan()
+  // Held ids are part of the key: when a link becomes a real file, the peer's unchanged manifest
+  // must be read again, not hidden behind a 304.
+  const exclude = JSON.stringify([current.exclude, [...before.held.keys()].sort()])
   const cached = _etags.get(peer.ip)
   const response = await fetch(`http://${peer.ip}:${PORT}${ROUTE.manifest}`, {
     headers: cached?.exclude === exclude ? { "if-none-match": cached.etag } : {},
@@ -216,9 +226,9 @@ export async function pull(peer: Peer, current: Settings) {
   if (remote.format !== FORMAT) {
     throw new Error(`runs oc ${remote.ocVersion} with sync format ${remote.format}; this oc uses ${FORMAT}`)
   }
-  const before = (await scan()).state
   const wanted = remote.entries.filter((entry) => {
-    const verdict = decide(before[entry.id], entry, current.exclude)
+    if (OcItems.isHeld(entry.id, before.held)) return false
+    const verdict = decide(before.state[entry.id], entry, current.exclude)
     return verdict === "take" || verdict === "conflict"
   })
   const fetched = await fetchItems(
@@ -263,6 +273,8 @@ export async function applyPulled(
   const applied: string[] = []
   const overwritten: string[] = []
   for (const entry of entries) {
+    // A held item is never written or deleted here, whatever the peer has.
+    if (OcItems.isHeld(entry.id, fresh.held)) continue
     const verdict = decide(state[entry.id], entry, exclude)
     if (verdict === "same") {
       if (state[entry.id].base !== entry.hash) state[entry.id] = { ...state[entry.id], base: entry.hash }

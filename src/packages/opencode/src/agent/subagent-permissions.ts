@@ -1,5 +1,44 @@
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
+import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import type { Agent } from "./agent"
+
+// Cursor's read-only subagents (SubagentArgs.readonly). The Cursor provider marks the tool call by id,
+// so no tool argument can set or clear it. The task tool puts the marker rule in the child's session
+// snapshot; every turn of that session (session/prompt.ts) then appends `readonlySubagentRules` last.
+const READONLY_MARKER = "oc_readonly_subagent"
+export const READONLY_MARKER_RULE: PermissionV1.Rule = { permission: READONLY_MARKER, pattern: "*", action: "deny" }
+const READONLY_TOOLS = ["read", "grep", "glob", "list", "websearch", "webfetch", "external_directory"]
+const _readonlyCalls = new Set<string>()
+
+export function markReadonlySubagentCall(callID: string) {
+  _readonlyCalls.add(callID)
+}
+
+/** True once for a call the Cursor provider marked read-only. */
+export function takeReadonlySubagentCall(callID: string | undefined) {
+  return callID !== undefined && _readonlyCalls.delete(callID)
+}
+
+export function isReadonlySubagent(permission: PermissionV1.Ruleset | undefined) {
+  return permission?.some((rule) => rule.permission === READONLY_MARKER) ?? false
+}
+
+/**
+ * Rules to append last for a read-only child: deny every tool, including unknown and MCP ones, then
+ * replay `prior` (every rule the child's turn already has, in order) for the read tools only, so they
+ * keep exactly their earlier decision and are never upgraded.
+ */
+export function readonlySubagentRules(prior: PermissionV1.Ruleset): PermissionV1.Rule[] {
+  return [
+    { permission: "*", pattern: "*", action: "deny" },
+    ...READONLY_TOOLS.flatMap((tool): PermissionV1.Rule[] => [
+      { permission: tool, pattern: "*", action: "ask" },
+      ...prior.filter((rule) => Wildcard.match(tool, rule.permission)).map((rule) => ({ ...rule, permission: tool })),
+    ]),
+    // MCP resource tools ask under `read` (session/tools.ts); MCP stays blocked.
+    { permission: "read", pattern: "mcp:*", action: "deny" },
+  ]
+}
 
 /**
  * Build the `permission` ruleset for a subagent's session when it's spawned

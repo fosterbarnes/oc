@@ -5,6 +5,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { Agent } from "../../src/agent/agent"
+import { isReadonlySubagent, markReadonlySubagentCall } from "../../src/agent/subagent-permissions"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Config } from "@/config/config"
@@ -773,6 +774,70 @@ describe("tool.task", () => {
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
     }),
+  )
+
+  // F29: Cursor marks a read-only call by id; the child keeps the marker and a writable child is never
+  // silently resumed as read-only.
+  it.instance("a Cursor read-only call marks its child and refuses a writable resume", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const { chat, assistant } = yield* seed()
+      const writable = yield* sessions.create({ parentID: chat.id, title: "Writable child", agent: "general" })
+      const def = yield* (yield* TaskTool).init()
+      const run = (callID: string, task_id?: string) =>
+        def.execute(
+          { description: "inspect bug", prompt: "look", subagent_type: "general", ...(task_id ? { task_id } : {}) },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            callID,
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ text: "done" }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+      markReadonlySubagentCall("cursor_ro_1")
+      const created = yield* run("cursor_ro_1")
+      expect(isReadonlySubagent((yield* sessions.get(created.metadata.sessionId)).permission)).toBe(true)
+
+      markReadonlySubagentCall("cursor_ro_2")
+      const refused = yield* run("cursor_ro_2", writable.id).pipe(Effect.exit)
+      expect(Exit.isFailure(refused) && String(Cause.squash(refused.cause))).toContain("writable subagent")
+      expect(isReadonlySubagent((yield* sessions.get(writable.id)).permission)).toBe(false)
+
+      const plain = yield* run("call_plain")
+      expect(isReadonlySubagent((yield* sessions.get(plain.metadata.sessionId)).permission)).toBe(false)
+    }),
+  )
+
+  it.instance(
+    "an agent entry with readonly: true starts a read-only child",
+    () =>
+      Effect.gen(function* () {
+        const sessions = yield* Session.Service
+        const { chat, assistant } = yield* seed()
+        const def = yield* (yield* TaskTool).init()
+        const result = yield* def.execute(
+          { description: "review diff", prompt: "look", subagent_type: "reviewer" },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            callID: "call_reviewer",
+            agent: "build",
+            abort: new AbortController().signal,
+            extra: { promptOps: stubOps({ text: "done" }) },
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+        expect(isReadonlySubagent((yield* sessions.get(result.metadata.sessionId)).permission)).toBe(true)
+      }),
+    { config: { agent: { reviewer: { mode: "subagent", readonly: true } } } },
   )
 
   it.instance(

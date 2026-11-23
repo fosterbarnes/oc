@@ -3,7 +3,12 @@ import { decodeMessage, encodeMessage } from "../../../src/provider/cursor/proto
 import { parseExecServerMessage } from "../../../src/provider/cursor/protocol/execParse.js"
 import { buildExecClientMessages } from "../../../src/provider/cursor/protocol/execResult.js"
 import { readAllFields } from "../../../src/provider/cursor/protocol/struct.js"
-import { prepareCursorShellArgs, registerCursorShellCall } from "../../../src/provider/cursor/shellTimeout.js"
+import {
+  prepareCursorShellArgs,
+  registerCursorShellCall,
+  resetCursorShellCalls,
+  setCursorShellPath,
+} from "../../../src/provider/cursor/shellTimeout.js"
 
 describe("shell_args parsing and bash mapping", () => {
   test("parses shell_args into bash tool with timeout metadata", () => {
@@ -115,5 +120,32 @@ describe("shell_args parsing and bash mapping", () => {
     expect(prepareCursorShellArgs("cursor_soft30", timed)).toBeUndefined()
     expect(timed).toMatchObject({ command: "git diff --stat", timeout: 30_000 })
     expect(prepareCursorShellArgs("cursor_soft0", soft("soft0", 0))).toMatch(/not supported on Windows/)
+  })
+
+  // F54: sh and dash once ran `exec /bin/sh <wrapper>`, so permission checks never saw the command.
+  test("sh and dash keep the real command: foreground until the window, background refused", () => {
+    setCursorShellPath("/bin/dash")
+    try {
+      registerCursorShellCall("cursor_dash_soft", {
+        shell_stream: true,
+        command: "rm -rf build",
+        working_directory: "/tmp",
+        timeout_ms: 20_000,
+        timeout_behavior: 2,
+      })
+      const soft: Record<string, unknown> = { command: "rm -rf build" }
+      expect(prepareCursorShellArgs("cursor_dash_soft", soft)).toBeUndefined()
+      expect(soft).toEqual({ command: "rm -rf build", timeout: 20_000 })
+      registerCursorShellCall("cursor_dash_bg", {
+        background_shell_spawn: true,
+        command: "sleep 5",
+        working_directory: "/tmp",
+      })
+      const background: Record<string, unknown> = { command: "sleep 5" }
+      expect(prepareCursorShellArgs("cursor_dash_bg", background)).toMatch(/not supported/)
+      expect(background).toEqual({ command: "sleep 5" })
+    } finally {
+      resetCursorShellCalls()
+    }
   })
 })

@@ -3,7 +3,7 @@ import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { expect } from "bun:test"
 import { Effect } from "effect"
 import { Agent } from "../../src/agent/agent"
-import { deriveSubagentSessionPermission } from "../../src/agent/subagent-permissions"
+import { deriveSubagentSessionPermission, readonlySubagentRules } from "../../src/agent/subagent-permissions"
 import { Permission } from "../../src/permission"
 import { testEffect } from "../lib/effect"
 
@@ -156,5 +156,40 @@ it.effect("subagent inherits parent session deny rules as hard runtime ceilings"
     )
 
     expect(Permission.evaluate("bash", "git status", effective).action).toBe("deny")
+  }),
+)
+
+// F29: the read-only rules go after everything a turn already has (session/prompt.ts), so a parent
+// command's `bash: allow` loses, read tools keep their earlier decision, and unknown tools are denied.
+it.effect("a read-only subagent turn denies everything but read tools and never upgrades them", () =>
+  Effect.sync(() => {
+    const general = testAgent({ name: "general", mode: "subagent", permission: { "*": "allow" } })
+    const turn = Permission.merge(
+      deriveSubagentSessionPermission({ parentSessionPermission: [], subagent: general }),
+      Permission.fromConfig({ bash: "allow", edit: "allow", read: { "*": "allow", "*.env": "deny" } }),
+    )
+    const effective = Permission.merge(
+      general.permission,
+      turn,
+      readonlySubagentRules([...general.permission, ...turn]),
+    )
+    const action = (permission: string, pattern = "*") => Permission.evaluate(permission, pattern, effective).action
+
+    expect(action("bash", "git status")).toBe("deny")
+    expect(action("edit", "a.ts")).toBe("deny")
+    expect(action("task", "general")).toBe("deny")
+    expect(action("my_mcp_tool")).toBe("deny")
+    // Claude Code built-ins without an oc mapping ask under their own name (session/claudeToolGuard.ts).
+    expect(action("Agent")).toBe("deny")
+    expect(action("read", "src/a.ts")).toBe("allow")
+    expect(action("read", "secrets.env")).toBe("deny")
+    expect(action("read", "mcp:server:file")).toBe("deny")
+    expect(action("grep", "TODO")).toBe("allow")
+    expect(action("webfetch", "https://example.com")).toBe("allow")
+    expect(Permission.disabled(["bash", "edit", "read", "grep", "task"], effective)).toEqual(
+      new Set(["bash", "edit", "task"]),
+    )
+    // No earlier rule for a read tool: it asks, as it would without the read-only rules.
+    expect(Permission.evaluate("glob", "*", readonlySubagentRules([])).action).toBe("ask")
   }),
 )

@@ -7,7 +7,12 @@ import { Session } from "@/session/session"
 import { SessionID, MessageID } from "../session/schema"
 import { MessageV2 } from "../session/message-v2"
 import { Agent } from "../agent/agent"
-import { deriveSubagentSessionPermission } from "../agent/subagent-permissions"
+import {
+  deriveSubagentSessionPermission,
+  isReadonlySubagent,
+  READONLY_MARKER_RULE,
+  takeReadonlySubagentCall,
+} from "../agent/subagent-permissions"
 import { SubagentRef } from "../agent/subagentRef"
 import type { SessionPrompt } from "../session/prompt"
 import { Config } from "@/config/config"
@@ -196,6 +201,7 @@ export const TaskTool = Tool.define(
     ) {
       const cfg = yield* config.get()
       const runInBackground = params.background === true
+      const cursorReadonly = takeReadonlySubagentCall(ctx.callID)
 
       const parent = yield* sessions.get(ctx.sessionID)
       let current = parent
@@ -228,6 +234,8 @@ export const TaskTool = Tool.define(
           ),
         )
       }
+      // Read-only comes from Cursor's call mark or the agent entry's `readonly`, never a tool argument.
+      const readonlyRequested = cursorReadonly || next.readonly === true
       if (!params.subagent_type && next.mode === "primary") {
         return yield* Effect.fail(new Error(`Configured default_subagent "${subagentType}" is a primary agent`))
       }
@@ -284,6 +292,13 @@ export const TaskTool = Tool.define(
       if (session && (session.parentID !== ctx.sessionID || session.agent !== next.name)) {
         return yield* Effect.fail(new Error(`task_id ${session.id} is not a ${next.name} subagent of this chat`))
       }
+      if (session && readonlyRequested && !isReadonlySubagent(session.permission)) {
+        return yield* Effect.fail(
+          new Error(
+            `task_id ${session.id} is a writable subagent and cannot be resumed read-only; start a new read-only task instead`,
+          ),
+        )
+      }
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -301,22 +316,24 @@ export const TaskTool = Tool.define(
           action: "deny" as const,
         })) ?? []),
       ]
+      const createPermission = [
+        ...childPermission,
+        ...childToolDenies.filter(
+          (deny) =>
+            !childPermission.some(
+              (rule) =>
+                rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
+            ),
+        ),
+      ]
       const nextSession =
         session ??
         (yield* sessions.create({
           parentID: ctx.sessionID,
           title: params.description + ` (@${level ? `${next.name}:${level}` : next.name} subagent)`,
           agent: next.name,
-          permission: [
-            ...childPermission,
-            ...childToolDenies.filter(
-              (deny) =>
-                !childPermission.some(
-                  (rule) =>
-                    rule.permission === deny.permission && rule.pattern === deny.pattern && rule.action === deny.action,
-                ),
-            ),
-          ],
+          // Read-only is enforced per turn by session/prompt.ts, after the parent's turn rules.
+          permission: readonlyRequested ? [...createPermission, READONLY_MARKER_RULE] : createPermission,
         }))
 
       const msg = yield* MessageV2.get({ sessionID: ctx.sessionID, messageID: ctx.messageID }).pipe(

@@ -31,6 +31,10 @@ const AgentSchema = Schema.StructWithRest(
     hidden: Schema.optional(Schema.Boolean).annotate({
       description: "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
     }),
+    readonly: Schema.optional(Schema.Boolean).annotate({
+      description:
+        "Run this subagent read-only: only read, search, list, web search, and web fetch; shell, edits, subagents, MCP, and other tools are denied",
+    }),
     options: Schema.optional(Schema.Record(Schema.String, Schema.Any)),
     color: Schema.optional(Color).annotate({
       description: "Hex color code (e.g., #FF5733) or theme color (e.g., primary)",
@@ -63,6 +67,7 @@ const KNOWN_KEYS = new Set([
   "top_p",
   "mode",
   "hidden",
+  "readonly",
   "color",
   "steps",
   "maxSteps",

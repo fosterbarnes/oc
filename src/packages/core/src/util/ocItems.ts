@@ -2,7 +2,8 @@
 // collected as portable units with ids that match across machines. Export/import (`ocPack.ts`) and
 // tailnet sync (`ocSync.ts`) share this model. The wire form (`toWire`) is the same on every
 // machine: home folder replaced by HOME_TOKEN, secrets redacted. Plan: docs/dev/syncPlan.md.
-import { existsSync } from "node:fs"
+import { dlopen, FFIType, ptr } from "bun:ffi"
+import { existsSync, type Stats } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { applyEdits, modify, parse, type ParseError } from "jsonc-parser"
@@ -110,6 +111,19 @@ const _SCRIPT_FILE = /\.(ps1|sh|bash|zsh|py|js|mjs|cjs|ts|exe|bat|cmd)$/i
 const _WINDOWS_FILE = /\.(ps1|psm1|bat|cmd|exe)$/i
 const _POSIX_FILE = /\.(sh|bash|zsh)$/i
 const _WINDOWS_PATH = /\b[a-z]:[\\/]|\.(exe|ps1|cmd|bat)\b/i
+// Held entries: links, shortcuts, and cloud placeholders are never read, followed, synced, or exported.
+const _SHORTCUT = /\.(lnk|pif|url|website|appref-ms|library-ms|scf|webloc|inetloc|fileloc|desktop)$/i
+const _ICLOUD_STUB = /^\..+\.icloud$/
+// A Finder alias (often no extension) starts with this bookmark header.
+const _ALIAS = Buffer.from("book\0\0\0\0mark", "latin1")
+// Windows file attributes: REPARSE_POINT, and OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS
+// (OneDrive and other cloud placeholders). GetFileAttributesW reads them without a download.
+const _REPARSE = 0x400
+const _PLACEHOLDER = 0x1000 | 0x40000 | 0x400000
+const _NO_ATTRIBUTES = 0xffffffff
+// macOS st_flags SF_DATALESS: an iCloud or File Provider file whose data is not on disk.
+const _SF_DATALESS = 0x40000000
+const _FILE_CATEGORIES: Category[] = ["skill", "instruction", ...new Set(_FILE_DIRS.map((entry) => entry[1]))]
 
 export function rootDir(root: Root) {
   return root === "config" ? Global.Path.config : path.join(Global.Path.home, ".opencode")
@@ -123,15 +137,18 @@ const _cache = new Map<string, { mtimeMs: number; size: number; data: Buffer }>(
 // `unread`: sources that could not be read this time (missing root, broken jsonc). Sync must not
 // treat their items as deleted. `partial`: `category:root` id prefixes where a folder or entry could
 // not be read (permissions, dangling link), so items under them may be missing without being
-// deleted. `mtimes`: newest file time per item id.
+// deleted. `held`: item ids (or prefixes, see `isHeld`) behind a link, shortcut, or cloud placeholder,
+// with the reason: never collected, and sync keeps their state without a tombstone. `mtimes`: newest
+// file time per item id.
 export async function collect() {
   const skipped: string[] = []
   const unread = new Set<Source>()
   const partial = new Set<string>()
+  const held = new Map<string, string>()
   const found = [
-    ...(await collectRoot("config", skipped, unread, partial)),
-    ...(await collectRoot("legacy", skipped, unread, partial)),
-    ...(await collectKeys(unread)),
+    ...(await collectRoot("config", skipped, unread, partial, held)),
+    ...(await collectRoot("legacy", skipped, unread, partial, held)),
+    ...(await collectKeys(unread, held)),
   ]
   return {
     items: found.map((entry) => entry.item),
@@ -139,27 +156,47 @@ export async function collect() {
     skipped,
     unread,
     partial,
+    held,
   }
+}
+
+// A held key covers its exact id, ids below it (`/`), and, when it ends in `:`, every id it prefixes.
+export function isHeld(id: string, held: ReadonlyMap<string, string>) {
+  return [...held.keys()].some(
+    (key) => id === key || id.startsWith(`${key}/`) || (key.endsWith(":") && id.startsWith(key)),
+  )
 }
 
 type Found = { item: Item; mtime: number }
 type Unreadable = (rel: string, error: NodeJS.ErrnoException) => void
+// `hold`: maps a held entry (path relative to the root) to the item id it keeps out.
+type Report = { unreadable: Unreadable; hold: (rel: string, reason: string) => void }
 
 // Paths already reported as unreadable, so a 20 s sync loop logs each once.
 const _warned = new Set<string>()
 // readdir codes that mean the folder is not there: it holds no items, so deleting `commands/` syncs.
 const _GONE = new Set(["ENOENT", "ENOTDIR"])
 
-async function collectRoot(root: Root, skipped: string[], unread: Set<Source>, partial: Set<string>): Promise<Found[]> {
+async function collectRoot(
+  root: Root,
+  skipped: string[],
+  unread: Set<Source>,
+  partial: Set<string>,
+  held: Map<string, string>,
+): Promise<Found[]> {
   const base = rootDir(root)
-  const names = await fs.readdir(base, { withFileTypes: true }).catch(() => undefined)
+  const rootHeld = await heldPath(base)
+  if (rootHeld) {
+    for (const category of _FILE_CATEGORIES) held.set(`${category}:${root}:`, rootHeld)
+    return []
+  }
+  const names = await fs.readdir(base).catch(() => undefined)
   if (!names) {
     unread.add(root)
     return []
   }
-  const unreadable =
-    (category: Category): Unreadable =>
-    (rel, error) => {
+  const report = (category: Category, id = (rel: string) => filesId(category, root, rel)): Report => ({
+    unreadable: (rel, error) => {
       partial.add(`${category}:${root}`)
       const file = path.join(base, rel)
       if (_warned.has(file)) return
@@ -167,38 +204,61 @@ async function collectRoot(root: Root, skipped: string[], unread: Set<Source>, p
       console.warn(
         `oc items: cannot read ${file} (${error.code ?? error.message}); keeping its ${category} items as they were`,
       )
-    }
-  const skills = await collectSkills(root, base, "skills", skipped, unreadable("skill"))
+    },
+    hold: (rel, reason) => held.set(id(rel), reason),
+  })
+  // `skills` itself maps to `skill:<root>:`, a prefix over every skill.
+  const skills = await collectSkills(
+    root,
+    base,
+    "skills",
+    skipped,
+    report("skill", (rel) => filesId("skill", root, rel.slice("skills/".length))),
+  )
   const files = await Promise.all(
     _FILE_DIRS.map(async ([dir, category]) => {
-      const paths = await walk(base, dir, skipped, unreadable(category))
+      const paths = await walk(base, dir, skipped, report(category))
       return Promise.all(
         paths
           .filter((file) => category !== "theme" || file.endsWith(".json"))
           .filter((file) => !["command", "agent"].includes(category) || file.endsWith(".md"))
-          .map((file) => filesItem(root, base, category, file, [file], category === "code", unreadable(category))),
+          .map((file) => filesItem(root, base, category, file, [file], category === "code", report(category))),
       )
     }),
   )
   const instructions = await Promise.all(
     names
-      .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
-      .map((entry) => filesItem(root, base, "instruction", entry.name, [entry.name], false, unreadable("instruction"))),
+      .filter((name) => name.endsWith(".md"))
+      .map(async (name) =>
+        (await classify(base, name, report("instruction")))?.isFile()
+          ? filesItem(root, base, "instruction", name, [name], false, report("instruction"))
+          : undefined,
+      ),
   )
   return [...skills, ...[...files.flat(), ...instructions].filter((item): item is Found => item !== undefined)]
 }
 
-// One item per folder holding SKILL.md, with every file under it.
+// One item per folder holding SKILL.md, with every file under it. Any held file holds the whole skill.
 async function collectSkills(
   root: Root,
   base: string,
   dir: string,
   skipped: string[],
-  unreadable: Unreadable,
+  report: Report,
 ): Promise<Found[]> {
-  const names = await listNames(base, dir, unreadable)
-  if (names.includes("SKILL.md")) {
-    const files = await walk(base, dir, skipped, unreadable)
+  if (dir === "skills" && !(await classify(base, dir, report))?.isDirectory()) return []
+  const names = await listNames(base, dir, report.unreadable)
+  if (names.includes("SKILL.md") || names.includes(".SKILL.md.icloud")) {
+    const holds: string[] = []
+    const skill: Report = {
+      unreadable: report.unreadable,
+      hold: (rel, reason) => {
+        holds.push(rel)
+        report.hold(dir, reason)
+      },
+    }
+    const files = await walk(base, dir, skipped, skill)
+    if (holds.length) return []
     const item = await filesItem(
       root,
       base,
@@ -206,7 +266,7 @@ async function collectSkills(
       dir.slice("skills/".length),
       files,
       files.some((f) => _SCRIPT_FILE.test(f)),
-      unreadable,
+      skill,
     )
     return item ? [item] : []
   }
@@ -214,30 +274,26 @@ async function collectSkills(
     names
       .filter((name) => !_SKIP_NAME.test(name))
       .map(async (name) => {
-        const stat = await statEntry(base, `${dir}/${name}`, unreadable)
-        return stat?.isDirectory() ? collectSkills(root, base, `${dir}/${name}`, skipped, unreadable) : []
+        const stat = await classify(base, `${dir}/${name}`, report)
+        return stat?.isDirectory() ? collectSkills(root, base, `${dir}/${name}`, skipped, report) : []
       }),
   )
   return children.flat()
 }
 
-// Every file under `base/dir` (symlinks followed), as forward-slash paths relative to `base`.
-async function walk(
-  base: string,
-  dir: string,
-  skipped: string[],
-  unreadable: Unreadable,
-  depth = 0,
-): Promise<string[]> {
+// Every plain file under `base/dir`, as forward-slash paths relative to `base`. Held entries are
+// reported, never followed.
+async function walk(base: string, dir: string, skipped: string[], report: Report, depth = 0): Promise<string[]> {
   if (depth > 8) return []
-  const names = await listNames(base, dir, unreadable)
+  if (depth === 0 && !(await classify(base, dir, report))?.isDirectory()) return []
+  const names = await listNames(base, dir, report.unreadable)
   const nested = await Promise.all(
     names
       .filter((name) => !_SKIP_NAME.test(name))
       .map(async (name) => {
         const rel = `${dir}/${name}`
-        const stat = await statEntry(base, rel, unreadable)
-        if (stat?.isDirectory()) return walk(base, rel, skipped, unreadable, depth + 1)
+        const stat = await classify(base, rel, report)
+        if (stat?.isDirectory()) return walk(base, rel, skipped, report, depth + 1)
         if (!stat?.isFile()) return []
         if (stat.size > _MAX_FILE) {
           skipped.push(rel)
@@ -257,18 +313,72 @@ function listNames(base: string, dir: string, unreadable: Unreadable) {
   })
 }
 
-// undefined when the entry cannot be followed. Only a missing entry (lstat ENOENT) is a deletion; a
-// dangling link, EACCES, or ELOOP is unreadable.
-function statEntry(base: string, rel: string, unreadable: Unreadable) {
+// The entry's own lstat when it is a plain local file or folder, checked before anything reads or
+// lists it. A held entry is reported; a missing one is a deletion; any other error is unreadable.
+async function classify(base: string, rel: string, report: Report): Promise<Stats | undefined> {
   const full = path.join(base, rel)
-  return fs.stat(full).catch(async (error: NodeJS.ErrnoException) => {
-    const gone = await fs.lstat(full).then(
-      () => false,
-      (inner: NodeJS.ErrnoException) => inner.code === "ENOENT",
-    )
-    if (!gone) unreadable(rel, error)
+  const stat = await fs.lstat(full).catch((error: NodeJS.ErrnoException) => {
+    if (!_GONE.has(error.code ?? "")) report.unreadable(rel, error)
     return undefined
   })
+  if (!stat) return undefined
+  const reason = heldReason(full, stat)
+  if (!reason) return stat
+  // An iCloud stub `.name.icloud` stands for `name`: hold that item, or sync would tombstone it.
+  report.hold(rel.replace(/(^|\/)\.([^/]+)\.icloud$/, "$1$2"), reason)
+  return undefined
+}
+
+// The reason for the first held folder from the home folder down to `full` (all of `full` when it
+// is outside home). A missing segment is not held: the caller sees it as missing.
+async function heldPath(full: string) {
+  const home = Global.Path.home
+  const parts = inside(home, full) ? path.relative(home, full).split(path.sep) : []
+  const chain = parts.length ? parts.map((_, index) => path.join(home, ...parts.slice(0, index + 1))) : [full]
+  for (const entry of chain) {
+    const stat = await fs.lstat(entry).catch(() => undefined)
+    if (!stat) return undefined
+    const reason = heldReason(entry, stat)
+    if (reason) return reason
+  }
+  return undefined
+}
+
+// Why sync and export must not read an entry, or undefined for a plain local file or folder. Reads
+// metadata only, so a cloud placeholder is never downloaded.
+function heldReason(full: string, stat: Stats) {
+  if (stat.isSymbolicLink()) return "link"
+  if (!stat.isFile() && !stat.isDirectory()) return "not a file or folder"
+  const attributes = windowsAttributes(full)
+  if (attributes === _NO_ATTRIBUTES) return "attributes unreadable"
+  if (attributes & _REPARSE) return "link"
+  if (attributes & _PLACEHOLDER) return "cloud placeholder"
+  if (stat.isDirectory()) return undefined
+  const name = path.basename(full)
+  if (_SHORTCUT.test(name)) return "shortcut"
+  if (_ICLOUD_STUB.test(name) || (stat.blocks === 0 && stat.size > 0 && dataless(full))) return "cloud placeholder"
+  return undefined
+}
+
+const openKernel32 = () =>
+  dlopen("kernel32.dll", { GetFileAttributesW: { args: [FFIType.ptr], returns: FFIType.u32 } }).symbols
+let _kernel32: ReturnType<typeof openKernel32> | undefined
+
+// 0 off Windows. `\\?\` lifts the 260-character limit on drive paths.
+function windowsAttributes(full: string) {
+  if (process.platform !== "win32") return 0
+  const resolved = path.resolve(full)
+  const wide = Buffer.from(`${/^[a-z]:\\/i.test(resolved) ? "\\\\?\\" : ""}${resolved}\0`, "utf16le")
+  return (_kernel32 ??= openKernel32()).GetFileAttributesW(ptr(wide))
+}
+
+// macOS only: a file with no blocks but a size may be dataless. `stat -f %Xf` prints st_flags
+// without opening the file; a failed check holds the file.
+function dataless(full: string) {
+  if (process.platform !== "darwin") return false
+  const result = Bun.spawnSync(["/usr/bin/stat", "-f", "%Xf", full], { stdout: "pipe", stderr: "ignore" })
+  if (result.exitCode !== 0) return true
+  return (Number.parseInt(result.stdout.toString().trim(), 16) & _SF_DATALESS) !== 0
 }
 
 async function filesItem(
@@ -278,12 +388,12 @@ async function filesItem(
   label: string,
   paths: string[],
   code: boolean,
-  unreadable: Unreadable,
+  report: Report,
 ): Promise<Found | undefined> {
   const read = await Promise.all(
     paths.map((rel) =>
       readCached(path.join(base, rel)).catch((error: NodeJS.ErrnoException) => {
-        unreadable(rel, error)
+        report.unreadable(rel, error)
         return undefined
       }),
     ),
@@ -292,6 +402,11 @@ async function filesItem(
   // state), because an item missing one file would sync as an edit that removes it.
   const complete = read.filter((entry) => entry !== undefined)
   if (complete.length !== paths.length) return undefined
+  const alias = paths.find((_, index) => complete[index].data.subarray(0, _ALIAS.length).equals(_ALIAS))
+  if (alias) {
+    report.hold(alias, "Finder alias")
+    return undefined
+  }
   const files = paths.map((rel, index) => {
     const data = complete[index].data
     return data.includes(0)
@@ -314,8 +429,8 @@ async function readCached(file: string) {
   return entry
 }
 
-async function collectKeys(unread: Set<Source>): Promise<Found[]> {
-  const files = await Promise.all((["opencode", "tui", "oc"] as const).map(readKeyFile))
+async function collectKeys(unread: Set<Source>, held: Map<string, string>): Promise<Found[]> {
+  const files = await Promise.all((["opencode", "tui", "oc"] as const).map((file) => readKeyFile(file, held)))
   return files.flatMap((read, index) => {
     const file = (["opencode", "tui", "oc"] as const)[index]
     if (!read) {
@@ -386,9 +501,16 @@ export function keyFilePath(file: KeyFile) {
 }
 
 // undefined when the file exists but cannot be read or parsed (a half-saved edit must not look
-// like every key was deleted). A missing file is an empty one.
-async function readKeyFile(file: KeyFile) {
+// like every key was deleted). A missing file is an empty one. A held file (or config folder) holds
+// every key in it.
+async function readKeyFile(file: KeyFile, held: Map<string, string>) {
   const target = keyFilePath(file)
+  const stub = path.join(path.dirname(target), `.${path.basename(target)}.icloud`)
+  const reason = existsSync(stub) ? "cloud placeholder" : await heldPath(target)
+  if (reason) {
+    held.set(`${file}:`, reason)
+    return undefined
+  }
   const stat = await fs.stat(target).catch(() => undefined)
   if (!stat) return { value: {} as Record<string, unknown>, mtime: 0 }
   const read = await readCached(target).catch(() => undefined)

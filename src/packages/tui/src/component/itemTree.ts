@@ -20,6 +20,19 @@ export function treeOptions(
   }))
 }
 
+// Links, shortcuts, and cloud placeholders `OcItems.collect` keeps out, as plain rows.
+export function heldOptions(held: ReadonlyMap<string, string> | undefined, category: string) {
+  return [...(held ?? [])].map(
+    ([id, reason]): DialogSelectOption<string> => ({
+      title: id,
+      value: "",
+      inert: true,
+      category,
+      description: reason,
+    }),
+  )
+}
+
 export function pickedState(node: OcItems.TreeNode, picked: ReadonlySet<string>): TreeState {
   const count = node.ids.filter((id) => picked.has(id)).length
   if (count === 0) return "off"

@@ -44,6 +44,16 @@ export function handleToolGuardLine(ap: ActiveProcess, line: string) {
   return true
 }
 
+// Checks waiting on oc. `stopToolGuardChecks` aborts them all (global dispose), so each answers with a
+// denial instead of waiting on a disposed instance's permission prompt.
+const _checks = new Set<AbortController>()
+
+/** Drops every stored guard and denies the checks in flight. Later callbacks deny until a step sets one. */
+export function stopToolGuardChecks() {
+  claudeToolGuards.clear()
+  for (const check of _checks) check.abort()
+}
+
 async function answer(ap: ActiveProcess, requestID: string, request: GuardRequest) {
   const guard = ap.opencodeSessionID ? claudeToolGuards.get(ap.opencodeSessionID) : undefined
   const tool = request.input?.tool_name
@@ -51,6 +61,9 @@ async function answer(ap: ActiveProcess, requestID: string, request: GuardReques
   const abort = new AbortController()
   const stop = () => abort.abort()
   ap.proc.once("exit", stop)
+  // A callback read after the child exited would never see the exit event.
+  if (ap.proc.exitCode !== null || ap.proc.signalCode !== null) abort.abort()
+  _checks.add(abort)
   ap.guardPending = (ap.guardPending ?? 0) + 1
   const denial =
     request.callback_id !== CALLBACK_ID || !guard || !tool || !callID
@@ -60,6 +73,7 @@ async function answer(ap: ActiveProcess, requestID: string, request: GuardReques
           return "oc could not check this tool call, so it was blocked."
         })
   ap.guardPending -= 1
+  _checks.delete(abort)
   ap.proc.off("exit", stop)
   writeControlResponse(
     ap.proc,

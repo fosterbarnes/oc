@@ -175,9 +175,57 @@ describe("collect and apply on disk", () => {
     expect(collected.items.map((item) => item.id)).toContain("command:config:commands/top.md")
   })
 
-  test.skipIf(process.platform === "win32")("a dangling link marks its category partial", async () => {
+  // F4 changed this on purpose: a link is held (never followed), no longer a partial category.
+  test.skipIf(process.platform === "win32")("a dangling link is held, not partial", async () => {
     await fs.symlink(path.join(root, "missing.md"), path.join(commands(), "link.md"))
-    expect((await OcItems.collect()).partial.has("command:config")).toBe(true)
+    const collected = await OcItems.collect()
+    expect(collected.held.get("command:config:commands/link.md")).toBe("link")
+    expect(collected.partial.size).toBe(0)
+  })
+
+  // F4: nothing behind a link, shortcut, or Finder alias is read; a held file holds its whole skill.
+  test("links, linked folders, shortcuts, and aliases are held, not collected", async () => {
+    const config = Global.Path.config
+    const outside = path.join(root, "outside")
+    await fs.mkdir(outside)
+    await fs.writeFile(path.join(outside, "secret.md"), "private")
+    await fs.symlink(outside, path.join(commands(), "linked"), "junction")
+    await fs.mkdir(path.join(config, "prompts"))
+    await fs.writeFile(path.join(config, "prompts", "site.url"), "[InternetShortcut]")
+    await fs.writeFile(path.join(config, "prompts", "alias"), Buffer.from("book\0\0\0\0mark\0\0", "latin1"))
+    await fs.writeFile(path.join(config, "prompts", "bookmarks.md"), "book notes")
+    await fs.mkdir(path.join(config, "skills", "mixed"), { recursive: true })
+    await fs.writeFile(path.join(config, "skills", "mixed", "SKILL.md"), "skill")
+    await fs.symlink(outside, path.join(config, "skills", "mixed", "refs"), "junction")
+    // iCloud stubs stand for the evicted file, so the real item is held.
+    await fs.writeFile(path.join(config, "prompts", ".evicted.md.icloud"), "stub")
+    await fs.mkdir(path.join(config, "skills", "cloud"))
+    await fs.writeFile(path.join(config, "skills", "cloud", ".SKILL.md.icloud"), "stub")
+    const collected = await OcItems.collect()
+    const ids = collected.items.map((item) => item.id)
+    expect(ids).toContain("command:config:commands/top.md")
+    expect(ids).toContain("prompt:config:prompts/bookmarks.md")
+    expect(ids.filter((id) => /secret|site|alias|mixed/.test(id))).toEqual([])
+    expect(Object.fromEntries(collected.held)).toEqual({
+      "command:config:commands/linked": "link",
+      "prompt:config:prompts/site.url": "shortcut",
+      "prompt:config:prompts/alias": "Finder alias",
+      "skill:config:mixed": "link",
+      "prompt:config:prompts/evicted.md": "cloud placeholder",
+      "skill:config:cloud": "cloud placeholder",
+    })
+    expect(OcItems.isHeld("command:config:commands/linked/secret.md", collected.held)).toBe(true)
+    expect(OcItems.isHeld("command:config:commands/linkedX.md", collected.held)).toBe(false)
+  })
+
+  test("a linked top folder holds its whole category", async () => {
+    const outside = path.join(root, "outside")
+    await fs.mkdir(path.join(outside, "a"), { recursive: true })
+    await fs.writeFile(path.join(outside, "a", "SKILL.md"), "skill")
+    await fs.symlink(outside, path.join(Global.Path.config, "skills"), "junction")
+    const collected = await OcItems.collect()
+    expect(collected.items.some((item) => item.category === "skill")).toBe(false)
+    expect(OcItems.isHeld("skill:config:a", collected.held)).toBe(true)
   })
 
   test("a removed folder is gone, not partial", async () => {

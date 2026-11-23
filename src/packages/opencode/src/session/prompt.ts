@@ -16,7 +16,7 @@ import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
 import { Agent } from "../agent/agent"
-import { disabledSubagentRules } from "../agent/subagent-permissions"
+import { disabledSubagentRules, isReadonlySubagent, readonlySubagentRules } from "../agent/subagent-permissions"
 import { SubagentRef } from "../agent/subagentRef"
 import { Provider } from "@/provider/provider"
 
@@ -1680,7 +1680,7 @@ const layer = Layer.effect(
 
             // Command rules stay on this user message; legacy boolean tools still work. Session subagent
             // toggles skip turns where the user named an agent, so an explicit @agent still runs.
-            const turnPermission = Permission.merge(
+            const merged = Permission.merge(
               session.permission ?? [],
               bypassAgentCheck ? [] : disabledSubagentRules(session.metadata),
               Object.entries(lastUser.tools ?? {}).map(([tool, enabled]) => ({
@@ -1690,6 +1690,10 @@ const layer = Layer.effect(
               })),
               lastUser.permission ?? [],
             )
+            // A read-only subagent's rules go last, after any parent command rules such as `bash: allow`.
+            const turnPermission = isReadonlySubagent(session.permission)
+              ? [...merged, ...readonlySubagentRules([...agent.permission, ...merged])]
+              : merged
             const tools = yield* SessionTools.resolve({
               agent,
               session: { ...session, permission: turnPermission },

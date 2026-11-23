@@ -272,44 +272,31 @@ function ensureShellEnvWrap(toolCallId: string, policy: CursorShellPolicy): Curs
 }
 
 /**
- * Prepare OpenCode Bash args before execution when Cursor requested wrapping.
+ * Prepare OpenCode Bash args for a background/soft-timeout Cursor shell. bash/zsh source the
+ * shell.env injector, so the original command stays in OpenCode's permission and UI state
+ * (background_shell_spawn may hold the inline fallback; the original command replaces it).
  *
- * bash/zsh source the shell.env injector, so the original command remains in
- * OpenCode's permission/UI state. sh/dash ignore those startup variables; for
- * them, use a short `exec wrapper.sh` command that contains no user payload.
- *
- * background_shell_spawn may already contain the inline non-plugin fallback.
- * The classic hook replaces it with the original command (bash/zsh) or the
- * shorter wrapper-file command (sh/dash), avoiding duplicate execution.
+ * Every other shell (Windows, sh, dash, others) ignores those startup variables and is never
+ * rewritten, so permission checks always see the real command: Cursor marks every timed shell call
+ * soft-timeout, so those run in the foreground and stop at Cursor's window (reported as a
+ * timeout); real background requests (spawn, or a zero window) return a refusal the caller
+ * surfaces as the tool error. Returns undefined when the args were prepared or had no policy.
  */
-/**
- * Rewrite the emitted bash args for a background/soft-timeout Cursor shell.
- * Returns a refusal reason instead of touching `args` when the wrapper cannot
- * be built; the caller surfaces it as the tool error. Returns undefined when
- * the args were prepared (or there was no policy).
- */
-export function prepareCursorShellArgs(
-  toolCallId: string,
-  args: Record<string, unknown>,
-  options: { preferWrapperCommand?: boolean } = {},
-): string | undefined {
+export function prepareCursorShellArgs(toolCallId: string, args: Record<string, unknown>): string | undefined {
   const policy = policies.get(toolCallId)
   if (!policy) return
   if (!policy.backgroundSpawn && policy.timeoutBehavior !== CURSOR_TIMEOUT_BACKGROUND) return
 
-  if (process.platform === "win32") {
-    // Native Windows PowerShell/cmd wrapping is unsupported. Cursor marks every
-    // timed shell call as soft-timeout, so run those in the foreground and kill
-    // at Cursor's window (reported as a timeout) instead of handing off. Real
-    // background requests (spawn, or a zero window) still fail closed.
+  const shellKind = resolveCursorShellKind()
+  if (process.platform === "win32" || (shellKind !== "bash" && shellKind !== "zsh")) {
     if (!policy.backgroundSpawn && policy.timeoutMs > 0) {
       args.timeout = policy.timeoutMs
       return
     }
     return (
       `Cursor ${policy.backgroundSpawn ? "background" : "soft-timeout (background-on-timeout)"} shell ` +
-      `execution is not supported on Windows through OpenCode. Ask for a foreground command instead; ` +
-      `do not retry it as a background shell.`
+      `execution is not supported ${process.platform === "win32" ? "on Windows" : `with the ${shellKind} shell`} ` +
+      `through OpenCode. Ask for a foreground command instead; do not retry it as a background shell.`
     )
   }
 
@@ -319,21 +306,7 @@ export function prepareCursorShellArgs(
     // timeout is only an outer safety net and must not win the race.
     args.timeout = Math.max(OPENCODE_TIMEOUT_GRACE_MS, policy.timeoutMs + OPENCODE_TIMEOUT_GRACE_MS)
   }
-
-  const shellKind = resolveCursorShellKind()
-  // OpenCode 2.0 has no `shell.env` hook, so bash/zsh cannot be wrapped by
-  // sourcing an injector. Callers there opt into the wrapper-file command  -
-  // the same mechanism sh/dash already use - which needs no env injection.
-  const envInjectable = !options.preferWrapperCommand && (shellKind === "bash" || shellKind === "zsh")
-  if (envInjectable) {
-    // bash/zsh source the shell.env injector, so the original command remains
-    // in OpenCode's permission/UI state.
-    args.command = policy.command
-    return
-  }
-
-  const wrap = ensureShellEnvWrap(toolCallId, policy)
-  if (wrap) args.command = `exec /bin/sh ${shellQuote(wrap.wrapperPath)}`
+  args.command = policy.command
 }
 
 /** Restore the model-facing command in OpenCode's completed tool title. */
@@ -350,10 +323,7 @@ export function releaseCursorShellEnv(toolCallId: string): void {
   active.cleanup()
 }
 
-/**
- * Env vars for OpenCode's shell.env hook. bash/zsh execute the injector; the
- * same materialized wrapper backs the direct-command sh/dash fallback.
- */
+/** Env vars for OpenCode's shell.env hook: bash/zsh execute the injector, which runs the wrapper. */
 export function cursorShellEnvForCall(toolCallId: string | undefined): Record<string, string> | undefined {
   if (typeof toolCallId !== "string" || !toolCallId || !pendingEnvWraps.has(toolCallId)) return undefined
   const policy = policies.get(toolCallId)

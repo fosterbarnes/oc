@@ -190,7 +190,11 @@ export function parseExecServerMessage(msg: Record<string, unknown>): ParsedExec
       toolName: "task",
       args,
       resultField,
-      resultMetadata: cursorSubagentType ? { cursor_subagent_type: cursorSubagentType } : undefined,
+      // `readonly` never becomes a tool argument; pump.ts marks the emitted call instead.
+      resultMetadata: {
+        ...(cursorSubagentType ? { cursor_subagent_type: cursorSubagentType } : {}),
+        ...(raw.readonly === true ? { readonly: true } : {}),
+      },
       localError:
         prompt && cursorSubagentType
           ? undefined
