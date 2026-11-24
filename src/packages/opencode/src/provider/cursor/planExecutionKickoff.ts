@@ -112,6 +112,14 @@ export function queuePlanExecutionKickoff(input: PlanExecutionKickoffInput): boo
   return true
 }
 
+/** Move a kickoff pinned to `from` onto the Run that recovery replaced it with. */
+export function repinPlanExecutionKickoff(sessionID: string | undefined, from: string, to: string): void {
+  const state = pending.get(sessionID?.trim() ?? "")
+  if (state?.cursorSessionID !== from) return
+  state.cursorSessionID = to
+  trace(`planExecutionKickoff: repinned sessionID=${state.sessionID} from=${from} to=${to}`)
+}
+
 /**
  * Run one pending kickoff only after the owning Cursor Run reached a terminal,
  * idle state. Returns true only after successful host handoff.

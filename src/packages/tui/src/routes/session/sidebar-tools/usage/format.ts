@@ -7,9 +7,10 @@ export function formatUsagePercent(used: number | null | undefined, remaining = 
   return `${compact ? Math.round(value) : Number(value.toFixed(value < 10 ? 2 : value < 100 ? 1 : 0))}%`
 }
 
-/** Sidebar tag for a window of this length: `5h`, `1d`, `wk`, `mo`, `Nd`; `fallback` when the length is unknown. */
+/** Sidebar tag for a window of this length: `20m`, `5h`, `1d`, `wk`, `mo`, `Nd`; `fallback` when unknown. */
 export function windowTag(minutes: number | null | undefined, fallback: string): string {
   if (!minutes || minutes <= 0) return fallback
+  if (minutes < 60) return `${Math.max(1, Math.round(minutes))}m`
   const days = minutes / 1440
   if (days < 1) return `${Math.round(minutes / 60)}h`
   if (days === 7) return "wk"

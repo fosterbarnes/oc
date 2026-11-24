@@ -16,7 +16,10 @@ export function smoothText(text: Accessor<string>, done: Accessor<boolean>, enab
   const tick = () => {
     const backlog = text().length - shown()
     if (backlog <= 0) return stop()
-    setShown(shown() + Math.max(1, Math.ceil(backlog / 4)))
+    const next = shown() + Math.max(1, Math.ceil(backlog / 4))
+    // Never cut between a surrogate pair (emoji), which would show a lone half for a tick.
+    const code = text().charCodeAt(next - 1)
+    setShown(code >= 0xd800 && code <= 0xdbff ? next + 1 : next)
   }
   createEffect(() => {
     const length = text().length

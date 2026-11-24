@@ -18,15 +18,10 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-function parseAgentMarkdown(
-  raw: string,
-  fallbackName: string,
-): {
-  name: string
+function parseAgentMarkdown(raw: string): {
   description: string
   prompt: string
 } {
-  let name = fallbackName
   let description = ""
   let body = raw
   if (raw.startsWith("---")) {
@@ -41,12 +36,24 @@ function parseAgentMarkdown(
         const quoted =
           (trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
         const val = quoted ? trimmed.slice(1, -1) : trimmed
-        if (m[1] === "name") name = val
         if (m[1] === "description") description = val
       }
     }
   }
-  return { name, description, prompt: body.slice(0, 20_000) }
+  return { description, prompt: body.slice(0, 20_000) }
+}
+
+/**
+ * The host keys agents by path, never by frontmatter `name` (config/agent.ts
+ * scanFile): `agents/sub/review.md` dispatches as `review`. Advertising any
+ * other name makes the task tool fail with "Unknown agent type".
+ */
+function agentNameFromRelative(relative: string): string {
+  const name = relative
+    .replace(/\\/g, "/")
+    .replace(/^agents?\//, "")
+    .replace(/\.md$/, "")
+  return name.startsWith("sub/") ? name.slice("sub/".length) : name
 }
 
 function uniquePaths(paths: string[]): string[] {
@@ -137,12 +144,12 @@ async function scanAgentRoot(root: string, out: Map<string, CollectedAgent>, tru
 
       try {
         const raw = await readFile(full, "utf-8")
-        const fallbackName = relative.replace(/\\/g, "/").replace(/\.md$/, "")
-        const parsed = parseAgentMarkdown(raw, fallbackName)
-        if (!out.has(parsed.name)) {
-          out.set(parsed.name, {
+        const name = agentNameFromRelative(relative)
+        const parsed = parseAgentMarkdown(raw)
+        if (!out.has(name)) {
+          out.set(name, {
             fullPath: path.resolve(full),
-            name: parsed.name,
+            name,
             description: parsed.description,
             prompt: parsed.prompt,
           })

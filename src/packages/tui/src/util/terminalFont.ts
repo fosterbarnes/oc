@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process"
 import { open } from "node:fs/promises"
 import { promisify } from "node:util"
+import { weztermExecutable } from "../routes/session/sidebar-tools/scriptRunner"
 
 // Saved in KV; app.tsx sends it to WezTerm as the `oc_font` user var whenever it changes.
 export type TerminalFont = { family?: string; weight?: string; size?: number }
@@ -60,7 +61,7 @@ let cached: Promise<FontFamily[]> | undefined
 // Monospace families WezTerm can resolve, sorted, with their upright weights. Cached for the TUI run.
 export function listMonospaceFonts() {
   cached ??= (async () => {
-    const { stdout } = await promisify(execFile)("wezterm", ["ls-fonts", "--list-system"], {
+    const { stdout } = await promisify(execFile)(weztermExecutable(), ["ls-fonts", "--list-system"], {
       windowsHide: true,
       maxBuffer: 16 * 1024 * 1024,
     })

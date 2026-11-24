@@ -20,6 +20,8 @@ export type SteeringHost = {
   switching: () => boolean
   activeProcess: () => ActiveProcess | undefined
   write: (line: string) => void
+  /** Claude read a steer; output waits for `read` or `receiptFailed`. */
+  hold: () => void
   /** Claude read a steer and its delivery receipt is saved. */
   read: (messageID: string) => void
   /** Claude read a steer whose delivery receipt could not be saved. */
@@ -169,6 +171,8 @@ export class Steering {
     steer.read = true
     this.readAfterResult = true
     log.info("claude consumed steered message", { messageID: steer.messageID, uuid: steer.uuid })
+    // Synchronous, before the receipt saves: Claude's answer may already be streaming.
+    this.host.hold()
     const ack = steer.delivered().then(
       () => this.host.read(steer.messageID),
       (error) => this.host.receiptFailed(error),

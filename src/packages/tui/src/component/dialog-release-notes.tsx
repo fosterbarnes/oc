@@ -27,10 +27,13 @@ export async function releaseNotesAfterUpdate(
   if (InstallationLocal) return
   const shown: string | undefined = kv.get(RELEASE_NOTES_SHOWN)
   if (shown === InstallationDisplayVersion) return
-  kv.set(RELEASE_NOTES_SHOWN, InstallationDisplayVersion)
-  if (!releaseNotesDue(shown, InstallationDisplayVersion)) return
+  if (!releaseNotesDue(shown, InstallationDisplayVersion))
+    return kv.set(RELEASE_NOTES_SHOWN, InstallationDisplayVersion)
   const release = await OcRelease.lookup(InstallationDisplayVersion).catch(() => undefined)
-  if (!release?.notes) {
+  // A failed lookup stays unrecorded, so the next start tries again.
+  if (!release) return
+  kv.set(RELEASE_NOTES_SHOWN, InstallationDisplayVersion)
+  if (!release.notes) {
     toast.show({
       variant: "info",
       message: `Updated to oc v${InstallationDisplayVersion} (no release notes published)`,

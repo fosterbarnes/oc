@@ -48,6 +48,7 @@ function Get-CursorInstall {
 }
 
 $found = Get-CursorInstall
+if (-not $found -and -not $AllowFresh -and (Test-Path -LiteralPath (Join-Path $env:ProgramFiles "cursor\Cursor.exe"))) { throw "Cursor Desktop system install not supported" }
 if (-not $found -and -not $AllowFresh) { throw "Cursor Desktop not installed" }
 $local = $env:LOCALAPPDATA
 if ($found -and (-not $local -or -not $found.Dir.StartsWith("$local\", [StringComparison]::OrdinalIgnoreCase))) { throw "Cursor Desktop system install not supported" }

@@ -613,7 +613,8 @@ windowsTest("single revive opens a new tab in the current terminal, or a new con
   })
   expect(Revive.openTabCommand(command, { ...options, terminal: "windows-terminal" })).toMatchObject({
     file: "wt.exe",
-    args: ["-w", "0", "new-tab", "-d", context.directory, ...command],
+    // wt.exe splits on `;` everywhere, the folder included (F18, checked live 2026-11-23).
+    args: ["-w", "0", "new-tab", "-d", context.directory.replaceAll(";", "\\;"), ...command],
   })
   const generic = Revive.openTabCommand(command, { ...options, terminal: "generic" })
   expect(generic.file).toBe("cmd.exe")
@@ -758,6 +759,19 @@ test("build outputs must exist and must not provide the same name twice", async 
   await fs.writeFile(path.join(second, "runtime"), "b")
   await expect(Revive.installSources([first, second])).rejects.toThrow("Two build outputs provide runtime")
   await expect(Revive.installSources([path.join(tmp.path, "missing")])).rejects.toThrow("Build output not found")
+})
+
+test("a source download refuses an existing repository that is not an oc clone", async () => {
+  await using tmp = await tmpdir({ git: true })
+  const remote = Bun.spawnSync(["git", "-C", tmp.path, "remote", "add", "origin", "https://example.com/other.git"])
+  expect(remote.exitCode).toBe(0)
+  await expect(
+    ReviveHost.prepare({
+      source: "download",
+      sourceDir: tmp.path,
+      result: path.join(Global.Path.state, "oc-revive", "prepare-test.json"),
+    }),
+  ).rejects.toThrow("not an oc clone")
 })
 
 // No-window /mirror revive (ReviveHost.startHeadless / reviveHeadless).

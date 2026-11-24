@@ -56,9 +56,12 @@ export function resolveToolServerIdentity(
 
   // Longest first handles configured ids where one is a prefix of another
   // (e.g. "git" and "git_hub"). OpenCode flattens with the sanitized id.
-  const servers = [...new Set([...knownMcpServers].map(sanitizeMcpServerId).filter(Boolean))].sort(
-    (a, b) => b.length - a.length,
-  )
+  // A configured server named like the default stays under the default with
+  // its full id as tool_name: the return path keeps default-server tool names
+  // bare, so stripping the prefix would lose `opencode_x` or collide with `x`.
+  const servers = [...new Set([...knownMcpServers].map(sanitizeMcpServerId))]
+    .filter((server) => server && server !== defaultServer)
+    .sort((a, b) => b.length - a.length)
   for (const server of servers) {
     const prefix = `${server}_`
     if (!opencodeName.startsWith(prefix) || opencodeName.length === prefix.length) continue
@@ -119,7 +122,7 @@ type WebAliasRule = {
 }
 
 // Despite the name, these rules cover any advertised OpenCode tool whose bare
-// name collides with a Cursor-native capability, not only web search/fetch  - 
+// name collides with a Cursor-native capability, not only web search/fetch  -
 // see the MCP resource entries below and
 // tasks/plans/fix-cursor-mcp-resource-exec.md Phase 0/2.
 const WEB_ALIAS_RULES: readonly WebAliasRule[] = [

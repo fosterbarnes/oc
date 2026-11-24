@@ -2,6 +2,7 @@ import type { BidiStream, BidiTerminalEvent } from "./transport/connect.js"
 import { trace } from "./debug.js"
 import { CursorProtocolError, type CursorProviderError } from "./errors.js"
 import { sessionActivity, type SessionActivitySource } from "./activity.js"
+import { pinConversation, unpinConversation } from "./protocol/conversationBind.js"
 import type { OpencodeToolDef, ToolAliasRegistry } from "./protocol/descriptors.js"
 import type { HostSubagentCatalog } from "./protocol/subagents.js"
 import type { CursorConversationTokenDetails } from "./protocol/tokenDetails.js"
@@ -37,6 +38,8 @@ const DEFAULT_TOMBSTONE_LIMIT = 1_024
 // awaiting tool results are live work and never count against it (Cursor's
 // agent hosts advertise an unbounded HTTP/2 maxConcurrentStreams).
 const DEFAULT_MAX_OPEN_SESSIONS = 24
+// A continuation step starts reading within milliseconds of delivering its results (`awaitingResume`).
+const AWAIT_RESUME_GRACE_MS = 30_000
 
 function positiveInteger(name: string, value: unknown, fallback: number): number {
   const resolved = value === undefined ? fallback : value
@@ -210,6 +213,8 @@ export type CursorSession = {
    * lets the pump expose the final mutation to OpenCode as a targeted edit.
    */
   editToolCalls?: Map<string, { path: string; completeRead?: boolean }>
+  /** One-shot system reminders this turn consumed; a recovery Run resends them. */
+  systemReminders?: string[]
   /** Monotonic synthetic exec ids for bridged (display-only) OpenCode tool calls. */
   nextBridgedExecId: number
   /** KV blob store: blob_id (hex) → data, for Cursor's out-of-band payload channel. */
@@ -248,6 +253,11 @@ export type CursorSession = {
   pumpActive: boolean
   /** The active pull owner; stale cancel callbacks cannot affect a newer pump. */
   pumpOwner: symbol | null
+  /**
+   * True from the delivery that cleared the last pending result until the next
+   * pump begins. Covers the gap where neither pending nor pumpActive guards the Run.
+   */
+  awaitingResume?: boolean
   heartbeat: ReturnType<typeof setInterval> | null
   heartbeatCancel: (() => void) | null
   hardDeadlineTimer: ReturnType<typeof setTimeout> | null
@@ -333,6 +343,7 @@ export class SessionManager {
     session.semanticDeadlineAt ??= this.now() + session.policy.semanticIdleMs
     this.sessions.add(session)
     if (session.openCodeSessionId) {
+      pinConversation(session.conversationId)
       const prior = this.byOpenCodeSessionId.get(session.openCodeSessionId)
       if (prior && prior !== session && !prior.closed) {
         if (this.isPumping(prior)) {
@@ -525,7 +536,10 @@ export class SessionManager {
     this.putTombstone(key, "delivered")
     session.pending.delete(execId)
     this.byExecId.delete(key)
-    if (session.pending.size === 0) this.recordSemanticProgress(session)
+    if (session.pending.size === 0) {
+      session.awaitingResume = true
+      this.recordSemanticProgress(session)
+    }
     this.scheduleHardDeadline(session)
     return { kind: "delivered", framesWritten }
   }
@@ -558,6 +572,7 @@ export class SessionManager {
     }
     session.pumpOwner = owner
     session.pumpActive = true
+    session.awaitingResume = false
   }
 
   isPumpOwner(session: CursorSession, owner: symbol): boolean {
@@ -604,7 +619,7 @@ export class SessionManager {
     session.pumpActive = false
     session.displayToolCalls?.clear()
     session.blobs?.clear()
-    this.sessions.delete(session)
+    if (this.sessions.delete(session) && session.openCodeSessionId) unpinConversation(session.conversationId)
     if (session.openCodeSessionId && this.byOpenCodeSessionId.get(session.openCodeSessionId) === session) {
       this.byOpenCodeSessionId.delete(session.openCodeSessionId)
     }
@@ -620,16 +635,28 @@ export class SessionManager {
    * pumping this session. OpenCode aborts each doStream after finishReason
    * "tool-calls"; that abort must NOT tear down the Cursor Run stream.
    * Equally, a late cancel from the previous ReadableStream must not destroy
-   * the session once the continuation has cleared pending and resumed pumping.
-   * Returns true if the session was closed.
+   * the session once the continuation has cleared pending, including the gap
+   * before its pump begins. Returns true if the session was closed.
    */
   closeUnlessPending(session: CursorSession): boolean {
     if (session.closed) return true
     const pumpActive = this.isPumping(session)
-    if (session.pending.size > 0 || pumpActive) {
+    if (session.pending.size > 0 || pumpActive || session.awaitingResume) {
       trace(
-        `sessionManager.closeUnlessPending: KEEP open pendingCount=${session.pending.size} pumpActive=${pumpActive}`,
+        `sessionManager.closeUnlessPending: KEEP open pendingCount=${session.pending.size} ` +
+          `pumpActive=${pumpActive} awaitingResume=${session.awaitingResume === true}`,
       )
+      // Kept only for the resume gap: a real cancel there has no hard deadline (nothing pending), so close
+      // the Run if no step has begun reading after a grace period.
+      if (session.pending.size === 0 && !pumpActive) {
+        const timer = this.setTimer(() => {
+          if (session.closed || !session.awaitingResume || this.isPumping(session) || session.pending.size > 0) return
+          session.awaitingResume = false
+          this.close(session, "ordinary-cleanup")
+        }, AWAIT_RESUME_GRACE_MS)
+        const unref = (timer as unknown as { unref?: () => void }).unref
+        if (typeof unref === "function") unref.call(timer)
+      }
       return false
     }
     this.close(session, "ordinary-cleanup")

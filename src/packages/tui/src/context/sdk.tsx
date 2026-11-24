@@ -34,6 +34,9 @@ export interface ClaudeAccountOption {
   limitedUntil?: number
   /** The API-credit profile: pickable per session or agent, never as the global account. */
   kind?: "api"
+  /** API row only: credit spend oc recorded for the current local day and month. */
+  spentTodayUsd?: number
+  spentMonthUsd?: number
 }
 
 /** A pool account in the `Claude accounts` manager (`/global/claude/accounts`). */

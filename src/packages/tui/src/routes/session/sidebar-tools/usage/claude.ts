@@ -1,7 +1,8 @@
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
+import { writeJsonAtomic } from "../../../../util/persistence"
 import { clampUsagePercent, fetchUsageResponse, usageFailureMetadata, type UsageOptions } from "./fetch"
 import { compactResetDate } from "./format"
 import type { UsageProbeMetadata, UsageSnapshot, UsageWindow } from "./snapshot"
@@ -147,14 +148,10 @@ export async function probeClaudeCodeUsage(options: UsageOptions = {}): Promise<
     : cachedUsage
   if (liveUsage.ok) {
     const merged = withClaudeFallback(liveUsage, cachedTimed.ok ? cachedTimed : undefined, nowMs)
-    await mkdir(path.dirname(cacheWritePath), { recursive: true })
-      .then(() =>
-        writeFile(
-          cacheWritePath,
-          JSON.stringify(mergeClaudeCache(liveFetched?.body, cachedRaw, merged, nowMs, configDir)),
-        ),
-      )
-      .catch(() => undefined)
+    await writeJsonAtomic(
+      cacheWritePath,
+      mergeClaudeCache(liveFetched?.body, cachedRaw, merged, nowMs, configDir),
+    ).catch(() => undefined)
     return { ...merged, accountID: claudeConfigDirId(configDir) }
   }
   if (!cachedTimed.ok) {
@@ -185,7 +182,11 @@ async function readClaudeOauth(configDir: string, credentialsPath: string, homeD
   }
   const keychain =
     (options.platform ?? process.platform) === "darwin"
-      ? parse(await (options.claudeKeychain ?? readKeychain)(claudeKeychainService(configDir, homeDir, options.env)))
+      ? parse(
+          await (options.claudeKeychain ?? readKeychain)(claudeKeychainService(configDir, homeDir, options.env)).catch(
+            () => undefined,
+          ),
+        )
       : undefined
   if (typeof keychain?.accessToken === "string" && keychain.accessToken) return keychain
   return parse(await readFile(credentialsPath, "utf8").catch(() => undefined))
@@ -251,8 +252,16 @@ export async function probeClaudeCodePool(configDirs: string[], options: UsageOp
   const retryAt = Math.max(0, ...results.map((result) => result.metadata?.retryAt ?? 0))
   if (!known.length && results.every((result) => !result.ok && result.reason === "signed-out"))
     return { ok: false, reason: "signed-out" }
+  // Every account logged out and at least one expired reads as expired, not a bare failure.
+  const expired =
+    results.every((result) => !result.ok && result.reason) &&
+    results.some((result) => !result.ok && result.reason === "expired")
   if (!known.length)
-    return { ok: false, ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}) }
+    return {
+      ok: false,
+      ...(expired ? { reason: "expired" as const } : {}),
+      ...(metadata ? { metadata: { ...metadata, ...(retryAt ? { retryAt } : {}) } } : {}),
+    }
   return {
     ok: true,
     // The pool reads as fresh while any account is live; an idle account's cached usage does not dim it.

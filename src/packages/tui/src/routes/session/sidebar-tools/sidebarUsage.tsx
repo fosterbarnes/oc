@@ -100,8 +100,8 @@ export function createSidebarUsage(input: {
   const [claudeCodeUsage, setClaudeCodeUsage] = keptUsageSignal<UsageSnapshot<ClaudeCodeUsage>>("claude-code")
   // Pool account this session runs on (config dir name), marked with `*` in the Claude rows.
   const [activeClaudeAccount, setActiveClaudeAccount] = createSignal<string>()
-  // Label of the API-credit profile when this session runs on it; it has no usage meter.
-  const [activeClaudeApi, setActiveClaudeApi] = createSignal<string>()
+  // The API-credit profile's row (spend, limit, and whether this session runs on it); it has no usage meter.
+  const [claudeApi, setClaudeApi] = createSignal<ClaudeAccountOption>()
   // oc.json `claudeAccountNames`; reread when an account changes (the account manager renames through it).
   const [claudeNames, setClaudeNames] = createSignal(readOcConfig().claudeAccountNames)
   const [usageWidth, setUsageWidth] = createSignal(0)
@@ -132,9 +132,12 @@ export function createSidebarUsage(input: {
   const claudeDirectories = () => {
     const accounts = sync.data.config.provider?.["claude-code"]?.options?.accounts
     const dirs = Array.isArray(accounts) ? accounts.filter((dir): dir is string => typeof dir === "string") : []
-    return (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")]).map((dir) =>
-      claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())),
+    const ids = (dirs.length ? dirs : [process.env.CLAUDE_CONFIG_DIR ?? path.join(os.homedir(), ".claude")]).map(
+      (dir) => claudeConfigDirId(dir.replace(/^~(?=$|[\\/])/, os.homedir())),
     )
+    // One row per folder, as the provider pool collapses them (case-insensitive on Windows).
+    const key = (id: string) => (process.platform === "win32" ? id.toLowerCase() : id)
+    return ids.filter((id, index) => ids.findIndex((other) => key(other) === key(id)) === index)
   }
   const claudeSeed = (): UsageSnapshot<ClaudeCodeUsage> => {
     const dirs = claudeDirectories()
@@ -159,7 +162,7 @@ export function createSidebarUsage(input: {
   }
   const showActiveClaudeAccount = (pool: ClaudeAccountOption[] | undefined) => {
     const current = pool?.find((account) => account.current)
-    setActiveClaudeApi(current?.kind === "api" ? current.label : undefined)
+    setClaudeApi(pool?.find((account) => account.kind === "api"))
     setActiveClaudeAccount(
       current && current.kind !== "api"
         ? claudeConfigDirId(
@@ -407,8 +410,25 @@ export function createSidebarUsage(input: {
       return { text: line.text, short: line.short, warn: line.urgent, key }
     }
     const claude = (): UsageEntry[] => {
+      // No meter for API credits: the line shows the spend oc recorded; the Console has the balance.
+      const api = claudeApi()
+      const money = (value: number | undefined) => `$${(value ?? 0).toFixed(2)}`
+      const apiLine: UsageEntry[] = api
+        ? [
+            {
+              name: "Claude API",
+              active: api.current,
+              windows: [],
+              note:
+                (api.limitedUntil ?? 0) > nowMs
+                  ? "out of credits"
+                  : `${money(api.spentTodayUsd)} today · ${money(api.spentMonthUsd)} mo`,
+            },
+          ]
+        : []
       if (!claudeProjected.ok)
         return [
+          ...apiLine,
           {
             name: "Claude",
             table: true,
@@ -426,11 +446,6 @@ export function createSidebarUsage(input: {
       const accounts = claudeProjected.accounts?.flatMap((account) =>
         account.usage.ok ? [{ id: account.id, name: account.name, usage: account.usage }] : [],
       )
-      // No meter for API credits: the footer shows each turn's cost and the Console the balance.
-      const api = activeClaudeApi()
-      const apiLine: UsageEntry[] = api
-        ? [{ name: `Claude: ${api}`, active: true, windows: [], note: "API credits" }]
-        : []
       return [
         ...apiLine,
         ...(accounts?.length
@@ -638,9 +653,9 @@ export function createSidebarUsage(input: {
             ? undefined
             : selected.has(option.value)
               ? usageProviders().filter((id) => id !== option.value)
-              : USAGE_PROVIDER_IDS.filter((id) => selected.has(id) || id === option.value)
+              : USAGE_PROVIDER_IDS.filter((id) => usageProviders().includes(id) || id === option.value)
         input.settings().usageProviders = next
-        saveUserSidebarSetting("usageProviders", next)
+        void saveUserSidebarSetting("usageProviders", next).catch(toast.error)
         setSavedProviders(next)
         usageScheduler.request()
         selectUsageSettings()

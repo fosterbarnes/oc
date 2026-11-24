@@ -605,7 +605,10 @@ export function getSession(
           }
         } catch (error) {
           trace(`h2 cached session ping failed: origin=${origin} err=${(error as Error).message}`)
-          invalidateSession(origin, existing)
+          // A graceful GOAWAY already closed the session; destroying it would reset
+          // streams the server still lets drain.
+          if (existing.closed && !existing.destroyed) dropSession(origin, existing)
+          else invalidateSession(origin, existing)
         }
       }
     }

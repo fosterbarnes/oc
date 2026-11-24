@@ -354,7 +354,8 @@ export function renderOpencodePlanMarkdown(args: CursorCreatePlanArgs): string {
   const planLeadHeading = /^#\s+(.+?)\s*$/.exec(plan.split("\n", 1)[0] ?? "")?.[1]
   const planBody =
     name && planLeadHeading !== undefined && planLeadHeading.trim().toLowerCase() === name.toLowerCase()
-      ? plan.slice(plan.indexOf("\n") + 1).trimStart()
+      ? // A heading-only plan has no newline; slicing past its end leaves "".
+        plan.slice((plan.split("\n", 1)[0] ?? "").length + 1).trimStart()
       : plan
 
   if (name) {

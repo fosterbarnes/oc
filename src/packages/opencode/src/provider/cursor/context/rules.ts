@@ -205,10 +205,15 @@ export function isHostnameBlocked(hostname: string): boolean {
   return false
 }
 
-async function resolvesToBlocked(hostname: string): Promise<boolean> {
+/**
+ * The address to connect to for `hostname`: undefined when any resolved address
+ * is blocked or DNS fails, the hostname itself for IP literals and reserved test
+ * names (nothing to pin), else a validated public IP.
+ */
+async function resolvePublicHost(hostname: string): Promise<string | undefined> {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, "")
-  if (net.isIP(h) !== 0) return false
-  if (h === "localhost" || h.endsWith(".localhost")) return true
+  if (net.isIP(h) !== 0) return hostname
+  if (h === "localhost" || h.endsWith(".localhost")) return undefined
   // Reserved/example TLDs never resolve externally and never map to private
   // ranges. Skip DNS to keep tests deterministic and fast (no external network).
   if (
@@ -219,18 +224,35 @@ async function resolvesToBlocked(hostname: string): Promise<boolean> {
     h === "example.net" ||
     h === "example.org"
   )
-    return false
+    return hostname
   try {
     const results = await Promise.race([
       lookup(h, { all: true, verbatim: true }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("dns timeout")), 800)),
     ])
-    for (const r of results as Array<{ address: string }>) if (isIPBlocked(r.address)) return true
-    return false
+    if (results.length === 0 || results.some((r) => isIPBlocked(r.address))) return undefined
+    return results[0]!.address
   } catch {
     // A failed or timed-out lookup is not proof that the destination is public.
-    return true
+    return undefined
   }
+}
+
+/**
+ * Fetch one hop on the validated address so a rebinding resolver cannot swap
+ * in a private one after the check. Host and SNI keep the real name, so TLS
+ * still verifies the certificate against it.
+ */
+function fetchPinned(url: URL, address: string, signal: AbortSignal): Promise<Response> {
+  if (address === url.hostname) return fetch(url.toString(), { signal, redirect: "manual" })
+  const pinned = new URL(url)
+  pinned.hostname = net.isIP(address) === 6 ? `[${address}]` : address
+  return fetch(pinned.toString(), {
+    signal,
+    redirect: "manual",
+    headers: { host: url.host },
+    tls: { serverName: url.hostname },
+  })
 }
 
 /**
@@ -253,11 +275,12 @@ export async function fetchRemoteInstruction(url: string, timeoutMs = 5000): Pro
       }
       if (parsed.protocol !== "https:") return undefined
       if (isHostnameBlocked(parsed.hostname)) return undefined
-      if (await resolvesToBlocked(parsed.hostname)) return undefined
+      const address = await resolvePublicHost(parsed.hostname)
+      if (!address) return undefined
 
       let res: Response
       try {
-        res = await fetch(current, { signal: ctrl.signal, redirect: "manual" })
+        res = await fetchPinned(parsed, address, ctrl.signal)
       } catch {
         return undefined
       }
@@ -280,7 +303,6 @@ export async function fetchRemoteInstruction(url: string, timeoutMs = 5000): Pro
         }
         if (nextParsed.protocol !== "https:") return undefined
         if (isHostnameBlocked(nextParsed.hostname)) return undefined
-        if (await resolvesToBlocked(nextParsed.hostname)) return undefined
         current = next
         continue
       }
@@ -356,14 +378,14 @@ export async function collectRules(workspaceRoot: string): Promise<{
 
   const add = async (file: string | undefined) => {
     if (!file) return
-    const resolved = path.resolve(file)
-    if (seen.has(resolved)) return
     let canonical: string
     try {
-      canonical = await realpath(resolved)
+      canonical = await realpath(path.resolve(file))
     } catch {
       return
     }
+    // `seen` holds real paths, so a symlinked AGENTS.md and its target dedupe.
+    if (seen.has(canonical)) return
     if (!trustedRoots.some((root) => isPathInside(canonical, root))) return
     const rule = await readRule(canonical)
     if (!rule) return

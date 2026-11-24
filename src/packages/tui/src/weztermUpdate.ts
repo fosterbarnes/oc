@@ -65,6 +65,10 @@ export function sameBuild(a: string, b: string) {
   return a.slice(-8) === b.slice(-8)
 }
 
+// `date-sha` sorts by date. A nightly newer than the confirmed build is still a good update; an older one
+// means the package lagged and the confirmed build was not installed.
+const olderBuild = (build: string, than: string) => !sameBuild(build, than) && build < than
+
 export async function checkWezterm(): Promise<DesktopCheckResult> {
   if (inflight.has("check")) return { ok: false, alreadyRunning: true, message: `${LABEL} check already running` }
   inflight.add("check")
@@ -113,14 +117,19 @@ export async function installWezterm(
     if (!sameBuild(latest, expectedVersion)) return fail(`latest build changed (${latest}); confirm again`)
     if (sameBuild(installed, latest)) return { ok: true, alreadyRunning: false, message: upToDate(installed) }
     if (install.method === "unknown") return fail(manualMessage(install.cli, installed, latest))
-    if (install.method === "setup")
-      return await runDesktopInstall({ key: "wezterm", label: LABEL, script: setupScript, onLine })
+    if (install.method === "setup") {
+      const result = await runDesktopInstall({ key: "wezterm", label: LABEL, script: setupScript, onLine })
+      if (!result.ok) return result
+      const after = await installedVersion(install.cli)
+      return olderBuild(after, latest) ? fail(`installed ${after}, expected ${latest}`) : result
+    }
     onLine?.(`${STEP_PREFIX}downloading`)
     const cached = await runOrThrow(install.brew, ["--cache", "--cask", CASK], undefined, BREW_ENV)
     await rm(cached.trim(), { force: true })
     await runOrThrow(install.brew, ["reinstall", "--cask", CASK], onLine, BREW_ENV)
     const after = await installedVersion(install.cli)
     if (after === installed) return fail(`reinstall finished but ${LABEL} still reports ${after}`)
+    if (olderBuild(after, latest)) return fail(`installed ${after}, expected ${latest}`)
     return { ok: true, alreadyRunning: false, message: `Updated ${LABEL} ${installed} -> ${after}` }
   } catch (cause) {
     return fail(errorText(cause))

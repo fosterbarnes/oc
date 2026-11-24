@@ -86,9 +86,11 @@ export async function skillHint(
     signal,
     env,
   )
-  const fits = Math.max(...shortlist.map((_, index) => noul(narrow.answers[`fits_${index}`])))
   const pick = choice(narrow.answers.pick).choice
-  if (fits < FITS_AT || !shortlist.some((skill) => skill.name === pick)) return { text: NO_SKILL, gate, fits }
+  const index = shortlist.findIndex((skill) => skill.name === pick)
+  // The gate is the picked skill's own fit: another skill fitting well says nothing about this one.
+  const fits = index < 0 ? 0 : noul(narrow.answers[`fits_${index}`])
+  if (fits < FITS_AT) return { text: NO_SKILL, gate, fits }
   return {
     text: `<skill_relevance>Skill "${pick}" looks relevant to this task. Load it with the skill tool first if it fits; ignore this hint otherwise.</skill_relevance>`,
     skill: pick,

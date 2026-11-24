@@ -227,11 +227,13 @@ export function useReviveChain() {
   // This TUI keeps running when /revive-single or the revive helper fails; claim that failure here.
   const watchOwn = (sessionID: string, id: string) => {
     const check = () =>
-      void ReviveResume.status(id).then((state) => {
-        if (state === "pending") return
-        watcher.close()
-        if (state === "failed") void resume(sessionID)
-      })
+      void ReviveResume.status(id)
+        .then((state) => {
+          if (state === "pending") return
+          watcher.close()
+          if (state === "failed") return resume(sessionID)
+        })
+        .catch((error: unknown) => toast.error(error))
     const watcher = fs.watch(ReviveResume.directory(), check)
     // A fast settle can land before this watcher exists.
     check()

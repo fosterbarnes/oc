@@ -698,7 +698,9 @@ export function expandEnv(value: string, env: Env) {
 async function detectCli(executable: string | null, env: Env): Promise<Detection> {
   if (!executable) return { status: "missing" }
   const result = await runCliCommand(executable, ["--version"], VERSION_TIMEOUT_MS, env)
-  const version = result.ok ? versionOf(result.output) : undefined
+  if (!result.ok)
+    return { status: "error", message: result.error || result.lastLine || `exit ${result.code}`, path: executable }
+  const version = versionOf(result.output)
   return version ? { status: "found", version, path: executable } : { status: "found", path: executable }
 }
 

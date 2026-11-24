@@ -58,7 +58,7 @@ export type PaneSyntax = "pwsh" | "posix"
 
 // Text typed into a pane is read by the pane's own shell (paneSyntax). `ownPane` marks a pane the
 // sidebar made for this script: `closeOut` in a repo's .scripts/scriptHelper.ps1 (or posix/scriptHelper.sh)
-// kills the pane on success. Windows Terminal, and WezTerm runs when pwsh is found, start pwsh explicitly.
+// kills the pane on success. Windows Terminal and WezTerm runs start pwsh explicitly when it is found.
 const SYNTAX = {
   pwsh: { ownPane: "$env:SCRIPT_OWN_PANE='1'; ", quote: quoteCommandArg },
   posix: { ownPane: "export SCRIPT_OWN_PANE=1; ", quote: (value: string) => `'${value.replaceAll("'", "'\\''")}'` },
@@ -127,19 +127,30 @@ function sizeArgs(size: WezTermSplitSize | undefined): string[] {
   return "Percent" in size ? ["--percent", String(size.Percent)] : ["--cells", String(size.Cells)]
 }
 
+// wt.exe takes only a fraction of the split pane, so Cells become a fraction of oc's own pane, the
+// one wt splits.
 export function windowsTerminalArgs(
   terminal: Exclude<ScriptTerminal, "native">,
   cwd: string,
   size?: WezTermSplitSize,
+  pane: { columns?: number; rows?: number } = process.stdout,
 ): string[] {
   if (terminal === "wezterm-window") return ["-w", "new", "new-tab", "-d", cwd]
   if (terminal === "wezterm-tab") return ["-w", "0", "new-tab", "-d", cwd]
+  const total = terminal === "wezterm-horizontal" ? pane.columns : pane.rows
+  const fraction = !size
+    ? undefined
+    : "Percent" in size
+      ? size.Percent / 100
+      : total
+        ? Math.min(0.99, Math.max(0.01, Math.round((100 * size.Cells) / total) / 100))
+        : undefined
   return [
     "-w",
     "0",
     "split-pane",
     terminal === "wezterm-horizontal" ? "-V" : "-H",
-    ...(size && "Percent" in size ? ["--size", String(size.Percent / 100)] : []),
+    ...(fraction === undefined ? [] : ["--size", String(fraction)]),
     "-d",
     cwd,
   ]
@@ -149,11 +160,11 @@ function pwshScriptArgs(script: Script, pwsh: string, prefix = ""): string[] {
   return [pwsh, ...shellArgs(`${prefix}${SYNTAX.pwsh.ownPane}${scriptCommand(script)}`)]
 }
 
-export function windowsTerminalScriptArgs(script: Script, cwd: string): string[] {
+export function windowsTerminalScriptArgs(script: Script, cwd: string, pwsh: string): string[] {
   if (script.terminal === "native") return []
   return [
     ...windowsTerminalArgs(script.terminal, script.filePath ? path.dirname(script.filePath) : cwd, script.weztermSize),
-    ...pwshScriptArgs(script, "pwsh"),
+    ...pwshScriptArgs(script, pwsh),
   ]
 }
 
@@ -320,8 +331,10 @@ export async function runScript(script: Script, cwd: string, options: RunnerOpti
   const terminal = resolveScriptTerminal(script.terminal, kind)
   if (terminal !== "native") {
     if (kind === "wezterm") return runWezterm(script, cwd, terminal, true, options)
-    if (await probe("wt.exe"))
-      return (options.runCommand ?? runCommand)("wt.exe", windowsTerminalScriptArgs(script, cwd), cwd)
+    // wt.exe exits 0 even when its tab's program is missing, so pwsh is resolved first, as for WezTerm;
+    // without it the script launches natively.
+    const pwsh = (await probe("wt.exe")) ? await (options.resolveExecutable ?? resolveExecutable)("pwsh") : undefined
+    if (pwsh) return (options.runCommand ?? runCommand)("wt.exe", windowsTerminalScriptArgs(script, cwd, pwsh), cwd)
   }
   const target = script.filePath || script.command
   if (!(await probe(script.launcher.executable))) {

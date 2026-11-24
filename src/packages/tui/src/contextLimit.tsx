@@ -43,11 +43,13 @@ function isAction(value: string | undefined): value is LimitAction {
 }
 
 // Provider override fields win over global fields, which win over defaults.
-// Undefined when neither the global limit nor the override is configured.
+// Undefined when no limit applies. Matches the server's `resolveLimit`: a limit with only `providers`
+// covers just the listed providers.
 function effectiveLimit(config: LimitInput, scope: string | undefined) {
   const global = config.compaction?.limit
   const override = scope === undefined ? undefined : global?.providers?.[scope]
-  if (!global && !override) return
+  if (!global) return
+  if (global.providers !== undefined && global.tokens === undefined && global.action === undefined && !override) return
   const action = override?.action ?? global?.action
   const tokens = override?.tokens ?? global?.tokens
   return {
@@ -212,4 +214,3 @@ export function createContextLimitCommands() {
     },
   }
 }
-

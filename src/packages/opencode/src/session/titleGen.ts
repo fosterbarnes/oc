@@ -225,7 +225,9 @@ function cleanTitle(text: string) {
     .map((l) => l.trim())
     .find((l) => l.length > 0)
   if (!line) return
-  return line.length > 100 ? line.substring(0, 97) + "..." : line
+  // Code points, so an emoji is never cut in half.
+  const chars = Array.from(line)
+  return chars.length > 100 ? chars.slice(0, 97).join("") + "..." : line
 }
 
 // First user message plus the latest exchanges, text only, so the model sees where the session started and where it is now.

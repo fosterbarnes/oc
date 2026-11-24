@@ -32,6 +32,7 @@ export type DesktopInstallResult = {
   ok: boolean
   alreadyRunning: boolean
   message: string
+  upToDate?: true
 }
 
 export function compareDesktopVersions(a: string, b: string): number {
@@ -103,12 +104,19 @@ export function parseDesktopCheckOutput(
   }
 }
 
-export function parseDesktopInstallOutput(output: string, label = "Claude Desktop"): { ok: boolean; message: string } {
+export function parseDesktopInstallOutput(
+  output: string,
+  label = "Claude Desktop",
+): { ok: boolean; message: string; upToDate?: true } {
   const lines = nonEmptyLines(output)
   const updated = new RegExp(`^Updated ${escapeRegExp(label)} \\S+ -> \\S+`)
   for (const line of lines) {
     if (updated.test(line)) return { ok: true, message: line }
   }
+  // The app updated itself between the confirm and the install.
+  const upToDate = new RegExp(`^${escapeRegExp(label)} is up to date \\(`)
+  const current = lines.find((line) => upToDate.test(line))
+  if (current) return { ok: true, message: current, upToDate: true }
   return {
     ok: false,
     message: scriptError(output) ?? lines.at(-1) ?? `${label} install produced no output`,
@@ -318,7 +326,7 @@ export async function runDesktopInstall(input: {
     if (!parsed.ok) {
       return { ok: false, alreadyRunning: false, message: `Failed to update ${input.label}: ${parsed.message}` }
     }
-    return { ok: true, alreadyRunning: false, message: parsed.message }
+    return { ok: true, alreadyRunning: false, message: parsed.message, upToDate: parsed.upToDate }
   } finally {
     inflight.delete(input.key)
     if (ownDir) void removeRunDir(ownDir)
@@ -390,8 +398,10 @@ export async function prepareDesktopInstall(input: {
   dir: string
   onLine?: (line: string) => void
 }): Promise<(onLine?: (line: string) => void) => Promise<DesktopInstallResult>> {
+  if (inflight.has(input.key)) throw new Error(`${input.label} update already running`)
   const prepare = input.script(undefined, { dir: input.dir, prepareOnly: true })
-  const result = await runPowershell(prepare, input.onLine)
+  inflight.add(input.key)
+  const result = await runPowershell(prepare, input.onLine).finally(() => inflight.delete(input.key))
   const version = /^PREPARED (\S+)\s*$/m.exec(result.output)?.[1]
   if (result.ok && version) {
     return (onLine) =>

@@ -91,8 +91,11 @@ export async function claim(sessionID: string, pid: number, now = Date.now(), di
     if (error.code === "ENOENT") return []
     throw error
   })
-  for (const name of names) {
-    const match = name.match(/^(.+)-(\d+)\.(pending|ready|failed)\.json$/)
+  // Newest first, so a later ready chain wins over a leftover failed one (readdir order is arbitrary).
+  const entries = names
+    .map((name) => ({ name, match: name.match(/^(.+)-(\d+)\.(pending|ready|failed)\.json$/) }))
+    .sort((a, b) => Number(b.match?.[2] ?? 0) - Number(a.match?.[2] ?? 0))
+  for (const { name, match } of entries) {
     if (!match) continue
     const at = Number(match[2])
     const state = match[3] as State

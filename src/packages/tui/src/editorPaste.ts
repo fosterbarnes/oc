@@ -24,9 +24,12 @@ export function pasteImageFromEvent(
   const handler = editor && imagePasteTargets.get(editor)
   if (!handler) return
   event.preventDefault()
-  void clipboard.read?.(event).then((content) => {
-    if (content?.mime.startsWith("image/") && !editor.isDestroyed) handler(content)
-  })
+  void clipboard
+    .read?.(event)
+    .then((content) => {
+      if (content?.mime.startsWith("image/") && !editor.isDestroyed) handler(content)
+    })
+    .catch(() => {})
 }
 
 // The paste key (input_paste, ctrl+v; Cmd+V in WezTerm oc panes sends it too) inserts clipboard text into
@@ -49,7 +52,10 @@ export function useEditorPaste() {
         const editor = renderer.currentFocusedEditor
         const content = await clipboard.read?.(ctx.event)
         if (!content?.data) return
-        if (!(editor instanceof TextareaRenderable) || editor.isDestroyed) return
+        // Focus may have moved during the read (Tab to another field): paste only where the key was pressed.
+        if (!(editor instanceof TextareaRenderable) || editor.isDestroyed || renderer.currentFocusedEditor !== editor) {
+          return
+        }
         if (content.mime.startsWith("image/")) {
           const handler = imagePasteTargets.get(editor)
           if (handler) handler(content)

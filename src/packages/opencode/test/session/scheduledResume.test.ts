@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Deferred, Effect } from "effect"
@@ -277,6 +277,27 @@ describe("scheduledResume store", () => {
       utimesSync(`${tmp.file}.lock`, ancient, ancient)
       expect((await store.takeDue(500)).map((e) => e.sessionID)).toEqual(["s" as SessionID])
       expect(existsSync(`${tmp.file}.lock`)).toBe(false)
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  test("a holder whose lock was taken over does not delete the new holder's lock", async () => {
+    const tmp = tmpFile()
+    try {
+      const lock = `${tmp.file}.lock`
+      let takeOver = false
+      // `retry` reads the clock inside its critical section: simulate another process taking the lock there.
+      const store = ScheduledResume.createStore(tmp.file, () => {
+        if (takeOver) writeFileSync(lock, "1:other")
+        return 1000
+      })
+      store.setEnabled(true)
+      store.requestResume({ sessionID: "s", directory: "/d", fireAt: 100, reason: "r" }, 10)
+      const [due] = await store.takeDue(500)
+      takeOver = true
+      expect(store.retry(due)).toBe(true)
+      expect(readFileSync(lock, "utf8")).toBe("1:other")
     } finally {
       tmp.cleanup()
     }

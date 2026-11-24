@@ -268,13 +268,36 @@ function readTruncationSummary(
 }
 
 /**
+ * The nested AGENTS.md `<system-reminder>` block `tool/read.ts` appends after
+ * `</content>`. Body lines are all `N: `-prefixed, so the first bare
+ * `</content>` followed by a reminder is the real envelope end, even when the
+ * reminder text itself quotes those tags.
+ */
+function readSystemReminder(output: string): string | undefined {
+  const marker = "\n</content>\n\n<system-reminder>\n"
+  const idx = output.indexOf(marker)
+  if (idx === -1) return undefined
+  return output.slice(idx + "\n</content>\n\n".length).trimEnd()
+}
+
+/**
+ * Model-visible text that unwrapReadOutput strips from the content: the
+ * partial-read notice plus any nested AGENTS.md reminder. Kept out of the file
+ * content itself so neither can be echoed into a write.
+ */
+export function readTruncationNotice(output: string, resultMetadata?: Record<string, unknown>): string | undefined {
+  const notices = [partialReadNotice(output, resultMetadata), readSystemReminder(output)].filter(Boolean)
+  return notices.length > 0 ? notices.join("\n\n") : undefined
+}
+
+/**
  * Model-visible replacement for the stripped footer.
  *
  * Only for reads the model did not ask to bound. A caller that passed an
  * explicit offset/limit already knows it asked for a slice - warning there
  * would cry wolf on every deliberate paged read.
  */
-export function readTruncationNotice(output: string, resultMetadata?: Record<string, unknown>): string | undefined {
+function partialReadNotice(output: string, resultMetadata?: Record<string, unknown>): string | undefined {
   const summary = readTruncationSummary(output)
   if (!summary) return undefined
   const rangeRequested = num(resultMetadata?.offset) !== undefined || num(resultMetadata?.limit) !== undefined

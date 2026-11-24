@@ -56,7 +56,7 @@ test("bootstrapSession numbers the title and routes create and prompt to the pro
 
   expect(await bootstrapSession(client, directory)).toBe("ses_1")
   expect(calls).toEqual([
-    { name: "list", input: { roots: true, limit: 500 } },
+    { name: "list", input: { roots: true, limit: 500, search: "crow" } },
     {
       name: "create",
       input: { directory, title: "crow3", metadata: { ocAutoRename: { state: "pending", title: "crow3" } } },

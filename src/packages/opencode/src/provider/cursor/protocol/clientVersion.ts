@@ -8,13 +8,23 @@ const INSTALL_URL = "https://cursor.com/install"
 const REMOTE_TIMEOUT_MS = 5_000
 const BUILD_RE = /^\d{4}\.\d{2}\.\d{2}-[0-9A-Za-z][0-9A-Za-z.-]*$/
 const CLIENT_VERSION_RE = /^cli-[0-9A-Za-z][0-9A-Za-z._-]*$/
+// A hardcoded fallback is retried, so a long-lived process picks up the real
+// version once the network or a local CLI install comes back.
+const FALLBACK_RETRY_MS = 5 * 60_000
 
 type VersionCache = { version: string; fetchedAt: number }
 
 let cachedResolution: Promise<string> | undefined
+let fallbackAt: number | undefined
 
 export function resolveClientVersion(): Promise<string> {
-  cachedResolution ??= resolve()
+  if (!cachedResolution || (fallbackAt !== undefined && Date.now() - fallbackAt >= FALLBACK_RETRY_MS)) {
+    fallbackAt = undefined
+    cachedResolution = resolve().then((version) => {
+      if (version === FALLBACK_CLIENT_VERSION) fallbackAt = Date.now()
+      return version
+    })
+  }
   return cachedResolution
 }
 

@@ -389,8 +389,9 @@ export function useRevive(toast: ToastContext) {
     if (mode === "no-install") return swap("no-install", { sessionID, resume, next }).then(() => true)
     if (mode === "install") {
       const source = config.reviveSourceChosen ? {} : await chooseSource()
-      if (!source) return false
+      // DialogPrompt.show never closes itself: clear on every outcome, empty or invalid input included.
       if (!config.reviveSourceChosen) dialog.clear()
+      if (!source) return false
       // Builds while this window stays open; a failed build leaves it open (and a chain's steps restored).
       const output = await prepare(source)
       if (!output) return false

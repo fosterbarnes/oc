@@ -48,7 +48,7 @@ export function mergeClaudeProbe(
       ? { ...account, usage: mergeClaudeProbe(old.usage, account.usage, startedAt, now) }
       : account
   })
-  if (previous.accountID !== merged.accountID && !accounts) return merged
+  if (previous.accountID !== merged.accountID) return accounts ? { ...merged, accounts } : merged
   return {
     ...merged,
     fiveHour: mergeUsageWindow(previous.fiveHour, merged.fiveHour, startedAt),

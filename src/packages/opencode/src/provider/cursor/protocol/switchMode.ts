@@ -116,6 +116,8 @@ type ActiveCursorModeState = {
 }
 
 const activeCursorModeBySession = new Map<string, ActiveCursorModeState>()
+/** Sessions are never closed from here, so cap the map like conversationBind does. */
+const _MAX_ACTIVE_MODE_SESSIONS = 256
 
 function str(value: unknown): string {
   return typeof value === "string" ? value : ""
@@ -306,11 +308,18 @@ export function setActiveCursorMode(
   if (!sessionKey) return
   const modeId = normalizeSwitchModeId(targetModeId)
   if (!modeId) return
+  // Re-insert so Map order is least-recently-switched first.
+  activeCursorModeBySession.delete(sessionKey)
   activeCursorModeBySession.set(sessionKey, {
     modeId,
     firstTurn: true,
     bridgedPlanEntered: options.bridgedPlanEntered === true,
   })
+  while (activeCursorModeBySession.size > _MAX_ACTIVE_MODE_SESSIONS) {
+    const oldest = activeCursorModeBySession.keys().next().value
+    if (oldest === undefined) return
+    activeCursorModeBySession.delete(oldest)
+  }
 }
 
 export function getActiveCursorMode(sessionKey: string | undefined): string | undefined {
@@ -354,6 +363,8 @@ export function cursorModeSystemReminder(
     options.planExitAdvertised === false
       ? "record the finished plan (Cursor CreatePlan). Writing it needs no approval, and the user is then asked whether to start implementing; if they decline, refine the plan and record it again"
       : "record the finished plan, then call OpenCode `plan_exit` so the user can approve leaving plan mode"
+  const toAgent =
+    options.planExitAdvertised === false ? "SwitchMode target agent" : "OpenCode `plan_exit` / SwitchMode target agent"
 
   if (id === "plan" || id === "spec") {
     return wrapReminder(
@@ -381,7 +392,7 @@ Your role in Ask mode:
 3. Provide code examples and references when helpful, citing specific file paths and line numbers.
 4. If you need more information, ask the user for clarification (OpenCode \`question\` when available).
 5. You may provide suggestions about how to implement something, but you MUST NOT actually implement it yourself.
-6. If the user asks you to make changes or implement something, politely remind them that you're in Ask mode and can only provide information and guidance. Suggest they switch to Agent mode (OpenCode \`plan_exit\` / SwitchMode target agent) if they want you to make changes.`
+6. If the user asks you to make changes or implement something, politely remind them that you're in Ask mode and can only provide information and guidance. Suggest they switch to Agent mode (${toAgent}) if they want you to make changes.`
         : `Ask mode is still active. You MUST NOT make any edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received (for example, to make edits).`,
     )
   }

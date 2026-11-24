@@ -2,7 +2,6 @@
 // collected as portable units with ids that match across machines. Export/import (`ocPack.ts`) and
 // tailnet sync (`ocSync.ts`) share this model. The wire form (`toWire`) is the same on every
 // machine: home folder replaced by HOME_TOKEN, secrets redacted. Plan: docs/dev/syncPlan.md.
-import { dlopen, FFIType, ptr } from "bun:ffi"
 import { existsSync, type Stats } from "node:fs"
 import fs from "node:fs/promises"
 import path from "node:path"
@@ -131,8 +130,10 @@ export function rootDir(root: Root) {
 
 // --- Collect ---
 
-// File reads keyed by absolute path; a rescan reads only files whose mtime or size changed.
-const _cache = new Map<string, { mtimeMs: number; size: number; data: Buffer }>()
+// File reads keyed by absolute path; a rescan reads only files whose mtime or size changed. `scan` is the
+// last collect that used the entry; each collect drops the ones it did not use (deleted or renamed files).
+const _cache = new Map<string, { mtimeMs: number; size: number; data: Buffer; scan: number }>()
+let _scan = 0
 
 // `unread`: sources that could not be read this time (missing root, broken jsonc). Sync must not
 // treat their items as deleted. `partial`: `category:root` id prefixes where a folder or entry could
@@ -145,11 +146,13 @@ export async function collect() {
   const unread = new Set<Source>()
   const partial = new Set<string>()
   const held = new Map<string, string>()
+  const scan = ++_scan
   const found = [
     ...(await collectRoot("config", skipped, unread, partial, held)),
     ...(await collectRoot("legacy", skipped, unread, partial, held)),
     ...(await collectKeys(unread, held)),
   ]
+  for (const [file, entry] of _cache) if (entry.scan < scan) _cache.delete(file)
   return {
     items: found.map((entry) => entry.item),
     mtimes: new Map(found.map((entry) => [entry.item.id, entry.mtime])),
@@ -360,8 +363,16 @@ function heldReason(full: string, stat: Stats) {
   return undefined
 }
 
-const openKernel32 = () =>
-  dlopen("kernel32.dll", { GetFileAttributesW: { args: [FFIType.ptr], returns: FFIType.u32 } }).symbols
+// `bun:ffi` is required on first use, not imported, so Node bundles can load this module.
+const openKernel32 = () => {
+  const ffi: typeof import("bun:ffi") = require("bun:ffi")
+  return {
+    ptr: ffi.ptr,
+    ...ffi.dlopen("kernel32.dll", {
+      GetFileAttributesW: { args: [ffi.FFIType.ptr], returns: ffi.FFIType.u32 },
+    }).symbols,
+  }
+}
 let _kernel32: ReturnType<typeof openKernel32> | undefined
 
 // 0 off Windows. `\\?\` lifts the 260-character limit on drive paths.
@@ -369,7 +380,8 @@ function windowsAttributes(full: string) {
   if (process.platform !== "win32") return 0
   const resolved = path.resolve(full)
   const wide = Buffer.from(`${/^[a-z]:\\/i.test(resolved) ? "\\\\?\\" : ""}${resolved}\0`, "utf16le")
-  return (_kernel32 ??= openKernel32()).GetFileAttributesW(ptr(wide))
+  const kernel32 = (_kernel32 ??= openKernel32())
+  return kernel32.GetFileAttributesW(kernel32.ptr(wide))
 }
 
 // macOS only: a file with no blocks but a size may be dataless. `stat -f %Xf` prints st_flags
@@ -423,8 +435,11 @@ async function filesItem(
 async function readCached(file: string) {
   const stat = await fs.stat(file)
   const hit = _cache.get(file)
-  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) return hit
-  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, data: await fs.readFile(file) }
+  if (hit && hit.mtimeMs === stat.mtimeMs && hit.size === stat.size) {
+    hit.scan = _scan
+    return hit
+  }
+  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, data: await fs.readFile(file), scan: _scan }
   _cache.set(file, entry)
   return entry
 }

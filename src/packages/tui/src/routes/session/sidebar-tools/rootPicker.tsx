@@ -164,6 +164,9 @@ export function createRootPicker(input: {
     dialog.clear()
   }
 
+  // The live filter text and search hits, so a redraw (help row, ctrl+f) keeps what the user sees.
+  let rootPickerQuery = ""
+  let rootPickerSearchOptions: typeof liveRootPickerOptions = []
   const applyRootPickerOptions = (
     searchOptions: Array<{
       title: string
@@ -174,6 +177,7 @@ export function createRootPicker(input: {
       onSelect?: () => void
     }> = [],
   ) => {
+    rootPickerSearchOptions = searchOptions
     const searching = searchOptions.length > 0
     const next = searching ? [...searchOptions, ...buildRootPickerOptions(true)] : buildRootPickerOptions()
     liveRootPickerOptions.splice(0, liveRootPickerOptions.length, ...next)
@@ -181,23 +185,17 @@ export function createRootPicker(input: {
     return liveRootPickerOptions
   }
 
-  const renderRootPicker = (
-    query = "",
-    searchOptions: Array<{
-      title: string
-      value: string
-      category?: string
-      footer?: string
-      disabled?: boolean
-      onSelect?: () => void
-    }> = [],
-  ) => {
-    const options = applyRootPickerOptions(searchOptions)
+  // A redraw remounts over the open picker with the live filter and hits; a fresh open starts empty.
+  const renderRootPicker = (redraw = false) => {
+    if (!redraw) rootPickerQuery = ""
+    const query = rootPickerQuery
+    const options = applyRootPickerOptions(redraw ? rootPickerSearchOptions : [])
     selectedRootPickerValue = options.find(
       (option) => typeof option.value === "string" && isDirectory(option.value),
     )?.value
     pickerInterceptor?.()
-    ++rootPickerSearchGeneration
+    // A redraw lets an in-flight search land in the remounted picker.
+    if (!redraw) ++rootPickerSearchGeneration
     // Separate from the search generation: typing bumps that, and the close below must still clean up.
     const pickerID = ++rootPickerRender
     const interceptor = keymap.intercept("key", (context) => {
@@ -210,7 +208,7 @@ export function createRootPicker(input: {
       ) {
         context.consume({ preventDefault: true, stopPropagation: true })
         input.toggleFavorite(selectedRootPickerValue)
-        renderRootPicker(query, searchOptions)
+        renderRootPicker(true)
       }
     })
     pickerInterceptor = interceptor
@@ -222,6 +220,7 @@ export function createRootPicker(input: {
         return liveRootPickerOptions
       },
       onFilter: (filterQuery: string) => {
+        rootPickerQuery = filterQuery
         if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
         rootPickerDebounce = setTimeout(() => {
           void (async () => {
@@ -272,7 +271,7 @@ export function createRootPicker(input: {
       },
       onMove: (option: (typeof options)[number]) => {
         if (option.value === FAVORITE_HELP) {
-          queueMicrotask(() => renderRootPicker(query, searchOptions))
+          queueMicrotask(() => renderRootPicker(true))
           return
         }
         selectedRootPickerValue =
@@ -299,6 +298,8 @@ export function createRootPicker(input: {
         if (rootPickerDebounce) clearTimeout(rootPickerDebounce)
         rootPickerSearchAbort?.abort()
       },
+      // Seeded with the filter text; the cursor starts at the top as on a fresh open.
+      { selection: createSignal({ filter: query, value: undefined as unknown }) },
     )
   }
 

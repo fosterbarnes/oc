@@ -169,7 +169,20 @@ describe("context-security: agents symlink containment", () => {
     })
     const agents = await collectAgents(tmp.path)
     // Should contain the inner secret because target is inside trusted root
-    expect(agents.some((a) => a.name === "innerlink" && a.prompt.includes("INNER_SECRET_OK"))).toBe(true)
+    expect(agents.some((a) => a.name === "inner" && a.prompt.includes("INNER_SECRET_OK"))).toBe(true)
+  })
+
+  test("agents are advertised under the host's path-derived name, not frontmatter name", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const agentsDir = path.join(dir, ".opencode", "agents", "sub")
+        await mkdir(agentsDir, { recursive: true })
+        await writeFile(path.join(agentsDir, "review.md"), "---\nname: code-reviewer\n---\nbody", "utf-8")
+      },
+    })
+    const agents = await collectAgents(tmp.path)
+    expect(agents.map((a) => a.name)).toContain("review")
+    expect(agents.map((a) => a.name)).not.toContain("code-reviewer")
   })
 
   test("serialization of request context never contains out-of-root secret", async () => {

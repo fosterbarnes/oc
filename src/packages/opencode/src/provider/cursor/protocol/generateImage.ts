@@ -87,22 +87,28 @@ export type ImageWriteRoots = {
   projectDir: string
 }
 
-function isInside(root: string, target: string): boolean {
-  const rootAbs = path.resolve(root)
-  const targetAbs = path.resolve(target)
-  try {
-    const realRoot = fs.realpathSync(rootAbs)
-    let realTarget: string
+/** Realpath of the nearest existing ancestor, with the missing tail re-appended. */
+function realpathExisting(target: string): string {
+  const missing: string[] = []
+  let current = path.resolve(target)
+  for (;;) {
     try {
-      realTarget = fs.realpathSync(targetAbs)
-    } catch {
-      realTarget = path.resolve(fs.realpathSync(path.dirname(targetAbs)), path.basename(targetAbs))
+      return path.join(fs.realpathSync(current), ...missing)
+    } catch (error) {
+      const parent = path.dirname(current)
+      if (parent === current) throw error
+      missing.unshift(path.basename(current))
+      current = parent
     }
-    const relative = path.relative(realRoot, realTarget)
+  }
+}
+
+function isInside(root: string, target: string): boolean {
+  try {
+    const relative = path.relative(realpathExisting(root), realpathExisting(target))
     return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
   } catch {
-    const relative = path.relative(rootAbs, targetAbs)
-    return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+    return false
   }
 }
 

@@ -40,7 +40,7 @@ import { DialogPrompt } from "./ui/dialog-prompt"
 import { DialogSelect } from "./ui/dialog-select"
 import { DialogStepper } from "./ui/dialog-stepper"
 import { TOAST_DISPLAY_KEY, useToast } from "./ui/toast"
-import { LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
+import { type Browser, LINK_BROWSER_KEY, LINK_CLICK_KEY, scanBrowsers } from "./util/browser"
 import { Locale } from "./util/locale"
 import { writeTerminalEscape } from "./util/renderer"
 import {
@@ -136,8 +136,11 @@ export function createOcCommands(input: {
                 return
               }
               setCreating(option.title)
+              // Escape can close this dialog mid-create; then leave whatever the user opened since.
+              const owner = dialog.stack.at(-1)
               try {
                 const sessionID = await bootstrapSession(sdk.client, directory)
+                if (dialog.stack.at(-1) !== owner) return
                 dialog.clear()
                 route.navigate({ type: "session", sessionID })
               } catch (error) {
@@ -225,18 +228,21 @@ export function createOcCommands(input: {
           if (route.data.type !== "session") return
           const current = sync.session.get(route.data.sessionID)
           const root = current?.parentID ?? route.data.sessionID
-          const children = sync.data.session.filter((session) => session.parentID === root)
-          if (children.length === 0) {
+          const listChildren = () => sync.data.session.filter((session) => session.parentID === root)
+          const count = listChildren().length
+          if (count === 0) {
             toast.show({ message: "No subagents in this session", variant: "info" })
             return
           }
           const confirmed = await DialogConfirm.show(
             dialog,
             "Stop session subagents",
-            `Abort ${children.length} subagent session${children.length === 1 ? "" : "s"}? The parent chat and its history stay.`,
+            `Abort ${count} subagent session${count === 1 ? "" : "s"}? The parent chat and its history stay.`,
           )
           if (!confirmed) return
           dialog.clear()
+          // Re-read: subagents started while the confirm was open are stopped too.
+          const children = listChildren()
           const results = await Promise.all(children.map((child) => sdk.client.session.abort({ sessionID: child.id })))
           const failed = results.filter((result) => result.error).length
           toast.show({
@@ -410,16 +416,16 @@ export function createOcCommands(input: {
             <DialogPrompt
               title="Home directory"
               placeholder={current}
-              onConfirm={(value) => {
+              onConfirm={async (value) => {
                 const trimmed = value.trim()
                 if (!trimmed) return
-                const resolved = resolveOcDirectory(trimmed, "")
+                const resolved = resolveOcDirectory(path.resolve(trimmed), "")
                 if (!resolved) {
                   toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
                   return
                 }
-                void persistOcConfig("homeDir", resolved, toast)
-                dialog.clear()
+                // Closes after the save, so the next command reads the new oc.json
+                if (await persistOcConfig("homeDir", resolved, toast)) dialog.clear()
               }}
             />
           ))
@@ -442,9 +448,8 @@ export function createOcCommands(input: {
                 { value: "name", title: "name" },
                 { value: "modified", title: "modified" },
               ]}
-              onSelect={(option) => {
-                void persistOcConfig("homeDirSort", option.value, toast)
-                dialog.clear()
+              onSelect={async (option) => {
+                if (await persistOcConfig("homeDirSort", option.value, toast)) dialog.clear()
               }}
             />
           ))
@@ -465,16 +470,15 @@ export function createOcCommands(input: {
             <DialogPrompt
               title="User folder"
               placeholder={current}
-              onConfirm={(value) => {
+              onConfirm={async (value) => {
                 const trimmed = value.trim()
                 if (!trimmed) return
-                const resolved = resolveOcDirectory(trimmed, "")
+                const resolved = resolveOcDirectory(path.resolve(trimmed), "")
                 if (!resolved) {
                   toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
                   return
                 }
-                void persistOcConfig("ocDir", resolved, toast)
-                dialog.clear()
+                if (await persistOcConfig("ocDir", resolved, toast)) dialog.clear()
               }}
             />
           ))
@@ -922,11 +926,12 @@ export function createOcCommands(input: {
                     kv.set(TERMINAL_FONT_KEY, undefined)
                     return show("reset")
                   }
+                  const owner = dialog.stack.at(-1)
                   const fonts = await listMonospaceFonts().catch((cause) => {
                     const message = cause instanceof Error ? cause.message : String(cause)
                     toast.show({ message: `Could not list fonts: ${message}`, variant: "error" })
                   })
-                  if (!fonts) return
+                  if (!fonts || dialog.stack.at(-1) !== owner) return
                   if (option.value === "family") pickFamily(fonts, font)
                   else pickWeight(fonts, font)
                 }}
@@ -947,14 +952,19 @@ export function createOcCommands(input: {
         slashName: "time",
         run: () => {
           // Saves to global config `time`, applies locally at once, then reopens on the same row.
+          // Only the newest save applies locally, and it reopens only over the dialog that started it.
+          let saves = 0
           const save = async (patch: { clock?: Locale.Clock; timezone?: string }, current: "clock" | "zone") => {
+            const owner = dialog.stack.at(-1)
+            const id = ++saves
             const result = await sdk.client.global.config.update({ config: { time: patch } })
             if (result.error) {
               toast.show({ message: `Failed to save time setting: ${String(result.error)}`, variant: "error" })
               return
             }
+            if (id !== saves) return
             Locale.setTimeSettings({ clock: Locale.clock(), timezone: Locale.zone(), ...patch })
-            show(current)
+            if (dialog.stack.at(-1) === owner) show(current)
           }
           const pickZone = () => {
             const now = new Date()
@@ -1032,15 +1042,21 @@ export function createOcCommands(input: {
           return kv.get(LINK_BROWSER_KEY) || "system default"
         },
         slashName: "linkBrowser",
-        run: async () => {
-          const browsers = await scanBrowsers()
+        run: () => {
+          // Opens at once and fills in when the scan finishes, so a slow scan never mounts over a later dialog.
+          const [browsers, setBrowsers] = createSignal<Browser[]>([])
+          void scanBrowsers().then(setBrowsers)
           dialog.replace(() => (
             <DialogSelect
               title="Open links with"
               current={kv.get(LINK_BROWSER_KEY, "")}
               options={[
                 { value: "", title: "System default" },
-                ...browsers.map((browser) => ({ value: browser.path, title: browser.name, description: browser.path })),
+                ...browsers().map((browser) => ({
+                  value: browser.path,
+                  title: browser.name,
+                  description: browser.path,
+                })),
               ]}
               onSelect={(option) => {
                 kv.set(LINK_BROWSER_KEY, option.value)

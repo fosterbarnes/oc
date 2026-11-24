@@ -29,24 +29,38 @@ export function DialogSessionSubagents(props: { sessionID: string }) {
       }),
   )
 
-  async function toggle(name: string) {
-    // Drops names of agents deleted since they were switched off, so the sidebar count stays true
-    // (skipped when the list failed to load, which would otherwise wipe every saved name).
-    const names = agents()?.map((agent) => agent.name) ?? []
-    const next = new Set([...disabled()].filter((item) => !names.length || item === ALL || names.includes(item)))
-    if (disabled().has(name)) next.delete(name)
-    else next.add(name)
-    const previous = disabled()
-    setDisabled(next)
+  // Saves run one at a time and each sends the newest set, so a slow earlier save cannot land last
+  // with a stale set. A failure reverts to the last set the server accepted.
+  let saved = disabled()
+  let queue = Promise.resolve()
+  async function save() {
+    const next = disabled()
     // Metadata is replaced whole, so carry the session's other keys over
     const { disabledSubagents: _, ...rest } = sync.session.get(props.sessionID)?.metadata ?? {}
     const result = await sdk.client.session.update({
       sessionID: props.sessionID,
       metadata: next.size > 0 ? { ...rest, disabledSubagents: [...next] } : rest,
     })
-    if (!result.error) return
-    setDisabled(previous)
+    if (!result.error) {
+      saved = next
+      return
+    }
+    setDisabled(saved)
     toast.show({ message: errorMessage(result.error), variant: "error" })
+  }
+
+  function toggle(name: string) {
+    // Drops names of agents deleted since they were switched off, so the sidebar count stays true
+    // (skipped when the list failed to load, which would otherwise wipe every saved name).
+    const names = agents()?.map((agent) => agent.name) ?? []
+    const next = new Set([...disabled()].filter((item) => !names.length || item === ALL || names.includes(item)))
+    if (disabled().has(name)) next.delete(name)
+    else next.add(name)
+    setDisabled(next)
+    queue = queue.then(save).catch((error) => {
+      setDisabled(saved)
+      toast.error(error)
+    })
   }
 
   const options = createMemo<DialogSelectOption<string>[]>(() => {

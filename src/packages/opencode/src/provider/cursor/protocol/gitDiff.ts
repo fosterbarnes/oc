@@ -14,7 +14,7 @@ export const SAFE_MAX_FILES = 100
 export const SAFE_STDOUT_BYTES = SAFE_MAX_RESPONSE_BYTES
 export const SAFE_STDERR_BYTES = 256 * 1024
 
-function normalizePath(value: string): string {
+export function normalizePath(value: string): string {
   return process.platform === "win32" ? value.toLowerCase() : value
 }
 
@@ -376,6 +376,9 @@ async function runGitWithInput(
         })
       },
     )
+    // git can exit before draining stdin (EPIPE); the callback above already
+    // reports that failure, so an unhandled stream error must not crash the process.
+    child.stdin?.on("error", () => {})
     child.stdin?.end(input)
   })
 }

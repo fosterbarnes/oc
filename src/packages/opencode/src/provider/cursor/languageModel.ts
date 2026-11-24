@@ -21,6 +21,7 @@ import { setActiveCursorMode, takeActiveCursorModeReminder } from "./protocol/sw
 import {
   flushPlanExecutionKickoff,
   planExecutionKickoffState,
+  repinPlanExecutionKickoff,
   takePlanExecutionKickoffWarning,
 } from "./planExecutionKickoff.js"
 import { getCheckpoint } from "./protocol/checkpoint.js"
@@ -352,18 +353,22 @@ export async function pumpWithRecovery(input: {
       const delayMs = retryDelayMs(failure, attempt + 1, retryPolicy)
       trace(`Run retry backoff: attempt=${attempt + 1}/${maxRecoveries} delayMs=${delayMs}`)
       await sleepForRetry(delayMs, input.abortSignal)
+      const systemReminders = pumpedSession.systemReminders
       const recovery: CursorRunRecovery = checkpoint
         ? {
             kind: "resume",
             conversationId: pumpedSession.conversationId,
             checkpoint: Uint8Array.from(checkpoint),
+            systemReminders,
           }
-        : { kind: "rebase" }
+        : { kind: "rebase", systemReminders }
       session = await input.recover(recovery)
       if (recovery.kind === "resume") {
         session.usageEstimate = { ...pumpedSession.usageEstimate }
         session.editToolCalls = new Map(pumpedSession.editToolCalls)
       }
+      // The recovered Run owns any plan approval the interrupted one recorded.
+      repinPlanExecutionKickoff(pumpedSession.openCodeSessionId, pumpedSession.sessionId, session.sessionId)
       input.onSession?.(session)
     } finally {
       sessionManager.endPump(pumpedSession, pumpOwner)
@@ -371,7 +376,10 @@ export async function pumpWithRecovery(input: {
   }
 }
 
-export type CursorRunRecovery = { kind: "rebase" } | { kind: "resume"; conversationId: string; checkpoint: Uint8Array }
+export type CursorRunRecovery = (
+  | { kind: "rebase" }
+  | { kind: "resume"; conversationId: string; checkpoint: Uint8Array }
+) & { systemReminders?: string[] }
 
 async function startSession(
   modelId: string,
@@ -464,7 +472,7 @@ async function startSession(
     )
     // A recovery resume must become a history rebase so the interrupted user
     // request remains in the seed. An ordinary turn keeps its normal user text.
-    if (recovery?.kind === "resume") recovery = { kind: "rebase" }
+    if (recovery?.kind === "resume") recovery = { kind: "rebase", systemReminders: recovery.systemReminders }
     resumeRecovery = undefined
     resuming = false
     bound = bindConversationId(sessionKey, { reset: true, ephemeral: lifecycle })
@@ -502,20 +510,23 @@ async function startSession(
   // After an approved SwitchMode, inject the Cursor CLI-shaped mode reminder
   // (same <system_reminder> contract the CLI uses after flipping unifiedMode).
   const startedWithCheckpoint = !!conversationState
+  // The take* calls consume one-shot state, so a recovery Run reuses what the
+  // interrupted Run took instead of taking again and finding nothing.
+  const carriedReminders = recovery?.systemReminders
+  const oneShotAllowed = !(isCompaction || startedWithCheckpoint || lifecycle)
   const modeReminder =
-    isCompaction || startedWithCheckpoint || lifecycle
+    !oneShotAllowed || carriedReminders
       ? undefined
       : takeActiveCursorModeReminder(sessionKey, {
           advertisedTools: cursorTools.map((tool) => tool.name),
         })
-  const kickoffWarning =
-    isCompaction || startedWithCheckpoint || lifecycle ? undefined : takePlanExecutionKickoffWarning(sessionKey)
-  const systemPrompt = [
-    baseSystemPrompt,
-    interactionGuidance,
-    modeReminder,
-    kickoffWarning ? `<system_reminder>${kickoffWarning}</system_reminder>` : undefined,
-  ]
+  const kickoffWarning = !oneShotAllowed || carriedReminders ? undefined : takePlanExecutionKickoffWarning(sessionKey)
+  const systemReminders =
+    carriedReminders ??
+    [modeReminder, kickoffWarning ? `<system_reminder>${kickoffWarning}</system_reminder>` : undefined].filter(
+      (reminder): reminder is string => !!reminder,
+    )
+  const systemPrompt = [baseSystemPrompt, interactionGuidance, ...(oneShotAllowed ? systemReminders : [])]
     .filter(Boolean)
     .join("\n\n")
   const history = extractPromptHistory(prompt, {
@@ -756,6 +767,7 @@ async function startSession(
     },
     openCodeSessionId: durable ? sessionKey : undefined,
     postCompactionRebase: isCompaction || hasPostCompactionRebase(sessionKey),
+    systemReminders,
     toolCatalog: snapshotToolCatalog(sessionKey),
     stream,
     frames: stream.frames()[Symbol.asyncIterator](),

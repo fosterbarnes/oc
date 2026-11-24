@@ -34,9 +34,14 @@ export function createClearSavedImagesCommand() {
         `Delete ${count} saved ${noun} in ${dir}?`,
       )
       if (confirmed !== true) return
-      await Promise.all(files.map((file) => unlink(file)))
-        .then(() => toast.show({ message: `Deleted ${count} saved ${noun}`, variant: "success" }))
-        .catch(toast.error)
+      const results = await Promise.allSettled(files.map((file) => unlink(file)))
+      const failed = results.filter((result) => result.status === "rejected")
+      if (failed.length === 0) {
+        toast.show({ message: `Deleted ${count} saved ${noun}`, variant: "success" })
+        return
+      }
+      if (failed.length === count) return toast.error(failed[0].reason)
+      toast.show({ message: `Deleted ${count - failed.length} of ${count} saved images`, variant: "warning" })
     },
   }
 }

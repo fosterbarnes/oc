@@ -131,6 +131,82 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-23 (~21:52) - v0.2.411 emacAnthem - Swarm claim fixes, lost subagent results, steering race, Cursor ledger items, API spend line - Claude Opus 5.5, default; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default; Implementation (swarm handoff, verified claims); completed, live unverified. Uncommitted.
+- Version: 0.2.411
+- Fixed F18 `config/revive.ts` `openTabCommand`: escapes `;` in the folder (live in Windows Terminal); revive test updated.
+- Fixed F36 `cursor/protocol/deviceId.ts` `parseWindowsMachineGuid`: hashes only the GUID; new `test/provider/cursor/deviceId.test.ts`. Changes Cursor device identity once.
+- Fixed lost subagent results (26 of 74 in the swarm): `session/prompt.ts` `pendingClaudeUser` counts from the turn's original parent (`steeredParentID`) after a steer split and skips prompts an assistant already answered; regression test in `test/session/prompt.test.ts`.
+- Fixed 76 of 78 REAL claims from `~/.config/opencode/plans/2026-11-23-claim-verification.md`: Cursor C10 C21 C32 C35 C47 C48 C49 C51 C52 C54 C55 C57-C61 C63; opencode/core C4 C5 C8 C9 C11 C39-C43 C64 C67 C71-C73; TUI dialogs C2 C3 C13-C18 C26-C28 C76 C77 C79-C81 C88 C93-C95 C97; sidebar/updaters C19 C20 C24 C25 C74 C84-C86 C89-C91 C100-C106 C108-C112. New `test/provider/cursor/editSafety.test.ts`.
+- Kept C34 (macOS pid-reuse window; no simple close). Reverted C66: `renameFallback.test.ts` requires skipping a failed model at another variant; by design.
+- Changed agent work: C8 failed listener lookup still trusts live state; C111 only an older build fails; C106 callers show save errors.
+- Fixed core `util/processDarwin.ts`, `util/ocItems.ts`: `bun:ffi` now `require`d on first use, not imported. Node bundles (`plugin/azure.ts`, `npm.ts` via processTree) failed `ERR_UNSUPPORTED_ESM_URL_SCHEME`; pre-existing since processDarwin (v0.2.332), core source otherwise equal to HEAD. `Npm.add` Node test and azure test now pass; Azure entry removed from Known failures.
+- Fixed F29 gap `agent/subagent-permissions.ts`: read-only rules name `session_complete`/`session_failed` deny. `Permission.disabled` special-cases those two (only a rule naming them counts), so the `*` deny left them listed; execution was already denied at `ctx.ask`. Test extended in `plan-mode-subagent-bypass.test.ts`.
+- Fixed from review `session/queue.ts` cancel: re-reads the row inside the delete transaction (another process could claim it after the outside read).
+- Fixed from review `cursor/context/skills.ts`: scan via core `Glob.scan` (same as host `util/fingerprint.ts`) instead of `Bun.Glob` followSymlinks; probe: junction cycle terminates.
+- Fixed from review `tui/src/pushAutoDelete.ts`: `claimed` id set so sweep and leave-session never delete one session twice (false "failed" toast).
+- Kept (review, checked): Cursor `~` paths consistent (host `edit`/`apply_patch` call `expandHome`); pushAutoDelete reuse safe (new prompt sets in-progress, clearing complete, `session.ts:847`); scheduledResume cross-process lost cancel on exit (was always lost before), resume count reset on cancel (designed), three-contender stale-lock race (two processes share the file).
+- Risk/limits: C42 Terminal close timeout only, launcher surviving force-kill not killed; C52 tiny parent-dir swap window; C54 reminders lost if first write fails; C60 guesses first dash without provider; C61 not reproduced; C86 gap between prepare and install; C89 cannot see server-side plugin retry; C16 PATCHes may arrive out of order; F76 long-open terminal delays sync reload; macOS dataless folders listed.
+- Fixed steering race `claude-code/steering.ts` `onReplay` + `streamWriter.ts`: the split waited for the async receipt save (`steer.delivered()`), so text Claude streamed meanwhile went to the reply before the steer (`steering.test.ts` "a steer reaches the running turn" failed 2 of 11 runs, empty second reply). `StreamWriter.hold()` on replay buffers output; `splitAt` emits the split then the buffer; `release()` on receipt failure and close. Test `streamWriter.test.ts`. Probe first ruled out `pendingClaudeUser` (equal to HEAD's lookup on all 8 test timelines).
+- Fixed Cursor F40 `pump.ts`: failed progress continuation saves the checkpoint, then fails the turn (was a normal stop).
+- Fixed Cursor F44 `session.ts`: `awaitingResume` keeps a Run open between result delivery and the next pump. Limit: a real cancel in that gap waits for replacement or the hard deadline.
+- Fixed Cursor F48 `imageInput.ts`, `prompt.ts`: tool-result `image-data` (AI SDK 6) attached on a fresh Run; in-turn tool results get an explicit "not shown" note (exec replies are text only).
+- Fixed Cursor F51 `readResult.ts`: nested AGENTS.md reminder kept for read_result/mcp_result. Left: `pi_read_result`.
+- Fixed Cursor F53 `descriptors.ts`: MCP server named like the default keeps full tool names. F52 partial: bare `name` without provider still guesses the first dash.
+- Fixed F29 gaps `session/prompt.ts`: read-only child's brief `@file` parts read through its rules (no cwd bypass); `refuseInReadonly` blocks command `!` shell and subtasks. ToolSearch kept exempt (schemas only; later calls guarded). Tests in `prompt.test.ts`.
+- Added Claude API spend line: `accounts.ts` `addApiSpend` tally (local day/month, in pool file), `turnStream.ts` adds API-account turn cost, `sidebarUsage.tsx` shows `Claude API $x today · $y mo` or `out of credits`. Risk: pool file last-writer-wins across oc and native; CLI cost estimate only.
+- Added personal agents `general-opus-5.5-api`, `advisor-fable-5.2-api` (`claudeAccount: ~/.claudeApi`). Ran one `general-opus-5.5-api` turn; no pool warning.
+- Verified 79 low claims plus 3 unsure with 17 GLM Flash agents: 56 REAL. Fixed 41 with 8 Opus API agents (each re-checked first), skipped 15 with reasons; list in `~/.config/opencode/plans/2026-11-23-claim-verification.md`. Notable: Cursor open Runs pinned against conversation eviction (`conversationBind.ts` pin/unpin in `session.ts` register/close), generateImage symlink escape into a missing folder (test), GOAWAY ping no longer destroys draining Runs, edit remap path compare case-insensitive on win32 and refuses non-files, Cursor skill precedence now host order (later roots win), `run_after_turn` refuses a second call per turn, revive resume newest chain first, failed job spawn deletes its folder, Jev score must be 0-1, usage tags `20m`, pooled usage merge per account, Claude dirs deduped, single update and Update all exclusive, Explorer comma paths quoted verbatim (main agent: only comma paths, trailing `\` trimmed), WT scripts use resolved pwsh, script palette ids `encodeURIComponent` (old custom keybinds on punctuated script names change), ocCommands folder saves awaited.
+- Fixed from GLM review of the claim fixes `cursor/session.ts`: a cancel held only by `awaitingResume` closes the Run after `AWAIT_RESUME_GRACE_MS` (30 s) if no step began reading (no hard deadline covers that gap). Test in `lateCancel.test.ts`. Rejected: pin-count leak (registerSession returns early for a registered session).
+- Fixed `opencode-sessions.js` (user repo, uncommitted, approved): `messages()` reads the `X-Next-Cursor` header; `collectMessagePages` stops with pages read so far when a guessed message-id bookmark is rejected. Its tests 74/74. Live after an oc restart (plugin loads from that file).
+- ERROR: one-offs not reproduced: `steering.test.ts` "delivered steer revert ... resets an empty conversation" (receipt missing, during edits under load; 10/10 since); tui `DiffViewerFileTree` empty render once (3/3 since; untouched).
+- MISTAKE: a subagent edited `prompt.test.ts` with Python despite the Edit-only rule; checked: no CR/BOM, additions only. Restate the rule in every implementation brief.
+- Verification (final tree): typecheck core, opencode, tui pass. core 1097 pass 0 fail. tui 809 pass, 5 known fail. opencode provider/session/agent/tool/config/permission/plugin/util/background 3858 pass, 1 known intermittent (`@<agent>:<level>`) plus the grace test, which ran against `session.ts` loaded before its edit; rerun after: lateCancel 3/3, cursor + prompt 230 pass 0 fail. Steering file 10/10 after the race fix. Live: F36 one Cursor turn answered normally on the installed build; user saw no sign-in or device prompt. Not run live: F29 on a real Cursor read-only child, lost-result fix with a real subagent burst, API spend line on screen, two-machine sync, macOS (C34 C40 C42 C91 C111 brew, Finder alias, dataless, Mac tool guard).
+- Risk: Mac runs 0.2.407, which ignores `readonly: true`; do not use `review-*` there until updated.
+
+### User
+Subagents
+- Background subagent results that arrived while a Claude turn was starting or ending are no longer lost.
+- A read-only subagent no longer sees the tools that mark a session complete or failed.
+
+Cursor
+- Cursor now sees the same device id as its own app on Windows, so it may ask you to sign in again once.
+- Cursor edits of files in your home folder, files with non-UTF-8 bytes, and repeated matches on one line now work safely.
+- Cursor finds nested skills, uses the right subagent names, and no longer adds a symlinked AGENTS.md twice.
+- Cursor now sees images that a read returns, keeps nested AGENTS.md reminders on reads, reports a failed continuation as an error, and keeps an MCP server named "opencode" working.
+- A late cancel no longer cuts off a Cursor reply between tool results.
+
+Claude
+- Text Claude writes right after reading a message you sent mid-turn now always appears under that message.
+- The sidebar Usage section shows a Claude API line with today's and this month's spend on API credits.
+
+Read-only subagents
+- A read-only subagent cannot read brief files its rules deny, and cannot run command shell steps or start subtasks.
+
+Smaller fixes (41 from the low-priority bug list)
+- Cursor: long runs keep their saved state, image writes through links stay in the project, server shutdowns let running replies finish, and web search errors show as errors.
+- Sidebar usage: short windows read like `20m`, duplicate Claude folders show once, and switching accounts no longer mixes readings.
+- Updaters: an app that is already current shows as current, and one update at a time runs.
+- Dialogs and scripts: subagent toggles save in order, failed sync saves show the real state, plugin names keep their scope, and Windows Terminal scripts use the real PowerShell path.
+- `run_after_turn` queues one command per turn and refuses a second.
+- session_read works on long chats again (opencode-sessions plugin, after a restart).
+
+Sessions and queue
+- Cancelling a queued prompt that is already sending now says it is busy instead of "Cancelled".
+- Cancelling a scheduled resume holds even when the schedule file is briefly locked.
+- Push session auto-delete no longer deletes a session you open during the sweep or shows a false failure.
+
+Windows Terminal, revive, and updaters
+- Folders with a semicolon open correctly in new Windows Terminal tabs.
+- /revive only builds a real oc source folder, and several updater and dependency rows report their true state.
+
+Dialogs and sidebar
+- Many dialog and sidebar fixes: hotkey conflicts are caught, saves report errors, schedule times near midnight stay on the right day, and script and usage rows show correct values.
+
+---
+
 ## 2026-11-23 (~04:17) - v0.2.410 eggoEnabled - Sync only real files, read-only subagents, Cursor sh commands, sync idle - Claude Opus 5.5, default; Implementation
 
 ### Agent

@@ -39,6 +39,11 @@ export const RunAfterTurnTool = Tool.define(
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
+          const pending = queued.get(ctx.sessionID)
+          if (pending)
+            throw new Error(
+              `run_after_turn already queued ${pending.exe} for this turn; only one command runs per turn.`,
+            )
           yield* ctx.ask({
             permission: "run_after_turn",
             patterns: [params.exe],

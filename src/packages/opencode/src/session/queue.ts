@@ -444,7 +444,24 @@ export const layer = Layer.effect(
           if (!row || row.session_id !== input.sessionID || row.state === "completed") {
             return yield* new NotFoundError({ id: input.id })
           }
-          yield* db.delete(SessionQueueTable).where(eq(SessionQueueTable.id, input.id)).run().pipe(Effect.orDie)
+          // A claimed row whose message is saved was admitted and is sending; deleting it would not stop it.
+          // Re-read in the same transaction as the delete: another process may have claimed the row since
+          // `row` was read, and admission (which re-checks the row) cannot land in between.
+          const sent = yield* db
+            .transaction(
+              () =>
+                Effect.gen(function* () {
+                  const current = yield* findRow(input.id)
+                  if (current?.state === "dispatching" && (yield* isSent(current.message_id ?? current.id))) {
+                    return true
+                  }
+                  yield* db.delete(SessionQueueTable).where(eq(SessionQueueTable.id, input.id)).run()
+                  return false
+                }),
+              { behavior: "immediate" },
+            )
+            .pipe(Effect.orDie)
+          if (sent) return yield* new BusyError({ id: input.id })
           owned.delete(input.id)
           yield* notify
           return yield* snapshotOf(input.sessionID)

@@ -125,6 +125,7 @@ function checkedTarget(input: {
           const result = await input.install(checked.newVersion, onLine)
           if (result.alreadyRunning) return { label, status: "busy", message: result.message }
           if (!result.ok) return { label, status: "failed", message: result.message }
+          if (result.upToDate) return { label, status: "current", message: result.message }
           return { label, status: "updated", message: result.message, versions }
         },
       }
@@ -273,6 +274,9 @@ function showResult(toast: ToastContext, result: UpdateResult) {
   toast.show({ message: result.message, variant: "error", duration: 15_000 })
 }
 
+// One update (single or Update all) at a time: both draw into the one progress toast.
+let updateRunning = false
+
 // One palette entry: a one-line progress toast, then the result toast replaces it.
 // `autoConfirm` is the `auto_confirm_updates` TUI setting: install without the confirm dialog.
 export async function updateOne(
@@ -281,6 +285,8 @@ export async function updateOne(
   dialog: DialogContext,
   autoConfirm: boolean,
 ) {
+  if (updateRunning) return toast.show({ message: "An update is already running", variant: "info" })
+  updateRunning = true
   const label = target.label
   const progress = createUpdateProgress(toast, `Update ${label}`, [label])
   const run = async (): Promise<UpdateResult> => {
@@ -304,6 +310,7 @@ export async function updateOne(
     else progress.set(label, _RESULT_PHASE[result.status])
   } finally {
     progress.stop()
+    updateRunning = false
   }
   showResult(toast, result)
 }
@@ -311,22 +318,21 @@ export async function updateOne(
 // Each installed target is checked in list order. Updates that need no confirmation (the CLIs, or
 // everything under auto confirm) install as soon as their check ends; the rest wait for one
 // combined confirm after every check, so the run never stalls on several prompts.
-let updateAllRunning = false
 export async function updateAll(
   targets: UpdateTarget[],
   toast: ToastContext,
   dialog: DialogContext,
   autoConfirm: boolean,
 ) {
-  if (updateAllRunning) return toast.show({ message: "Update all already running", variant: "info" })
-  updateAllRunning = true
+  if (updateRunning) return toast.show({ message: "An update is already running", variant: "info" })
+  updateRunning = true
   try {
     const installed = await detectInstalled(targets)
     const results = installed.length > 0 ? await runAll(installed, toast, dialog, autoConfirm) : []
     if (results.length === 0) return toast.show({ message: "Nothing oc can update is installed", variant: "info" })
     showSummary(toast, results)
   } finally {
-    updateAllRunning = false
+    updateRunning = false
   }
 }
 

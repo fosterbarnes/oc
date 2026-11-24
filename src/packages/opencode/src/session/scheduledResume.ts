@@ -1,5 +1,15 @@
 import { randomUUID } from "node:crypto"
-import { copyFileSync, constants, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  constants,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -132,6 +142,9 @@ export function createStore(file: string | null, clock: () => number = Date.now)
   wakes.set(file, wake)
   const owner = ScheduledDelivery.ownerOnce()
   let identity: Awaited<ReturnType<typeof ScheduledDelivery.owner>> | undefined
+  // Sessions whose cancel timed out on the lock. takeDue, the only path that fires entries, applies them
+  // under its own lock, so a timed-out cancel cannot let the resume fire later.
+  const cancelled = new Set<string>()
   const read = (): State => {
     if (!file) return defaultState()
     try {
@@ -157,8 +170,16 @@ export function createStore(file: string | null, clock: () => number = Date.now)
   // so this is a bounded spin, not a queue: a critical section is one small
   // JSON write, and a lock older than STALE_MS is a crashed holder.
   const STALE_MS = 30_000
-  const holderGone = (lock: string) => {
-    const pid = Number(readFileSync(lock, "utf8"))
+  // Lock content is "pid:token"; the token tells this holder's lock from a later one at the same path.
+  const readLock = (lock: string) => {
+    try {
+      return readFileSync(lock, "utf8")
+    } catch {
+      return undefined
+    }
+  }
+  const holderGone = (content: string) => {
+    const pid = Number.parseInt(content, 10)
     if (!pid) return false
     try {
       process.kill(pid, 0)
@@ -174,16 +195,25 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     const sleepBuf = new Int32Array(new SharedArrayBuffer(4))
     const sleep = (ms: number) => Atomics.wait(sleepBuf, 0, 0, ms)
     const deadline = Date.now() + 5_000
+    const token = `${process.pid}:${randomUUID()}`
     for (;;) {
       try {
-        writeFileSync(lock, String(process.pid), { flag: "wx" })
+        writeFileSync(lock, token, { flag: "wx" })
         break
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err
+        const seen = readLock(lock)
+        const aside = `${lock}.${token.replace(":", "-")}.stale`
         try {
           // The 5 s wait below is shorter than STALE_MS, so a crashed holder is also detected by its pid.
-          if (Date.now() - statSync(lock).mtimeMs > STALE_MS || holderGone(lock)) rmSync(lock, { force: true })
+          // Rename is atomic, so only one waiter takes the stale lock; if another holder replaced it after
+          // `seen` was read, that live lock is put back instead of deleted.
+          if (seen !== undefined && (Date.now() - statSync(lock).mtimeMs > STALE_MS || holderGone(seen))) {
+            renameSync(lock, aside)
+            if (readLock(aside) !== seen) linkSync(aside, lock)
+          }
         } catch {}
+        rmSync(aside, { force: true })
         if (Date.now() >= deadline) {
           // Leave queued entries untouched so the next poll can retry safely.
           return undefined
@@ -194,7 +224,8 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     try {
       return action()
     } finally {
-      rmSync(lock, { force: true })
+      // A holder judged stale may have lost the lock to another process; never delete theirs.
+      if (readLock(lock) === token) rmSync(lock, { force: true })
     }
   }
   // Always re-read: two instances share this file, and claiming (takeDue)
@@ -239,6 +270,8 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       const state = read()
       if (!state.enabled) return null
       if (!input.sessionID || !input.directory || !Number.isFinite(input.fireAt)) return null
+      // A cancel still waiting for takeDue applies first, so this newer schedule survives it.
+      if (cancelled.delete(input.sessionID)) dropSession(state, input.sessionID)
       if ((state.resumeCounts[input.sessionID] ?? 0) >= MAX_AUTO_RESUMES) return null
       const entry: Entry = {
         id: randomUUID(),
@@ -265,17 +298,26 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       return true
     }) ?? false
 
-  const cancelSession = (sessionID: string): boolean =>
-    withLock(() => {
+  const dropSession = (state: State, sessionID: string) => {
+    const next = state.entries.filter((entry) => entry.sessionID !== sessionID)
+    const counted = sessionID in state.resumeCounts
+    if (next.length === state.entries.length && !counted) return false
+    state.entries = next
+    delete state.resumeCounts[sessionID]
+    return true
+  }
+
+  const cancelSession = (sessionID: string): boolean => {
+    const done = withLock(() => {
+      cancelled.delete(sessionID)
       const state = read()
-      const next = state.entries.filter((entry) => entry.sessionID !== sessionID)
-      const counted = sessionID in state.resumeCounts
-      if (next.length === state.entries.length && !counted) return false
-      state.entries = next
-      delete state.resumeCounts[sessionID]
+      if (!dropSession(state, sessionID)) return false
       write(state)
       return true
-    }) ?? false
+    })
+    if (done === undefined) cancelled.add(sessionID)
+    return done ?? false
+  }
 
   const takeDue = async (now: number = clock()): Promise<Entry[]> => {
     if (!read().enabled) {
@@ -300,6 +342,9 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     return (
       withLock(() => {
         const state = read()
+        const dropped = [...cancelled].filter((sessionID) => dropSession(state, sessionID)).length
+        cancelled.clear()
+        if (dropped) write(state)
         // A liveness result cannot evict a claim replaced while the OS query was in flight.
         const due = state.entries.filter(
           (entry) =>

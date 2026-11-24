@@ -365,6 +365,34 @@ it.instance("editing refuses a claimed prompt and cancellation removes it", () =
   }),
 )
 
+it.instance("cancelling a prompt that was already admitted reports busy and keeps the row", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup()
+    const session = yield* fixture.sessions.create({ title: "admitted" })
+    yield* fixture.state.maintenance(
+      session.id,
+      Effect.gen(function* () {
+        const id = (yield* add(fixture, session.id, "sending")).entries[0]!.id
+        expect((yield* fixture.queue.claim(session.id, Effect.succeed(true)))?.id).toBe(id)
+        const messageID = yield* fixture.queue.prepare(id)
+        yield* fixture.prompt.prompt({
+          sessionID: session.id,
+          model: ref,
+          messageID,
+          noReply: true,
+          parts: [text("sending")],
+          delivery: fixture.queue.delivery(id),
+        })
+        const cancel = yield* Effect.exit(fixture.prompt.queue.cancel({ sessionID: session.id, id }))
+        expect(Exit.isFailure(cancel) && Cause.squash(cancel.cause)).toBeInstanceOf(SessionQueue.BusyError)
+        expect((yield* fixture.queue.snapshot(session.id)).entries.map((entry) => entry.id)).toEqual([id])
+        yield* fixture.queue.complete(id)
+      }),
+    )
+    expect(yield* userTexts(fixture, session.id)).toEqual(["sending"])
+  }),
+)
+
 it.instance("a restart pauses left-over prompts until the user resumes", () =>
   Effect.gen(function* () {
     const fixture = yield* setup()

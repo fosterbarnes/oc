@@ -563,7 +563,9 @@ export function mcpRealToolName(mcpArgs: Record<string, unknown>, defaultServer 
   }
 
   const name = typeof mcpArgs.name === "string" ? mcpArgs.name : ""
-  const dash = name.indexOf("-")
+  // Server ids may contain `-` (`user-github`), so split after the known
+  // provider when Cursor sent one; the first dash is only a guess.
+  const dash = provider && name.startsWith(`${provider}-`) ? provider.length : name.indexOf("-")
   if (dash > 0) {
     const server = name.slice(0, dash)
     const bare = name.slice(dash + 1)

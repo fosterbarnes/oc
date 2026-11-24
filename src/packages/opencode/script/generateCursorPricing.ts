@@ -173,7 +173,9 @@ export function buildPricingTable(markdown: string): Record<string, OpenCodeMode
       oneMillion.set(baseId, row.cost)
       continue
     }
-    if (/ 500k(?: \(Fast\))?$/i.test(row.name)) explicitLong.add(id.replace(/-500k-fast$/, "").replace(/-500k$/, ""))
+    // Same base key as the 1M branch: a Fast row strips to `-fast`, not the standard model.
+    if (/ 500k(?: \(Fast\))?$/i.test(row.name))
+      explicitLong.add(id.replace(/-500k-fast$/, "-fast").replace(/-500k$/, ""))
     table[id] = row.cost
     if (
       !/ 500k(?: \(Fast\))?$/i.test(row.name) &&
@@ -272,10 +274,16 @@ async function render(
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
-  const fromIndex = args.indexOf("--from-file")
-  const contextFromIndex = args.indexOf("--context-from-file")
-  const from = fromIndex === -1 ? undefined : args[fromIndex + 1]
-  const contextFrom = contextFromIndex === -1 ? undefined : args[contextFromIndex + 1]
+  // A flag with no path must fail, not silently fall back to the live doc and overwrite.
+  const fileArg = (flag: string) => {
+    const index = args.indexOf(flag)
+    if (index === -1) return undefined
+    const value = args[index + 1]
+    if (!value || value.startsWith("--")) throw new Error(`${flag} needs a file path`)
+    return value
+  }
+  const from = fileArg("--from-file")
+  const contextFrom = fileArg("--context-from-file")
   const check = args.includes("--check")
   const pricing = await load(CURSOR_PRICING_DOC_URL, from)
   const contextDoc = await load(CURSOR_CONTEXT_DOC_URL, contextFrom)

@@ -138,6 +138,14 @@ test("parses a successful install", () => {
   })
 })
 
+test("an install that finds the app already current is not a failure", () => {
+  expect(parseDesktopInstallOutput("Claude Desktop is up to date (2.31226.1)\n")).toEqual({
+    ok: true,
+    message: "Claude Desktop is up to date (2.31226.1)",
+    upToDate: true,
+  })
+})
+
 test("parses a failed install from the last line", () => {
   expect(parseDesktopInstallOutput("Install failed: Access is denied\n")).toEqual({
     ok: false,

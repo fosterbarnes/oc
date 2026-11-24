@@ -104,7 +104,9 @@ function table(entries: UsageEntry[], width: number, options: { spacing: boolean
       (entry.note !== undefined || (tags && entry.windows.map((window) => window.tag).join() === tags.join())),
   )
   const rest = entries.filter((entry) => !rows.includes(entry))
-  const nameWidth = Math.max(0, ...rows.map((entry) => entry.name.length))
+  // Wide enough that the first label, ending at its column, starts after `- Usage: ` (9 columns).
+  const first = tags?.[0] === "wk" ? "week" : (tags?.[0] ?? "")
+  const nameWidth = Math.max(first.length + 2, ...rows.map((entry) => entry.name.length))
   const resetWidth = [0, 1].map((slot) => Math.max(0, ...rows.map((entry) => entry.windows[slot]?.reset.length ?? 0)))
   const renewWidth = Math.max(0, ...rows.map((entry) => entry.plan?.short.length ?? 0))
   // Name, marker, and ` 42%` per window always; ` 7:40PM` resets, then ` 26d` renewals, while they fit.

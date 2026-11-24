@@ -4,6 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { Global } from "@opencode-ai/core/global"
+import { Flock } from "@opencode-ai/core/util/flock"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { detectTerminal, type TerminalInfo } from "@opencode-ai/core/util/terminal"
 import { cursorSessionSecretPath, readCursorSessionToken, writeCursorSessionToken } from "./cursorToken"
@@ -250,9 +251,11 @@ export function normalizeScriptSettings(value: unknown, base = defaultScriptSett
   const languages = cloneSettings(base).languages
   if (Array.isArray(input.languages)) {
     for (const item of input.languages) {
+      const id = (item as { id?: unknown })?.id
+      // language() trims the stored id, so the builtin lookup must match on the trimmed id too.
       const normalized = language(
         item,
-        languages.find((entry) => entry.id === (item as { id?: unknown })?.id),
+        languages.find((entry) => entry.id === (typeof id === "string" ? id.trim() : id)),
       )
       if (!normalized) continue
       const index = languages.findIndex((entry) => entry.id === normalized.id)
@@ -420,15 +423,27 @@ const USER_KEYS = [
 ] as const
 type SidebarState = Pick<SidebarSettings, "scriptPins" | "favoriteFileRoots" | "recentFileRoots" | "fileRoots">
 
-/** An undefined value removes the key, which returns that setting to its default. */
+let _userWrites: Promise<void> = Promise.resolve()
+
+/**
+ * An undefined value removes the key, which returns that setting to its default. Every TUI shares
+ * sidebar.json, so the read-modify-write runs under a cross-process lock and one TUI never drops
+ * another's key. Queued so rapid changes land in order.
+ */
 export function saveUserSidebarSetting<K extends (typeof USER_KEYS)[number]>(
   key: K,
   value: SidebarSettings[K],
   filePath = sidebarUserPath(),
-): void {
-  const existing = readJsonFile(filePath)
-  const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
-  writeJsonObject(filePath, { ...base, [key]: value })
+): Promise<void> {
+  const result = _userWrites.then(() =>
+    Flock.withLock(`sidebar-user:${filePath}`, async () => {
+      const existing = readJsonFile(filePath)
+      const base = existing && typeof existing === "object" ? (existing as Record<string, unknown>) : {}
+      writeJsonObject(filePath, { ...base, [key]: value })
+    }),
+  )
+  _userWrites = result.catch(() => undefined)
+  return result
 }
 
 // TODO: remove at 0.4.0. One-time copy of the openSidebar plugin-era files into oc's own: the user file
@@ -447,7 +462,7 @@ export function migrateLegacySidebar(input: {
   const legacyUser = upgradeLegacySidebar(readJsonFile(path.join(legacyDirectory, "config.json")))
   const legacyProject = upgradeLegacySidebar(readJsonFile(path.join(input.projectRoot, ".config", "openSidebar.json")))
   const userPath = input.userPath ?? sidebarUserPath()
-  if (!fs.existsSync(userPath) && fs.existsSync(legacyDirectory)) {
+  if (!fs.existsSync(userPath) && (fs.existsSync(legacyDirectory) || legacyProject.visibility !== undefined)) {
     const tokenPath = input.tokenPath ?? cursorSessionSecretPath()
     const token =
       readCursorSessionToken(path.join(legacyDirectory, "cursor-session")) ??
@@ -546,5 +561,16 @@ export function updateLanguage(
     languages: settings.languages
       .map((item) => (item.id === languageID ? update(item) : item))
       .filter((item): item is ScriptLanguage => Boolean(item)),
+  }
+}
+
+/** Moves an extension to one language. Scripts run with the first matching language, so no other keeps it. */
+export function trackExtension(settings: ScriptSettings, languageID: string, extension: string): ScriptSettings {
+  return {
+    ...cloneSettings(settings),
+    languages: settings.languages.map((item) => {
+      const others = item.extensions.filter((value) => value !== extension)
+      return { ...item, extensions: item.id === languageID ? [...others, extension] : others }
+    }),
   }
 }

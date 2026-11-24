@@ -75,6 +75,19 @@ test("older probes and snapshots cannot replace newer Claude observations or era
   expect(older.ok && older.weekly.fetchedAt).toBe(1_000)
 })
 
+test("a pooled probe for another account does not keep the old account's windows", () => {
+  const live = applyClaudeObservation(claude(), observation("claude-code", "C:/accounts/main", "five_hour"))
+  const other = claude("C:/accounts/other")
+  if (!other.ok) throw new Error("fixture must be readable")
+  const pool: UsageSnapshot<ClaudeCodeUsage> = {
+    ...other,
+    accounts: [{ name: "other", id: "C:/accounts/other", usage: other }],
+  }
+  const merged = mergeClaudeProbe(live, pool, 2_000, 4_000)
+  expect(merged.ok && merged.fiveHour.usedPercent).toBe(8.25)
+  expect(merged.ok && merged.accounts?.length).toBe(1)
+})
+
 test("live Codex partial metadata survives a slow probe and rejects another account", () => {
   const live = applyOpenAIObservation({ ok: false }, observation("openai", "account1", "primary"))
   const probe: UsageSnapshot<OpenAIUsage> = {

@@ -35,7 +35,11 @@ function mtime(fullPath: string) {
 // Same steps as `session bootstrap` and the launcher, over the TUI's existing server connection.
 // The client defaults to the Home directory, so create and prompt route to `directory` explicitly.
 export async function bootstrapSession(client: OpencodeClient, directory: string) {
-  const sessions = await client.experimental.session.list({ roots: true, limit: 500 }, { throwOnError: true })
+  // Title search keeps older matching sessions inside the limit (a superset; nextProjectTitle filters).
+  const sessions = await client.experimental.session.list(
+    { roots: true, limit: 500, search: path.basename(directory) || directory },
+    { throwOnError: true },
+  )
   const title = nextProjectTitle(
     sessions.data.map((item) => item.title),
     directory,

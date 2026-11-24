@@ -2,7 +2,8 @@ import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
 import { sectionOpen } from "./open"
 import { SidebarToggle } from "./toggle"
 import type { BuiltinTuiPlugin } from "../builtins"
-import { createMemo, createResource, For, Show } from "solid-js"
+import { usePluginRuntime } from "../../plugin/runtime"
+import { createMemo, createResource, For, onCleanup, Show } from "solid-js"
 import path from "path"
 
 const id = "internal:sidebar-plugins"
@@ -20,10 +21,16 @@ function View(props: { api: TuiPluginApi }) {
   // Unset until clicked, so the section follows the failure state until the user chooses.
   const [open, setOpen] = sectionOpen(props.api, "plugins", undefined)
   const theme = () => props.api.theme.current
-  const [server] = createResource(() => props.api.client.plugin.status().then((x) => x.data ?? []))
+  const runtime = usePluginRuntime()
+  // Server status is refetched whenever the TUI plugin list changes (activate, deactivate, retry) or a
+  // plugin is added.
+  const [server, { refetch }] = createResource(runtime.status, () =>
+    props.api.client.plugin.status().then((x) => x.data ?? []),
+  )
+  onCleanup(props.api.event.on("plugin.added", () => void refetch()))
   const builtin = createMemo(() => (server() ?? []).filter((item) => item.source === "internal"))
   const rows = createMemo(() => {
-    const tui = props.api.plugins.list().filter((item) => item.source !== "internal")
+    const tui = runtime.status().filter((item) => item.source !== "internal")
     const external = (server() ?? []).filter((item) => item.source !== "internal")
     const merged = external.map((item): Row => {
       const half = tui.find((x) => x.target === item.target)
@@ -40,11 +47,13 @@ function View(props: { api: TuiPluginApi }) {
       .filter((item) => !external.some((x) => x.target === item.target))
       .map(
         (item): Row => ({
-          name: path.parse(item.spec).name,
+          // npm specs keep their scope and drop only the trailing `@version`
+          name: item.source === "npm" ? item.spec.replace(/(.)@.*$/, "$1") : path.parse(item.spec).name,
           version: item.source === "file" ? "local" : undefined,
           server: false,
           tui: item.active,
-          status: item.active ? "loaded" : "disabled",
+          // Enabled but inactive means its `tui()` threw.
+          status: item.active ? "loaded" : item.enabled ? "failed" : "disabled",
         }),
       )
     return [...merged, ...tuiOnly]

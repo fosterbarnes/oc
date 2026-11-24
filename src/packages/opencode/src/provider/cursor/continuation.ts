@@ -2,6 +2,7 @@ import path from "node:path"
 import { trace } from "./debug.js"
 import { decodeMessage, encodeMessage } from "./protocol/messages.js"
 import { buildCompleteEditReadMessages } from "./protocol/editRemap.js"
+import { resolveReadTargetPath } from "./protocol/readResult.js"
 import { buildExecClientMessages, buildExecStreamClose } from "./protocol/execResult.js"
 import {
   buildAskQuestionInteractionReply,
@@ -285,8 +286,8 @@ export function deliverContinuationResults(
             ? session.editToolCalls?.get(correlatedEditCallId)
             : undefined
         if (correlatedEdit) {
-          const absolutePath = path.resolve(workspaceRoot, requestedPath as string)
-          if (absolutePath === path.resolve(workspaceRoot, correlatedEdit.path)) {
+          const absolutePath = resolveReadTargetPath(requestedPath as string, workspaceRoot)
+          if (absolutePath === resolveReadTargetPath(correlatedEdit.path, workspaceRoot)) {
             frames = buildCompleteEditReadMessages(r.execId, absolutePath, requestedPath as string) ?? []
             if (frames.length > 0) {
               correlatedEdit.completeRead = true

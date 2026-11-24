@@ -33,14 +33,21 @@ export function createQueueSnapshot(sessionID: () => string | undefined) {
   const [snapshot, setSnapshot] = createSignal<QueueSnapshot>(EMPTY, {
     equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
   })
+  // Requests are numbered so a response never overwrites one from a newer request (e.g. a poll sent
+  // before a cancel landing after the cancel's own refresh).
+  let started = 0
+  let applied = 0
   // Resolves once the snapshot is updated, for callers that read it right after a change.
   const refresh = async () => {
     const id = sessionID()
     if (!id) return
+    const request = ++started
     await sdk.client.session.queue
       .get({ sessionID: id }, { throwOnError: true })
       .then((result) => {
-        if (sessionID() === id) setSnapshot(result.data)
+        if (sessionID() !== id || request < applied) return
+        applied = request
+        setSnapshot(result.data)
       })
       .catch(() => {})
   }
@@ -134,20 +141,25 @@ export function DialogQueue(props: { sessionID: string }) {
           value={entry.text}
           multiline
           onConfirm={(text) => {
+            // Back to the queue only if this editor is still on top when the save lands (not after Esc).
+            const owner = dialog.stack.at(-1)
+            const backIfOpen = () => {
+              if (dialog.stack.at(-1) === owner) back()
+            }
             // Parsed like a typed draft, so an edit can add or drop slash commands and revive chains.
             const chain = extractChain(text, sync.data.command)
             if (chain) {
               // A plain prompt edited into a chain has no TUI waiting for it yet.
               const body = { type: "edit" as const, id, text: "", commands: [], chain: chain.steps }
               void update(body).then((done) => {
-                back()
+                backIfOpen()
                 if (done) void reviveChain.watchQueued(props.sessionID).catch((error: unknown) => toast.error(error))
               })
               return
             }
             const typed = extractSlashCommands(text, sync.data.command)
             if (!typed.arguments && !typed.names.length) return
-            void update({ type: "edit", id, text: typed.arguments, commands: typed.names, chain: [] }).then(back)
+            void update({ type: "edit", id, text: typed.arguments, commands: typed.names, chain: [] }).then(backIfOpen)
           }}
         />
       ),

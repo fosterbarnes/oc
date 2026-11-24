@@ -223,7 +223,8 @@ async function newestPack() {
       .filter((name) => name.endsWith(OcPack.EXTENSION))
       .map(async (name) => {
         const file = path.join(downloads, name)
-        return { file, time: (await fs.stat(file)).mtimeMs }
+        // An unreadable pack sorts last instead of blocking the prompt.
+        return { file, time: (await fs.stat(file).catch(() => undefined))?.mtimeMs ?? 0 }
       }),
   )
   return packs.sort((a, b) => b.time - a.time)[0]?.file ?? ""

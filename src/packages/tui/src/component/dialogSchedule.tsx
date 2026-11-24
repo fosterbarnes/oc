@@ -34,37 +34,30 @@ export function DialogSchedule(props: { onSchedule: (schedule: Schedule) => void
       title="Schedule prompt: send to"
       options={TARGETS}
       onSelect={(option) =>
-        dialog.replace(
-          () => <DialogScheduleTime target={option.value} onSchedule={props.onSchedule} />,
-          undefined,
-          { back },
-        )
+        dialog.replace(() => <DialogScheduleTime target={option.value} onSchedule={props.onSchedule} />, undefined, {
+          back,
+        })
       }
     />
   )
 }
 
-function DialogScheduleTime(props: {
-  target: ScheduleTarget
-  onSchedule: (schedule: Schedule) => void
-}) {
+function DialogScheduleTime(props: { target: ScheduleTarget; onSchedule: (schedule: Schedule) => void }) {
   const dialog = useDialog()
   const toast = useToast()
   const { theme } = useTheme()
   const config = useTuiConfig()
   const submitShortcut = useCommandShortcut("dialog.prompt.submit")
   const [now, setNow] = createSignal(Date.now())
-  const [clock, setClock] = createSignal(createScheduleClock(
-    now(),
-    Locale.clock() === "12h",
-  ))
+  const [clock, setClock] = createSignal(createScheduleClock(now(), Locale.clock() === "12h"))
   const timer = setInterval(() => setNow(Date.now()), 1000)
   onCleanup(() => clearInterval(timer))
   const next = createMemo(() => nextScheduleOccurrence(clock(), now()))
   const labels = clock().hour12 ? ["hr", "min", "sec", "AM/PM"] : ["hr", "min", "sec"]
 
   function schedule() {
-    const runAt = nextScheduleOccurrence(clock(), Date.now())
+    // The shown time, not a fresh one: at the boundary a fresh read would roll to tomorrow unseen.
+    const runAt = next()
     if (runAt === undefined) {
       toast.show({ message: "Enter a valid local clock time", variant: "warning" })
       return
@@ -80,15 +73,23 @@ function DialogScheduleTime(props: {
     bindings: [
       ...config.keybinds.gather("dialog.prompt", ["dialog.prompt.submit"]),
       ...[
-        "left", "right", "up", "down", "shift+up", "shift+down",
-        "a", "p", "shift+a", "shift+p", "space", ..."0123456789",
+        "left",
+        "right",
+        "up",
+        "down",
+        "shift+up",
+        "shift+down",
+        "a",
+        "p",
+        "shift+a",
+        "shift+p",
+        "space",
+        ..."0123456789",
       ].map((key) => ({
         key,
         desc: "Edit scheduled time",
         group: "Dialog",
-        cmd: () => setClock((value) => editScheduleClock(
-          value, key.replace("shift+", ""), key.startsWith("shift+"),
-        )),
+        cmd: () => setClock((value) => editScheduleClock(value, key.replace("shift+", ""), key.startsWith("shift+"))),
       })),
     ],
   }))
@@ -103,8 +104,12 @@ function DialogScheduleTime(props: {
   return (
     <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={theme.text} attributes={TextAttributes.BOLD}>Schedule prompt: send at</text>
-        <text fg={theme.textMuted} onMouseUp={() => dialog.escape()}>esc</text>
+        <text fg={theme.text} attributes={TextAttributes.BOLD}>
+          Schedule prompt: send at
+        </text>
+        <text fg={theme.textMuted} onMouseUp={() => dialog.escape()}>
+          esc
+        </text>
       </box>
       <box flexDirection="row" gap={1}>
         <For each={labels}>
@@ -117,7 +122,7 @@ function DialogScheduleTime(props: {
                   bg={clock().section === index() ? theme.primary : theme.backgroundElement}
                   attributes={clock().section === index() ? TextAttributes.BOLD : undefined}
                 >
-                  {` ${index() === 3 ? clock().pm ? "PM" : "AM" : clock().fields[index()]} `}
+                  {` ${index() === 3 ? (clock().pm ? "PM" : "AM") : clock().fields[index()]} `}
                 </text>
                 <text fg={theme.textMuted}>{label}</text>
               </box>
@@ -126,7 +131,9 @@ function DialogScheduleTime(props: {
         </For>
       </box>
       <text fg={next() === undefined ? theme.warning : theme.text}>
-        {next() === undefined ? "Enter a valid local clock time" : `Next: ${Locale.format(next()!, { dateStyle: "medium", timeStyle: "medium" })}`}
+        {next() === undefined
+          ? "Enter a valid local clock time"
+          : `Next: ${Locale.format(next()!, { dateStyle: "medium", timeStyle: "medium" })}`}
       </text>
       <box>
         <text fg={theme.textMuted}>←/→ section · ↑/↓ adjust · Shift: ±1</text>

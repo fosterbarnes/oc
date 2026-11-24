@@ -141,6 +141,19 @@ test("reads versions from real --version output", () => {
   expect(versionOf("\n")).toBeUndefined()
 })
 
+test.skipIf(process.platform !== "win32")("a CLI whose --version fails is an error, not installed", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "oc-broken-cli-"))
+  try {
+    await Bun.write(path.join(dir, "git.cmd"), "@exit /b 3\r\n")
+    const rest = Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "path")
+    const row = DEPENDENCIES.find((dep) => dep.id === "git")
+    const detected = await row?.detect({ ...Object.fromEntries(rest), PATH: dir, PATHEXT: ".CMD" })
+    expect(detected?.status).toBe("error")
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("quotes PowerShell literals including curly quotes", () => {
   expect(psString("C:\\Users\\O'Neil\\oc")).toBe("'C:\\Users\\O''Neil\\oc'")
   expect(psString("a\u2019b")).toBe("'a\u2019\u2019b'")

@@ -57,7 +57,8 @@ export function resolveRetryPolicy(options: CursorRetryOptions | undefined): Cur
 }
 
 export function retryDelayMs(error: CursorProviderError, attempt: number, policy: CursorRetryPolicy): number {
-  if (error.retryAfterMs !== undefined) return Math.min(MAX_RETRY_DELAY_MS, error.retryAfterMs)
+  // A zero hint (RetryInfo "0s") falls through to jittered backoff instead of immediate retries.
+  if (error.retryAfterMs) return Math.min(MAX_RETRY_DELAY_MS, error.retryAfterMs)
   const ceiling = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** Math.max(0, attempt - 1))
   return Math.floor(Math.random() * ceiling)
 }

@@ -146,6 +146,31 @@ function readMidTurn(msgs: SessionV1.WithParts[], userID: string, assistant: Ses
   )
 }
 
+const steered = (msg: SessionV1.WithParts) =>
+  msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY])
+
+/**
+ * The oldest prompt after a Claude step that still needs its own step. A reply split at a steered prompt
+ * (`SessionProcessor.splitAt`) points at that prompt, so prompts queued before Claude read it (notices posted while
+ * the turn started or ended, which `steerClaudeTurn` skips) count from the turn's original parent instead.
+ */
+export function pendingClaudeUser(timeline: SessionV1.WithParts[], assistant: SessionV1.Assistant) {
+  const original = timeline
+    .find((msg) => msg.info.id === assistant.parentID)
+    ?.parts.find((part): part is SessionV1.TextPart => part.type === "text" && !!part.metadata?.[STEERED_METADATA_KEY])
+    ?.metadata?.steeredParentID
+  const floor = typeof original === "string" ? original : assistant.parentID
+  const answered = new Set(timeline.flatMap((msg) => (msg.info.role === "assistant" ? [msg.info.parentID] : [])))
+  return timeline.find(
+    (msg) =>
+      msg.info.role === "user" &&
+      !msg.info.noReply &&
+      msg.info.id > floor &&
+      !answered.has(msg.info.id) &&
+      !steered(msg),
+  )
+}
+
 /**
  * An oc-posted synthetic prompt (Claude wake turn, background notice) continues the turn before it, so it runs
  * under that turn's command rules (`permission`, `toolHost`), also through a chain of them.
@@ -964,6 +989,11 @@ const layer = Layer.effect(
               const mime = (yield* fsys.isDir(filepath)) ? "application/x-directory" : part.mime
 
               const { read } = yield* registry.named()
+              // A read-only subagent's attached files (e.g. `@path` in a task brief) obey its own read rules.
+              const briefRules = [...ag.permission, ...(current.permission ?? []), ...(input.turnPermission ?? [])]
+              const readonlyRules = isReadonlySubagent(current.permission)
+                ? [...briefRules, ...readonlySubagentRules(briefRules)]
+                : undefined
               const execRead = (args: Parameters<typeof read.execute>[0], extra?: Tool.Context["extra"]) => {
                 const controller = new AbortController()
                 return read
@@ -972,10 +1002,15 @@ const layer = Layer.effect(
                     abort: controller.signal,
                     agent: input.agent!,
                     messageID: info.id,
-                    extra: { bypassCwdCheck: true, ...extra },
+                    extra: { ...(readonlyRules ? {} : { bypassCwdCheck: true }), ...extra },
                     messages: [],
                     metadata: () => Effect.void,
-                    ask: () => Effect.void,
+                    ask: readonlyRules
+                      ? (req) =>
+                          permission
+                            .ask({ ...req, sessionID: input.sessionID, ruleset: readonlyRules })
+                            .pipe(Effect.orDie)
+                      : () => Effect.void,
                   })
                   .pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())))
               }
@@ -1410,19 +1445,10 @@ const layer = Layer.effect(
           // No-reply marks (revive) are never answered on their own; the next prompt carries them.
           const pendingUser =
             lastAssistant && isClaudeCodeProvider(lastAssistant.providerID)
-              ? timeline.find(
-                  (msg) =>
-                    msg.info.role === "user" &&
-                    !msg.info.noReply &&
-                    msg.info.id > lastAssistant.parentID &&
-                    !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]),
-                )
+              ? pendingClaudeUser(timeline, lastAssistant)
               : undefined
           const unanswered = timeline.findLast(
-            (msg) =>
-              msg.info.role === "user" &&
-              !msg.info.noReply &&
-              !msg.parts.some((part) => part.type === "text" && part.metadata?.[STEERED_METADATA_KEY]),
+            (msg) => msg.info.role === "user" && !msg.info.noReply && !steered(msg),
           )?.info
           const pickedUser =
             pendingUser?.info.role === "user"
@@ -1843,6 +1869,15 @@ const layer = Layer.effect(
       return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
     })
 
+    // Command shell expansion and subtasks skip tool permission, so a read-only subagent may not use them.
+    const refuseInReadonly = Effect.fnUntraced(function* (sessionID: SessionID, what: string) {
+      const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+      if (!isReadonlySubagent(session.permission)) return
+      const error = new NamedError.Unknown({ message: `${what}, which a read-only subagent may not do` })
+      yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+      throw error
+    })
+
     const commandTemplate = Effect.fn("SessionPrompt.commandTemplate")(function* (
       cmd: Command.Info,
       input: { sessionID: SessionID; arguments: string; agent?: string },
@@ -1880,6 +1915,7 @@ const layer = Layer.effect(
 
         const shellMatches = ConfigMarkdown.shell(template)
         if (shellMatches.length > 0) {
+          yield* refuseInReadonly(input.sessionID, `Command "${cmd.name}" runs shell commands`)
           const ctx = yield* InstanceState.context
           const cfg = yield* config.get()
           const sh = Shell.preferred(cfg.shell)
@@ -2051,6 +2087,7 @@ const layer = Layer.effect(
             : part,
         )
       const isSubtask = (agent.mode === "subagent" && cmd.subtask !== false) || cmd.subtask === true
+      if (isSubtask) yield* refuseInReadonly(input.sessionID, `Command "${cmd.name}" starts a subtask`)
       // A direct (non-subtask) turn runs at the session's own variant, so a level there would be silently dropped.
       if (commandRef?.level !== undefined && !isSubtask) {
         const error = new NamedError.Unknown({

@@ -12,7 +12,6 @@ import { extractHostSubagentCatalog } from "./protocol/subagents.js"
 import { bindConversationId } from "./protocol/conversationBind.js"
 import type { SeedHistoryMessage } from "./protocol/request.js"
 
-
 // -- Prompt extraction --
 
 export type ExtractedToolResult = {
@@ -76,12 +75,16 @@ function toolResultOutputToText(output: unknown): { text: string; isError: boole
     return { text: JSON.stringify(o.value ?? null), isError }
   }
   if (o.type === "content" && Array.isArray(o.value)) {
-    // Held-open continuation exec frames are text-only. Media is intentionally
-    // omitted here and harvested from the full prompt when a fresh Run opens.
+    // Exec replies (ReadSuccess/McpSuccess) carry text only, so media cannot ride
+    // a held-open Run. imageInput.ts attaches it as selected_images when a fresh
+    // Run opens; until then the model gets an explicit note instead of silence.
     const text = o.value
       .map((c) => {
         const cp = c as Record<string, unknown>
-        return cp.type === "text" ? String(cp.text ?? "") : ""
+        if (cp.type === "text") return String(cp.text ?? "")
+        const mediaType = typeof cp.mediaType === "string" ? cp.mediaType : "unknown"
+        const later = mediaType.startsWith("image/") ? " It is attached to the request when the next turn starts." : ""
+        return `\n[${mediaType} attachment from this tool result is not shown here: Cursor tool results carry text only.${later}]`
       })
       .join("")
     return { text, isError }

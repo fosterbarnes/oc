@@ -46,6 +46,7 @@ import {
   type AccountBlockKind,
 } from "./cliEvents.js"
 import {
+  addApiSpend,
   apiAccountId,
   apiRolloverCandidate,
   markModelLimited,
@@ -315,10 +316,14 @@ class ClaudeTurn {
       switching: () => !!this.switchTo,
       activeProcess: () => this.activeProcess,
       write: (line) => this.proc.stdin?.write(line),
+      hold: () => {
+        if (!this.closed) this.out.hold()
+      },
       read: (messageID) => {
         if (!this.closed) this.out.splitAt(messageID)
       },
       receiptFailed: (error) => {
+        this.out.release()
         this.autoContinue.aborted = true
         this.steering.retire("Claude read a message whose delivery receipt could not be saved")
         if (!this.closed)
@@ -1402,6 +1407,7 @@ class ClaudeTurn {
     // Each result's diff covers only its own segment (the baseline moves every time), so add them.
     const segmentCost = turnCostFromTotal(msg.session_id, msg.total_cost_usd, this.cliArgs.includes("--resume"))
     if (segmentCost !== undefined) this.turnCostUsd = (this.turnCostUsd ?? 0) + segmentCost
+    if (segmentCost !== undefined && this.account === apiAccountId()) addApiSpend(segmentCost)
     const turnCostUsd = this.turnCostUsd
     this.resultMeta = { ...resultMetadata(msg), ...(turnCostUsd === undefined ? {} : { turnCostUsd }) }
     log.info("conversation result", {

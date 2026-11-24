@@ -54,16 +54,18 @@ function readLinuxMachineId(): string | undefined {
 // Windows: MachineGuid from the registry.
 function readWindowsMachineGuid(): string | undefined {
   try {
-    const out = execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', {
-      timeout: 5000,
-    }).toString()
-    const m = out.split("MachineGuid")[1]
-    if (!m) return undefined
-    const hex = m.replace(/=|\s+|"/gi, "")
-    return hex || undefined
+    return parseWindowsMachineGuid(
+      execSync('reg query "HKLM\\SOFTWARE\\Microsoft\\Cryptography" /v MachineGuid', { timeout: 5000 }).toString(),
+    )
   } catch {
     return undefined
   }
+}
+
+/** The GUID from `reg query ... /v MachineGuid` output (`MachineGuid    REG_SZ    <guid>`), as the CLI reads it. */
+export function parseWindowsMachineGuid(out: string): string | undefined {
+  const value = out.split("REG_SZ")[1]?.replace(/\s+/g, "").toLowerCase()
+  return value || undefined
 }
 
 function platformUuid(): string | undefined {

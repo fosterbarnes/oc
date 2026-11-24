@@ -166,7 +166,12 @@ it.effect("a read-only subagent turn denies everything but read tools and never 
     const general = testAgent({ name: "general", mode: "subagent", permission: { "*": "allow" } })
     const turn = Permission.merge(
       deriveSubagentSessionPermission({ parentSessionPermission: [], subagent: general }),
-      Permission.fromConfig({ bash: "allow", edit: "allow", read: { "*": "allow", "*.env": "deny" } }),
+      Permission.fromConfig({
+        bash: "allow",
+        edit: "allow",
+        session_complete: "allow",
+        read: { "*": "allow", "*.env": "deny" },
+      }),
     )
     const effective = Permission.merge(
       general.permission,
@@ -186,8 +191,9 @@ it.effect("a read-only subagent turn denies everything but read tools and never 
     expect(action("read", "mcp:server:file")).toBe("deny")
     expect(action("grep", "TODO")).toBe("allow")
     expect(action("webfetch", "https://example.com")).toBe("allow")
-    expect(Permission.disabled(["bash", "edit", "read", "grep", "task"], effective)).toEqual(
-      new Set(["bash", "edit", "task"]),
+    expect(action("session_complete")).toBe("deny")
+    expect(Permission.disabled(["bash", "edit", "read", "grep", "task", "session_complete"], effective)).toEqual(
+      new Set(["bash", "edit", "task", "session_complete"]),
     )
     // No earlier rule for a read tool: it asks, as it would without the read-only rules.
     expect(Permission.evaluate("glob", "*", readonlySubagentRules([])).action).toBe("ask")

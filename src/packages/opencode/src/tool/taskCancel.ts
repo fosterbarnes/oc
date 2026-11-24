@@ -29,7 +29,9 @@ export const TaskCancelTool = Tool.define(
             const info = yield* background.get(id)
             if (!info) return `Task ${id} is not running in the background.`
             if (info.status !== "running") return `Task ${id} already ${info.status}.`
-            yield* background.cancel(id)
+            // The job can finish between `get` and `cancel`; cancel then returns its finished snapshot.
+            const after = yield* background.cancel(id)
+            if (after && after.status !== "cancelled") return `Task ${id} already ${after.status}.`
             return `Stopped task ${id}. Its session keeps the work so far; resume it with task and this task_id if needed.`
           })
           return { title: output, output, metadata: {} }

@@ -44,19 +44,30 @@ export function reloading<A extends { fingerprint: string }, E, R, E2, R2>(
   state: InstanceState.InstanceState<A, E, R>,
   read: Effect.Effect<string, E2, R2>,
 ) {
-  const locks = new Map<string, Semaphore.Semaphore>()
+  // Counted, so a directory's entry goes once no reader holds or waits on it (the map outlives instances).
+  const locks = new Map<string, { lock: Semaphore.Semaphore; users: number }>()
   return Effect.fnUntraced(function* () {
     const dir = yield* InstanceState.directory
-    const lock = locks.get(dir) ?? Semaphore.makeUnsafe(1)
-    locks.set(dir, lock)
-    return yield* lock.withPermits(1)(
-      Effect.gen(function* () {
-        const s = yield* InstanceState.get(state)
-        if ((yield* read) === s.fingerprint) return s
-        yield* InstanceState.invalidate(state)
-        return yield* InstanceState.get(state)
-      }),
-    )
+    const entry = locks.get(dir) ?? { lock: Semaphore.makeUnsafe(1), users: 0 }
+    entry.users++
+    locks.set(dir, entry)
+    return yield* entry.lock
+      .withPermits(1)(
+        Effect.gen(function* () {
+          const s = yield* InstanceState.get(state)
+          if ((yield* read) === s.fingerprint) return s
+          yield* InstanceState.invalidate(state)
+          return yield* InstanceState.get(state)
+        }),
+      )
+      .pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            entry.users--
+            if (entry.users === 0) locks.delete(dir)
+          }),
+        ),
+      )
   })
 }
 

@@ -6,7 +6,7 @@ import { Schema } from "effect"
 import { createContext, createSignal, type JSX, useContext } from "solid-js"
 import { TuiKeybind } from "./keybind"
 import { TuiKeybindPreset } from "./keybindPreset"
-import { validateHotkey } from "../hotkeyValidate"
+import { validateHotkey, type ValidateHotkeyResult } from "../hotkeyValidate"
 
 export const AttentionSoundName = Schema.Literals([
   "default",
@@ -184,7 +184,8 @@ export type Resolved = Omit<
   setDailyTheme: (on: boolean) => void
   setAutoConfirmUpdates: (on: boolean) => void
   setSubagentTabs: (settings: SubagentTabsSettings) => void
-  setPaletteKey: (command: string, key: string | undefined) => void
+  // Not saved when `ok` is false; the caller reports `reason`.
+  setPaletteKey: (command: string, key: string | undefined) => ValidateHotkeyResult
   attention: {
     enabled: boolean
     notifications: boolean
@@ -267,7 +268,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
       return paletteKeys()
     },
     setPaletteKey(command, key) {
-      if (key === undefined && paletteKeys()[command] === undefined) return
+      if (key === undefined && paletteKeys()[command] === undefined) return { ok: true }
       if (key !== undefined) {
         const leaderBinding = lookups[preset()].get("leader")[0]?.key
         const leaderKey = !leaderBinding
@@ -284,7 +285,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
             )?.[0],
           kittyKeyboard: true,
         })
-        if (!result.ok) return
+        if (!result.ok) return result
       }
       setPaletteKeys((current) => {
         if (key !== undefined) return { ...current, [command]: key }
@@ -292,6 +293,7 @@ export function resolve(input: Info, options: ResolveOptions): Resolved {
         delete next[command]
         return next
       })
+      return { ok: true }
     },
     attention: {
       enabled: input.attention?.enabled ?? false,

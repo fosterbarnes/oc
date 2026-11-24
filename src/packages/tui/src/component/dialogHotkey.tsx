@@ -54,11 +54,8 @@ export function DialogHotkey(props: { command: string; title: string }) {
   const [leaderPending, setLeaderPending] = createSignal(false)
 
   const leaderBinding = config.keybinds.get(LEADER_TOKEN)[0]?.key
-  const leaderKey = !leaderBinding
-    ? ""
-    : typeof leaderBinding === "string"
-      ? leaderBinding.trim().toLowerCase()
-      : strokeKey(leaderBinding)
+  // Normalized like captured strokes, so `meta+x` or `shift+ctrl+x` matches `alt+x` / `ctrl+shift+x`.
+  const leaderKey = leaderBinding ? sequenceKey(keymap.parseKeySequence(leaderBinding)) : ""
 
   const entries = keymap.getCommandEntries({ visibility: "registered" })
   const titles = new Map(
@@ -83,9 +80,14 @@ export function DialogHotkey(props: { command: string; title: string }) {
   }
   for (const command of Object.values(TuiKeybind.CommandMap)) {
     if (command === props.command) continue
+    // Config bindings are raw `{ key }` values with no parsed `sequence`, as in app.tsx's palette check.
     for (const binding of config.keybinds.get(command)) {
-      remember(sequenceKey(binding.sequence), titles.get(command) ?? command)
+      remember(sequenceKey(keymap.parseKeySequence(binding.key)), titles.get(command) ?? command)
     }
+  }
+  // Palette hotkeys of commands not registered here (setPaletteKey refuses those too).
+  for (const [command, key] of Object.entries(config.palette_keys)) {
+    if (command !== props.command) remember(key, titles.get(command) ?? command)
   }
   const ownerOf = (key: string) => owned.get(key.trim().toLowerCase())
 
@@ -114,13 +116,15 @@ export function DialogHotkey(props: { command: string; title: string }) {
     }
     if (!modified && (name === "return" || name === "enter")) {
       const key = captured()
-      if (key && validateHotkey({ key, leaderKey, ownerOf, kittyKeyboard: kittyKeyboard() }).ok) {
-        config.setPaletteKey(props.command, key)
-        void persistTuiSetting(["palette_keys"], config.palette_keys, toast)
-        dialog.clear()
-      } else {
-        setLeaderPending(false)
+      setLeaderPending(false)
+      if (!key || !validateHotkey({ key, leaderKey, ownerOf, kittyKeyboard: kittyKeyboard() }).ok) return
+      const saved = config.setPaletteKey(props.command, key)
+      if (!saved.ok) {
+        toast.show({ message: saved.reason, variant: "error" })
+        return
       }
+      void persistTuiSetting(["palette_keys"], config.palette_keys, toast)
+      dialog.clear()
       return
     }
     const stroke = strokeKey({

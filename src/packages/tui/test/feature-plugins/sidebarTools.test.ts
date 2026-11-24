@@ -511,7 +511,17 @@ test("maps Windows Terminal placements and percentage sizes to CLI arguments", (
     "-d",
     cwd,
   ])
-  assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Cells: 20 }), [
+  assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Cells: 20 }, { columns: 100, rows: 40 }), [
+    "-w",
+    "0",
+    "split-pane",
+    "-H",
+    "--size",
+    "0.5",
+    "-d",
+    cwd,
+  ])
+  assert.deepEqual(windowsTerminalArgs("wezterm-vertical", cwd, { Cells: 20 }, {}), [
     "-w",
     "0",
     "split-pane",
@@ -545,7 +555,7 @@ test("runs the WezTerm command in Windows Terminal from the script directory", (
     launcher: { executable: "pwsh", args: ["-File"] },
     weztermSize: { Percent: 50 },
   }
-  const args = windowsTerminalScriptArgs(script, "C:\\other")
+  const args = windowsTerminalScriptArgs(script, "C:\\other", "pwsh")
   assert.deepEqual(args.slice(0, -1), [
     "-w",
     "0",
@@ -650,6 +660,43 @@ test("falls back to native when wt.exe is unavailable without changing the saved
   assert.deepEqual(launched, [{ ...native, cwd: "C:\\work" }])
   assert.equal(result.error, undefined)
   assert.equal(script.terminal, "wezterm-tab")
+})
+
+// wt.exe exits 0 even when its tab's program is missing, so a bare `pwsh` once reported success on
+// machines without PowerShell 7.
+test("Windows Terminal starts the resolved pwsh, and launches natively when pwsh is missing", async () => {
+  const script = {
+    name: "build",
+    command: "npm run build",
+    terminal: "wezterm-tab" as const,
+    launcher: { executable: "powershell", args: [] },
+    weztermSize: { Percent: 50 },
+  }
+  const run = async (pwsh: string | undefined) => {
+    const wt: string[][] = []
+    let nativeLaunches = 0
+    await runScript(script, "C:\\work", {
+      kind: "windows-terminal",
+      available: async () => true,
+      resolveExecutable: async () => pwsh,
+      runCommand: async (command, args) => {
+        wt.push([command, ...args])
+        return { target: command }
+      },
+      spawnCommand: async (command) => {
+        nativeLaunches++
+        return { target: command }
+      },
+    })
+    return { wt, nativeLaunches }
+  }
+  const pwsh = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"
+  assert.deepEqual(await run(pwsh), {
+    wt: [["wt.exe", ...windowsTerminalScriptArgs(script, "C:\\work", pwsh)]],
+    nativeLaunches: 0,
+  })
+  assert.ok((await run(pwsh)).wt[0]?.includes(pwsh))
+  assert.deepEqual(await run(undefined), { wt: [], nativeLaunches: 1 })
 })
 
 test("placing a script in Windows Terminal uses native instead of reporting unsupported placement", async () => {
@@ -1199,25 +1246,26 @@ test("migrates openSidebar files once into oc's own files and leaves them untouc
   }
 })
 
-test("saveUserSidebarSetting changes one key and keeps the rest of the file", () => {
+test("saveUserSidebarSetting changes one key and keeps the rest of the file", async () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "sidebar-user-settings-"))
   try {
     const userPath = sidebarUserPath(root)
     const missing = path.join(root, "missing.json")
     writeJsonObject(userPath, { visibility: { showMcp: false }, scripts: { terminal: "native" }, extra: "keep" })
-    saveUserSidebarSetting(
+    // Not awaited: the second save must still keep the first one's key.
+    void saveUserSidebarSetting(
       "scripts",
       normalizeScriptSettings({ terminal: "wezterm-vertical", wezterm: { vertical: { Cells: 20 } } }),
       userPath,
     )
-    saveUserSidebarSetting("usageProviders", ["opencode-go", "openrouter"], userPath)
+    await saveUserSidebarSetting("usageProviders", ["opencode-go", "openrouter"], userPath)
     assert.equal(JSON.parse(readFileSync(userPath, "utf8")).extra, "keep")
     const settings = loadSidebarSettings(missing, userPath)
     assert.equal(settings.scripts.terminal, "wezterm-vertical")
     assert.deepEqual(settings.scripts.wezterm.vertical, { Cells: 20 })
     assert.deepEqual(settings.usageProviders, ["opencode-go", "openrouter"])
     assert.equal(settings.visibility.showMcp, false)
-    saveUserSidebarSetting("usageProviders", undefined, userPath)
+    await saveUserSidebarSetting("usageProviders", undefined, userPath)
     assert.equal(loadSidebarSettings(missing, userPath).usageProviders, undefined)
   } finally {
     rmSync(root, { recursive: true, force: true })

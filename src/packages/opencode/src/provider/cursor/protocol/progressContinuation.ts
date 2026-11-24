@@ -30,6 +30,20 @@ const PREFIXES_WITH_OBJECT: readonly RegExp[] = [
 
 const INSPECTION_OBJECT = /^(?:the|how|whether|if|for|on|this|that|it)\b/i
 const MAX_PROGRESS_FRAGMENT_WORDS = 8
+const CLAUSE_OBJECT = /^(?:how|whether|if)\b/i
+const FINITE_VERB =
+  /\b(?:is|are|was|were|has|have|had|reveals?|shows?|indicates?|suggests?|confirms?|means|seems|looks|appears)\b/i
+
+/**
+ * An inspection object with no finite verb after it. "Looking at the data
+ * reveals no errors" is a complete sentence even without punctuation. A
+ * `how`/`whether`/`if` clause may carry its own verb ("Checking whether it is
+ * built").
+ */
+function isInspectionFragment(rest: string): boolean {
+  if (!INSPECTION_OBJECT.test(rest)) return false
+  return CLAUSE_OBJECT.test(rest) || !FINITE_VERB.test(rest)
+}
 
 function normalizeWhitespace(text: string): string {
   return text.trim().replace(/\s+/g, " ")
@@ -67,11 +81,11 @@ export function isProgressOnlyAssistantText(text: string): boolean {
   }
   if (lower.startsWith("looking into") || lower.startsWith("looking at")) {
     const prefix = lower.startsWith("looking into") ? "looking into" : "looking at"
-    return INSPECTION_OBJECT.test(restAfterPrefix(withoutEllipsis, prefix))
+    return isInspectionFragment(restAfterPrefix(withoutEllipsis, prefix))
   }
   if (PREFIXES_WITH_OBJECT.some((pattern) => pattern.test(withoutEllipsis))) {
     const rest = withoutEllipsis.replace(/^\S+\s+/i, "")
-    return INSPECTION_OBJECT.test(rest)
+    return isInspectionFragment(rest)
   }
   return false
 }

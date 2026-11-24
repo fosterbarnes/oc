@@ -9,6 +9,7 @@ import {
   parseLauncher,
   resolveScriptTerminal,
   scriptTerminals,
+  trackExtension,
   updateLanguage,
   type ScriptLanguage,
   type ScriptSettings,
@@ -55,131 +56,138 @@ export function createScriptSettingsMenu(input: {
       footer: language.launcher.executable,
       disabled: !language.enabled,
     }))
-    dialog.replace(() => (
-      <DialogSelect
-        title={`Track ${extension} with`}
-        options={options}
-        current={options.find((option) => !option.disabled)?.value}
-        onSelect={(option) => {
-          input.save(
-            updateLanguage(input.settings(), option.value, (language) => ({
-              ...language,
-              extensions: language.extensions.includes(extension)
-                ? language.extensions
-                : [...language.extensions, extension],
-            })),
-            `Tracking ${extension} with ${option.title}`,
-          )
-          selectScriptSettings()
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
-  }
-  const promptCustomExtension = (languageID?: string) =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add script extension"
-        description={() => <text>Enter an extension such as .ps1 or .envrc.</text>}
-        placeholder=".custom"
-        onConfirm={(value) => {
-          const extension = normalizeExtension(value)
-          if (!extension) {
-            toast.show({ variant: "error", message: "Enter a valid file extension." })
-            return
-          }
-          if (languageID) {
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title={`Track ${extension} with`}
+          options={options}
+          current={options.find((option) => !option.disabled)?.value}
+          onSelect={(option) => {
             input.save(
-              updateLanguage(input.settings(), languageID, (language) => ({
-                ...language,
-                extensions: language.extensions.includes(extension)
-                  ? language.extensions
-                  : [...language.extensions, extension],
-              })),
-              `Tracking ${extension}`,
+              trackExtension(input.settings(), option.value, extension),
+              `Tracking ${extension} with ${option.title}`,
             )
             selectScriptSettings()
-          } else {
-            chooseLanguageForExtension(extension)
-          }
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
+          }}
+        />
+      ),
+      undefined,
+      { back: selectScriptSettings },
+    )
+  }
+  const promptCustomExtension = (languageID?: string) =>
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title="Add script extension"
+          description={() => <text>Enter an extension such as .ps1 or .envrc.</text>}
+          placeholder=".custom"
+          onConfirm={(value) => {
+            const extension = normalizeExtension(value)
+            if (!extension) {
+              toast.show({ variant: "error", message: "Enter a valid file extension." })
+              return
+            }
+            if (languageID) {
+              input.save(trackExtension(input.settings(), languageID, extension), `Tracking ${extension}`)
+              selectScriptSettings()
+            } else {
+              chooseLanguageForExtension(extension)
+            }
+          }}
+        />
+      ),
+      undefined,
+      { back: selectScriptSettings },
+    )
   const promptCustomExecutable = () =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title="Add custom script executable"
-        description={() => <text>Enter an executable and optional arguments. The file path is appended.</text>}
-        placeholder="my-runner --flag"
-        onConfirm={(value) => {
-          const tokens = parseLauncher(value)
-          if (!tokens) {
-            toast.show({ variant: "error", message: "Enter an executable." })
-            return
-          }
-          const [executable, ...args] = tokens
-          const id = `custom-${Date.now()}`
-          const language: ScriptLanguage = {
-            id,
-            title: `Custom: ${executable}`,
-            enabled: true,
-            launcher: { executable, args },
-            extensions: [],
-          }
-          input.save(
-            { ...input.settings(), languages: [...input.settings().languages, language] },
-            `Added ${executable}`,
-          )
-          promptCustomExtension(id)
-        }}
-      />
-    ), undefined, { back: selectScriptSettings })
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title="Add custom script executable"
+          description={() => <text>Enter an executable and optional arguments. The file path is appended.</text>}
+          placeholder="my-runner --flag"
+          onConfirm={(value) => {
+            const tokens = parseLauncher(value)
+            if (!tokens) {
+              toast.show({ variant: "error", message: "Enter an executable." })
+              return
+            }
+            const [executable, ...args] = tokens
+            const id = `custom-${Date.now()}`
+            const language: ScriptLanguage = {
+              id,
+              title: `Custom: ${executable}`,
+              enabled: true,
+              launcher: { executable, args },
+              extensions: [],
+            }
+            input.save(
+              { ...input.settings(), languages: [...input.settings().languages, language] },
+              `Added ${executable}`,
+            )
+            promptCustomExtension(id)
+          }}
+        />
+      ),
+      undefined,
+      { back: selectScriptSettings },
+    )
   const splitSizeLabel = (size: WezTermSplitSize) => ("Percent" in size ? `${size.Percent}%` : `${size.Cells} cells`)
   const promptWeztermSizeValue = (direction: "horizontal" | "vertical", mode: "Percent" | "Cells") =>
-    dialog.replace(() => (
-      <DialogPrompt
-        title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split ${mode}`}
-        description={() => (
-          <text>{mode === "Percent" ? "Enter a percentage from 1 to 99." : "Enter a positive cell count."}</text>
-        )}
-        placeholder={mode === "Percent" ? "30" : "20"}
-        onConfirm={(value) => {
-          const number = Number(value.trim())
-          const valid = Number.isInteger(number) && (mode === "Percent" ? number > 0 && number < 100 : number > 0)
-          if (!valid) {
-            toast.show({
-              variant: "error",
-              message:
-                mode === "Percent"
-                  ? "Enter a whole percentage from 1 to 99."
-                  : "Enter a positive whole number of cells.",
-            })
-            return
-          }
-          const size: WezTermSplitSize = mode === "Percent" ? { Percent: number } : { Cells: number }
-          input.save(
-            {
-              ...input.settings(),
-              wezterm: { ...input.settings().wezterm, [direction]: size },
-            },
-            `${direction === "horizontal" ? "Horizontal" : "Vertical"} split size set to ${splitSizeLabel(size)}`,
-          )
-          selectScriptSettings()
-        }}
-      />
-    ), undefined, { back: () => selectWeztermSizeMode(direction) })
+    dialog.replace(
+      () => (
+        <DialogPrompt
+          title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split ${mode}`}
+          description={() => (
+            <text>{mode === "Percent" ? "Enter a percentage from 1 to 99." : "Enter a positive cell count."}</text>
+          )}
+          placeholder={mode === "Percent" ? "30" : "20"}
+          onConfirm={(value) => {
+            const number = Number(value.trim())
+            const valid = Number.isInteger(number) && (mode === "Percent" ? number > 0 && number < 100 : number > 0)
+            if (!valid) {
+              toast.show({
+                variant: "error",
+                message:
+                  mode === "Percent"
+                    ? "Enter a whole percentage from 1 to 99."
+                    : "Enter a positive whole number of cells.",
+              })
+              return
+            }
+            const size: WezTermSplitSize = mode === "Percent" ? { Percent: number } : { Cells: number }
+            input.save(
+              {
+                ...input.settings(),
+                wezterm: { ...input.settings().wezterm, [direction]: size },
+              },
+              `${direction === "horizontal" ? "Horizontal" : "Vertical"} split size set to ${splitSizeLabel(size)}`,
+            )
+            selectScriptSettings()
+          }}
+        />
+      ),
+      undefined,
+      { back: () => selectWeztermSizeMode(direction) },
+    )
   const selectWeztermSizeMode = (direction: "horizontal" | "vertical") => {
     const current = input.settings().wezterm[direction]
-    dialog.replace(() => (
-      <DialogSelect
-        title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split size`}
-        options={[
-          { title: "Percent", value: "Percent", footer: "Percent" in current ? `${current.Percent}%` : "" },
-          { title: "Cells", value: "Cells", footer: "Cells" in current ? `${current.Cells} cells` : "" },
-        ]}
-        current={"Percent" in current ? "Percent" : "Cells"}
-        onSelect={(option) => promptWeztermSizeValue(direction, option.value as "Percent" | "Cells")}
-      />
-    ), undefined, { back: selectScriptSettings })
+    dialog.replace(
+      () => (
+        <DialogSelect
+          title={`${direction === "horizontal" ? "Horizontal" : "Vertical"} split size`}
+          options={[
+            { title: "Percent", value: "Percent", footer: "Percent" in current ? `${current.Percent}%` : "" },
+            { title: "Cells", value: "Cells", footer: "Cells" in current ? `${current.Cells} cells` : "" },
+          ]}
+          current={"Percent" in current ? "Percent" : "Cells"}
+          onSelect={(option) => promptWeztermSizeValue(direction, option.value as "Percent" | "Cells")}
+        />
+      ),
+      undefined,
+      { back: selectScriptSettings },
+    )
   }
   const selectScriptSettings = () => {
     const defaults = defaultScriptSettings()
@@ -196,8 +204,9 @@ export function createScriptSettingsMenu(input: {
         }))
       })
       .concat(
-        input.settings().languages
-          .filter((language) => !defaults.languages.some((item) => item.id === language.id))
+        input
+          .settings()
+          .languages.filter((language) => !defaults.languages.some((item) => item.id === language.id))
           .flatMap((language) =>
             language.extensions.map((extension) => ({
               title: extension,
@@ -233,7 +242,8 @@ export function createScriptSettingsMenu(input: {
         title: shell.title,
         value: `shell:${shell.id}`,
         category: "Shell",
-        footer: input.settings().shell.executable === shell.launcher.executable ? "selected" : shell.launcher.executable,
+        footer:
+          input.settings().shell.executable === shell.launcher.executable ? "selected" : shell.launcher.executable,
       })),
       ...(BUILTIN_SHELLS.some((shell) => shell.launcher.executable === input.settings().shell.executable)
         ? []

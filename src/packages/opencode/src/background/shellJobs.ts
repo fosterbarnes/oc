@@ -335,7 +335,11 @@ const make = Effect.fn("ShellJobs.make")(function* () {
   const start = Effect.fn("ShellJobs.start")(function* (input: StartInput) {
     // Prepared before the spawn: output pumps start only after the job record exists, so no wait may sit between.
     const slot = yield* prepare(input.sessionID)
-    const handle = yield* spawner.spawn(input.spawn).pipe(Effect.provideService(Scope.Scope, scope))
+    const handle = yield* spawner.spawn(input.spawn).pipe(
+      Effect.provideService(Scope.Scope, scope),
+      // No meta.json is written yet, so recover would never clean this folder up.
+      Effect.onError(() => Effect.promise(() => fs.rm(slot.dir, { recursive: true, force: true }))),
+    )
     const job = yield* register(input, slot, handle, Date.now())
     const pumps = yield* Effect.forkIn(
       Effect.all([pump(handle.stdout, job.out), pump(handle.stderr, job.err)], { concurrency: "unbounded" }),

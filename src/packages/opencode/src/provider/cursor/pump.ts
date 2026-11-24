@@ -67,7 +67,7 @@ import {
 import { conversationBlobCount } from "./protocol/blobStore.js"
 import { persistConversationState } from "./protocol/conversationState.js"
 import { sessionManager, type CursorSession, type Frame } from "./session.js"
-import { CursorProtocolError, CursorProviderError, CursorTransportError } from "./errors.js"
+import { CursorProtocolError, CursorProviderError, CursorTransportError, toCursorProviderError } from "./errors.js"
 import { workspaceRootFromRequestContext } from "./context/env.js"
 import { progressOnlyContinuationPrompt, shouldContinueProgressOnlyTurn } from "./protocol/progressContinuation.js"
 import { ensureOpencodeProjectDir, opencodeGlobalCacheDir } from "./context/paths.js"
@@ -572,7 +572,8 @@ export class CursorPump {
         trace(`progress continuation: sent attempt=${session.progressContinuationAttempts} promptLen=${prompt.length}`)
       } catch (error) {
         trace(`progress continuation: write FAILED err=${(error as Error).message}`)
-        // Fall through to ordinary finish/close on write failure
+        // The turn's checkpoint is still valid, so persist it, then fail the turn:
+        // a stop here would report an unfinished progress-only turn as success.
         if (session.openCodeSessionId) {
           await persistConversationState(session.cacheDir ?? opencodeGlobalCacheDir(), {
             sessionKey: session.openCodeSessionId,
@@ -586,11 +587,12 @@ export class CursorPump {
             )
           })
         }
-        // Ensure open spans are closed before finish
         this.closeOpenSpans()
-        this.emitFinish(turnEnded, { unified: "stop", raw: undefined })
-        sessionManager.close(session)
-        return true
+        const failure = this.replaySafety.applyTo(
+          toCursorProviderError(error, { replaySafe: false, fallback: "Cursor progress continuation failed" }),
+        )
+        sessionManager.close(session, "remote-error", failure)
+        throw failure
       }
       // Reset only turn-local text/counters attempt already incremented; retain
       // pending exec claims, checkpoint, replay barriers, stream ownership, identity.
@@ -921,6 +923,9 @@ export class CursorPump {
         // corresponding host tool. Emitting that request makes OpenCode
         // manufacture an `invalid` tool result. Refuse it on the held-open
         // Cursor exec channel instead, using the request's exact typed result.
+        // The edit handshake's private read is answered directly first: it
+        // needs only write/apply_patch, not a host `read` tool.
+        if (recoverCorrelatedEditRead(this, parsed, displayCallId)) return false
         if (!this.advertisedToolNameSet.has(parsed.toolName)) {
           const available = this.advertisedToolNames.length > 0 ? this.advertisedToolNames.join(", ") : "none"
           const reason =
@@ -934,7 +939,6 @@ export class CursorPump {
           if (!rejectExec(this, parsed, reason, "unavailable tool")) return true
           return false
         }
-        if (recoverCorrelatedEditRead(this, parsed, displayCallId)) return false
         if (rejectMissingReadTarget(this, parsed)) {
           if (displayCallId) session.displayToolCalls.delete(displayCallId)
           return false

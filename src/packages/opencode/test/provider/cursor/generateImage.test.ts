@@ -12,9 +12,7 @@ describe("remapCursorImageWritePath", () => {
       const roots = { workspaceRoot: projectDir, projectDir }
       expect(remapCursorImageWritePath(projectDir, roots)).toBe(projectDir)
       expect(remapCursorImageWritePath(".", roots)).toBe(projectDir)
-      expect(remapCursorImageWritePath("..", roots)).toBe(
-        path.join(projectDir, "assets", ".."),
-      )
+      expect(remapCursorImageWritePath("..", roots)).toBe(path.join(projectDir, "assets", ".."))
       const outside = path.join(path.dirname(projectDir), "outside.png")
       expect(remapCursorImageWritePath(outside, roots)).toBe(path.join(projectDir, "assets", "outside.png"))
     }
@@ -39,5 +37,15 @@ describe("remapCursorImageWritePath", () => {
     expect(mapped.startsWith(path.join(projectDir, "assets"))).toBe(true)
     await rm(outsideDir, { recursive: true, force: true })
     await rm(projectDir, { recursive: true, force: true })
+  })
+
+  test("does not follow a directory link out of the project through missing subdirectories", async () => {
+    await using outside = await tmpdir()
+    await using project = await tmpdir()
+    const link = path.join(project.path, "link")
+    await symlink(outside.path, link, "junction")
+    const target = path.join(link, "new", "cat.png")
+    const roots = { workspaceRoot: project.path, projectDir: project.path }
+    expect(remapCursorImageWritePath(target, roots)).toBe(path.join(project.path, "assets", "cat.png"))
   })
 })

@@ -41,6 +41,13 @@ test("on reveals a burst over several ticks and catches up exactly", async () =>
   expect(await waitFor(() => smooth.shown() === full)).toBe(true)
 })
 
+test("never reveals half of a surrogate pair", async () => {
+  const smooth = setup({})
+  smooth.setText("👍")
+  await Bun.sleep(50)
+  expect(smooth.shown()).toBe("👍")
+})
+
 test("done snaps to the full text", () => {
   const smooth = setup({})
   smooth.setText("the whole final reply")

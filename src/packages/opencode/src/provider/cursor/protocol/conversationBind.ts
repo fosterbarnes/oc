@@ -14,13 +14,26 @@ import { clearFrozenRequestContext, transferFrozenRequestContext } from "../cont
  */
 const activeBySession = new Map<string, string>()
 export const MAX_ACTIVE_CONVERSATION_BINDINGS = 256
+// Conversation id -> open Run count. Eviction skips these so a long Run keeps
+// its checkpoint, blobs, and binding until TurnEnded persists them.
+const pinnedConversations = new Map<string, number>()
+
+export function pinConversation(conversationId: string): void {
+  pinnedConversations.set(conversationId, (pinnedConversations.get(conversationId) ?? 0) + 1)
+}
+
+export function unpinConversation(conversationId: string): void {
+  const count = (pinnedConversations.get(conversationId) ?? 0) - 1
+  if (count > 0) pinnedConversations.set(conversationId, count)
+  else pinnedConversations.delete(conversationId)
+}
 
 function rememberConversation(sessionKey: string, conversationId: string): void {
   // Map insertion order is the LRU order. Refresh existing sessions on use.
   activeBySession.delete(sessionKey)
   activeBySession.set(sessionKey, conversationId)
   while (activeBySession.size > MAX_ACTIVE_CONVERSATION_BINDINGS) {
-    const oldest = activeBySession.entries().next().value as [string, string] | undefined
+    const oldest = [...activeBySession].find(([, id]) => !pinnedConversations.has(id))
     if (!oldest) break
     activeBySession.delete(oldest[0])
     clearCheckpoint(oldest[1])

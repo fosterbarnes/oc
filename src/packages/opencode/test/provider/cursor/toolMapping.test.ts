@@ -2,7 +2,11 @@ import { afterAll, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { mapCursorArgsToOpencode, parseExecServerMessage } from "@/provider/cursor/protocol/execParse.js"
+import {
+  mapCursorArgsToOpencode,
+  mcpRealToolName,
+  parseExecServerMessage,
+} from "@/provider/cursor/protocol/execParse.js"
 import { buildTypedExecResult } from "@/provider/cursor/protocol/execResult.js"
 
 const root = mkdtempSync(path.join(tmpdir(), "cursorToolMapping-"))
@@ -21,6 +25,12 @@ test("a negative read offset counts back from the end", () => {
     limit: 2,
   })
   expect(mapCursorArgsToOpencode("read", { path: file, offset: -900 }, "read_args").args.offset).toBe(1)
+})
+
+test("an MCP name without tool_name splits after a hyphenated provider id", () => {
+  expect(mcpRealToolName({ name: "user-github-create_issue", provider_identifier: "user-github", tool_name: "" })).toBe(
+    "user-github_create_issue",
+  )
 })
 
 test("grep case_insensitive becomes an inline ripgrep flag", () => {

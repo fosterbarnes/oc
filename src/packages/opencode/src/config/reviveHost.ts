@@ -70,6 +70,11 @@ export async function revive(context: Revive.ReviveContext) {
 async function revivePipeline(context: Revive.ReviveContext) {
   const log = reviveLog()
   if (context.mode === "single") return reviveSingle(context)
+  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
+  // Built or downloaded by `prepare` while the TUI stayed open; this pipeline only swaps it in.
+  const output = context.mode === "install" ? context.output : undefined
+  const installs = !!output
+  if (installs && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
   if (context.native && context.tuiPid) {
     const tuiPid = context.tuiPid
     await log.step("Waiting for native window shutdown", async () => {
@@ -83,11 +88,6 @@ async function revivePipeline(context: Revive.ReviveContext) {
     })
   }
   const settings = await read()
-  const bun = /^bun(?:\.exe)?$/i.test(path.basename(process.execPath))
-  // Built or downloaded by `prepare` while the TUI stayed open; this pipeline only swaps it in.
-  const output = context.mode === "install" ? context.output : undefined
-  const installs = !!output
-  if (installs && bun) throw new Error("Install revive needs an installed oc executable, not Bun")
   const executable = Revive.resolveLauncher(executablePath())
   const installDir = path.dirname(executablePath())
   const restart: Revive.RestartContext = {
@@ -392,7 +392,7 @@ async function reviveSingle(context: Revive.ReviveContext) {
   if (!context.hosted) {
     const command = Revive.openTabCommand(
       [process.execPath, "oc", "--revive", Revive.encode({ ...context, hosted: true })],
-      { terminal: reviveTerminal(context.terminal), directory: context.directory },
+      { terminal: reviveTerminal(context.terminal, true), directory: context.directory },
     )
     await log.step(`Opening a ${command.file} tab for the single build`, () =>
       openReviveTab(command, context.directory),
@@ -478,11 +478,11 @@ async function windowTabsSnapshot(paneID: string, self: Pick<Revive.ReviveContex
   }
 }
 
-function reviveTerminal(terminal: Revive.ReviveContext["terminal"]) {
+// `tab`: for `openTabCommand` (the `wezterm` CLI), else `restartCommand` (macOS relaunches WezTerm via `open`).
+function reviveTerminal(terminal: Revive.ReviveContext["terminal"], tab = false) {
   // Reuse the plain-console fallback for failed builds too.
-  const cli = { wezterm: "wezterm-gui", "windows-terminal": "wt.exe", "terminal-app": "osascript", generic: undefined }[
-    terminal
-  ]
+  const wezterm = tab ? "wezterm" : process.platform === "darwin" ? "open" : "wezterm-gui"
+  const cli = { wezterm, "windows-terminal": "wt.exe", "terminal-app": "osascript", generic: undefined }[terminal]
   return cli && !Bun.which(cli) ? "generic" : terminal
 }
 
@@ -493,6 +493,17 @@ async function downloadSource(directory: string) {
     () => true,
     () => false,
   )
+  // Only this function's own earlier clone is reused; any other repository would be built and shipped as oc.
+  const origin = cloned
+    ? Bun.spawnSync(["git", "-C", directory, "remote", "get-url", "origin"], { stdout: "pipe", stderr: "pipe" })
+        .stdout.toString()
+        .trim()
+    : ""
+  const repo = (url: string) => url.replace(/(?:\.git)?\/*$/, "").toLowerCase()
+  if (cloned && repo(origin) !== repo(Revive.SOURCE_REPO))
+    throw new Error(
+      `${directory} is a git repository but not an oc clone; choose an empty folder or an existing oc source`,
+    )
   await runVisible(
     cloned ? ["git", "-C", directory, "pull", "--ff-only"] : ["git", "clone", Revive.SOURCE_REPO, directory],
   )
@@ -650,7 +661,8 @@ function closeTerminalAppWindow(tty: string) {
         "end tell",
       ].join("\n"),
     ],
-    { stdout: "pipe", stderr: "pipe" },
+    // A tab whose launcher outlived the 10 s wait makes `close` show a "terminate processes?" prompt.
+    { stdout: "pipe", stderr: "pipe", timeout: 5000, killSignal: "SIGKILL" },
   )
   if (result.exitCode !== 0) throw new Error(`Closing the Terminal window failed: ${result.stderr.toString().trim()}`)
 }

@@ -141,22 +141,31 @@ export function planSubstringEdit(
   }
 
   const targets = replaceAll ? offsets : offsets.slice(0, 1)
-  const chunks: UpdateChunk[] = []
-  let previousEnd = -1
+  // Matches whose line ranges overlap share one chunk: separate chunks would
+  // emit the same original lines twice, and the second could never match.
+  const groups: Array<{ start: number; end: number; offsets: number[] }> = []
   for (const offset of targets) {
     const start = lineStart(source, offset)
     const end = lineEnd(source, offset + oldString.length)
-    // Overlapping expansions would emit the same original lines twice, and the
-    // second chunk could never match after the first replaced them.
-    if (start < previousEnd) {
-      return { ok: false, reason: "overlapping replacements cannot be expressed as a patch" }
+    const last = groups.at(-1)
+    if (last && start < last.end) {
+      last.end = Math.max(last.end, end)
+      last.offsets.push(offset)
+      continue
     }
-    previousEnd = end
+    groups.push({ start, end, offsets: [offset] })
+  }
 
-    const before = source.slice(start, offset)
-    const after = source.slice(offset + oldString.length, end)
-    const original = source.slice(start, end)
-    const replaced = before + newString + after
+  const chunks: UpdateChunk[] = []
+  for (const group of groups) {
+    let replaced = ""
+    let cursor = group.start
+    for (const offset of group.offsets) {
+      replaced += source.slice(cursor, offset) + newString
+      cursor = offset + oldString.length
+    }
+    replaced += source.slice(cursor, group.end)
+    const original = source.slice(group.start, group.end)
     chunks.push({
       oldLines: splitLines(original),
       // Only a line break the matched range ended with is implied. One the replacement adds is content.

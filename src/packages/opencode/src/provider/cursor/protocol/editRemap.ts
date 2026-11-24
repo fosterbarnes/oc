@@ -1,14 +1,26 @@
 import fs from "node:fs"
-import path from "node:path"
 import { encodeMessage } from "./messages.js"
 import { APPLY_PATCH_TOOL, buildAddFilePatch, buildUpdateFilePatch, planSubstringEdit } from "./applyPatch.js"
 import { binaryWritePayload, type ParsedExecRequest } from "./execParse.js"
-import { buildExecStreamClose } from "./execResult.js"
-import { countLines } from "./readResult.js"
+import { normalizePath } from "./gitDiff.js"
+import { buildExecStreamClose, buildReadRejectionMessages } from "./execResult.js"
+import { countLines, resolveReadTargetPath } from "./readResult.js"
 import { str, stringValue } from "./values.js"
 
 /** Matches Cursor's own pre-write read threshold (`local-exec` 52428800). */
 const MAX_EDIT_SOURCE_BYTES = 50 * 1024 * 1024
+
+const UTF8_STRICT = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
+
+/** File text, or undefined when it is not valid UTF-8. Read errors still throw. */
+function readUtf8(file: string): string | undefined {
+  const bytes = fs.readFileSync(file)
+  try {
+    return UTF8_STRICT.decode(bytes)
+  } catch {
+    return undefined
+  }
+}
 
 /**
  * Complete the private read inside Cursor's legacy edit transaction without
@@ -27,7 +39,13 @@ export function buildCompleteEditReadMessages(
   try {
     const stat = fs.statSync(sourcePath)
     if (!stat.isFile() || stat.size > MAX_EDIT_SOURCE_BYTES) return undefined
-    const content = fs.readFileSync(sourcePath, "utf8")
+    const content = readUtf8(sourcePath)
+    // Lossy decoding would hand Cursor U+FFFD for the invalid bytes, and its
+    // whole-file write would then persist them. Refuse the read instead.
+    if (content === undefined)
+      return buildReadRejectionMessages(execId, {
+        invalid_file: { path: resultPath, reason: "File is not valid UTF-8 text" },
+      })
     return [
       encodeMessage("AgentClientMessage", {
         exec_client_message: {
@@ -148,15 +166,17 @@ export function remapCorrelatedEditWriteForCatalog(
   if (!filePath || content === undefined || !editPath) return false
 
   const root = workspaceRoot ?? process.cwd()
-  const absolute = path.resolve(root, filePath)
-  if (absolute !== path.resolve(root, editPath)) return false
+  const absolute = resolveReadTargetPath(filePath, root)
+  if (normalizePath(absolute) !== normalizePath(resolveReadTargetPath(editPath, root))) return false
 
   let source: string
   try {
     const stat = fs.statSync(absolute)
     if (!stat.isFile() || stat.size > MAX_EDIT_SOURCE_BYTES) return false
     if (Buffer.byteLength(content, "utf8") > MAX_EDIT_SOURCE_BYTES) return false
-    source = fs.readFileSync(absolute, "utf8")
+    const decoded = readUtf8(absolute)
+    if (decoded === undefined) return false
+    source = decoded
   } catch {
     // Missing targets are creations and must stay writes. Other read failures
     // also fall back to the original host permission path without guessing.
@@ -238,20 +258,30 @@ export function remapEditToolsForCatalog(
     }
     // apply_patch matches whole lines, so a substring edit has to be widened to
     // the lines it touches - which requires the file the model is editing.
-    const absolute = path.resolve(workspaceRoot ?? process.cwd(), filePath)
-    let source: string
+    const absolute = resolveReadTargetPath(filePath, workspaceRoot ?? process.cwd())
+    let source: string | undefined
     try {
       // Bounded because this read is synchronous on the Run pump. Cursor's own
       // executor uses the same 50 MB threshold before reading a file it is
       // about to write.
-      const size = fs.statSync(absolute).size
+      const stat = fs.statSync(absolute)
+      // A device (`con`) or FIFO would block the synchronous read below.
+      if (!stat.isFile()) {
+        refuse("the target is not a regular file")
+        return
+      }
+      const size = stat.size
       if (size > MAX_EDIT_SOURCE_BYTES) {
         refuse(`the target file is ${Math.round(size / 1024 / 1024)} MB, too large to patch`)
         return
       }
-      source = fs.readFileSync(absolute, "utf8")
+      source = readUtf8(absolute)
     } catch (e) {
       refuse(`the target file could not be read (${(e as Error).message})`)
+      return
+    }
+    if (source === undefined) {
+      refuse("the target file is not valid UTF-8 text")
       return
     }
     const plan = planSubstringEdit(source, oldString, newString, parsed.args.replaceAll === true)

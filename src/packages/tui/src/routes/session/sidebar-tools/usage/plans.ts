@@ -61,7 +61,9 @@ export function resolveUsagePlans(
     extra: Pick<UsagePlan, "account" | "name" | "plan"> = {},
   ): UsagePlan => {
     const base = { provider, ...extra, url: USAGE_BILLING_URLS[provider] }
-    const entry = input.subscriptions.find((item) => item.provider === provider && item.account === extra.account)
+    // An account's own entry wins over a provider-wide one (no `account`).
+    const matches = input.subscriptions.filter((item) => item.provider === provider)
+    const entry = matches.find((item) => item.account === extra.account) ?? matches.find((item) => !item.account)
     if (!entry) return { ...base, verb: "renews", ...auto }
     if ("renewDay" in entry)
       return { ...base, atMs: nextRenewal(entry.renewDay, nowMs), verb: "renews", source: "manual" }

@@ -235,7 +235,8 @@ export const runCheck: Run<Schema.Schema.Type<typeof CheckParameters>> = async (
   )
   const results = checks.map((check) => {
     const answer = reply.answers[check.id]
-    if (answer?.type !== "noul" || typeof answer.noul !== "number")
+    // A probability: JSON `1e999` parses to Infinity, which must not read as a confident yes.
+    if (answer?.type !== "noul" || typeof answer.noul !== "number" || !(answer.noul >= 0 && answer.noul <= 1))
       return { id: check.id, question: check.question, verdict: "uncertain", status: "invalid_response" }
     const verdict = answer.noul >= yesAt ? "yes" : answer.noul <= noAt ? "no" : "uncertain"
     return { id: check.id, question: check.question, probability: round(answer.noul), verdict }

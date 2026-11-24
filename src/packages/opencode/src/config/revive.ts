@@ -466,7 +466,8 @@ export function openTabCommand(command: string[], options: { terminal: Terminal;
   if (options.terminal === "windows-terminal")
     return {
       file: "wt.exe",
-      args: ["-w", "0", "new-tab", "-d", options.directory, ...command.map((arg) => arg.replaceAll(";", "\\;"))],
+      // wt.exe splits its whole command line on `;`, the folder included.
+      args: ["-w", "0", "new-tab", "-d", ...[options.directory, ...command].map((arg) => arg.replaceAll(";", "\\;"))],
       env: flavor,
       windowsVerbatimArguments: false,
     }
@@ -575,9 +576,10 @@ export async function removeLeftovers(directory: string) {
   return names.filter((_, index) => results[index].status === "rejected")
 }
 
-// Other names in `directory` that share a file identity with a file being replaced.
+// Other names in `directory` that share a file identity with a file being replaced. `target` is the new
+// file's name: the old one may differ in case and is renamed aside before relinking.
 async function aliasNames(directory: string, targets: readonly string[]) {
-  const lower = new Set(targets.map((name) => name.toLowerCase()))
+  const lower = new Map(targets.map((name) => [name.toLowerCase(), name]))
   const files = await Promise.all(
     (await fsp.readdir(directory, { withFileTypes: true }))
       .filter((entry) => entry.isFile() && !LEFTOVER.test(entry.name))
@@ -592,7 +594,7 @@ async function aliasNames(directory: string, targets: readonly string[]) {
       (other) =>
         lower.has(other.name.toLowerCase()) && other.stat.ino === file.stat.ino && other.stat.dev === file.stat.dev,
     )
-    return target ? [{ name: file.name, target: target.name }] : []
+    return target ? [{ name: file.name, target: lower.get(target.name.toLowerCase()) ?? target.name }] : []
   })
 }
 

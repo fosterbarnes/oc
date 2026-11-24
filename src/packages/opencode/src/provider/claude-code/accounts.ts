@@ -62,6 +62,10 @@ const sessionAccounts = new Map<string, string>()
 /** Sessions on API credits only because every pool account was limited (`pinApiRollover`). */
 const apiRollover = new Set<string>()
 const UNPINNED = "global"
+/** API-credit spend by local day and month (`addApiSpend`); oc sees no API balance or rate-limit headers. */
+type ApiSpend = { day: string; dayUsd: number; month: string; monthUsd: number }
+const NO_SPEND: ApiSpend = { day: "", dayUsd: 0, month: "", monthUsd: 0 }
+let apiSpend = NO_SPEND
 /** `claudeAccount` dirs already warned about as missing from the pool. */
 const unknownPreferred = new Set<string>()
 let currentAccount: string | undefined
@@ -152,6 +156,11 @@ function readPersist(now: number): void {
     for (const session of raw.apiRollover) if (typeof session === "string") apiRollover.add(session)
   readUntilMap(raw.modelLimited, modelLimited, now)
   readUntilMap(raw.limitedUntil, limitedUntil, now)
+  const spend = raw.apiSpend as Partial<ApiSpend> | undefined
+  apiSpend =
+    spend && typeof spend.day === "string" && typeof spend.month === "string"
+      ? { day: spend.day, dayUsd: usd(spend.dayUsd), month: spend.month, monthUsd: usd(spend.monthUsd) }
+      : NO_SPEND
   limitReasons.clear()
   if (raw.limitReason && typeof raw.limitReason === "object") {
     for (const [id, reason] of Object.entries(raw.limitReason as Record<string, unknown>)) {
@@ -167,6 +176,38 @@ type PoolFile = {
   sessionAccounts?: unknown
   apiRollover?: unknown
   modelLimited?: unknown
+  apiSpend?: unknown
+}
+
+const usd = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0)
+/** Local-date keys: `YYYY-MM-DD` and `YYYY-MM`. */
+function spendKeys(now: number) {
+  const date = new Date(now)
+  const month = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`
+  return { day: `${month}-${String(date.getDate()).padStart(2, "0")}`, month }
+}
+
+/** Add one turn's API-credit cost; a new local day or month starts its bucket at 0. */
+export function addApiSpend(cost: number, now = Date.now()): void {
+  if (!Number.isFinite(cost) || cost <= 0) return
+  ensureLoaded(now, true)
+  const { day, month } = spendKeys(now)
+  apiSpend = {
+    day,
+    dayUsd: (apiSpend.day === day ? apiSpend.dayUsd : 0) + cost,
+    month,
+    monthUsd: (apiSpend.month === month ? apiSpend.monthUsd : 0) + cost,
+  }
+  persistPool(now)
+}
+
+/** Spend for the current local day and month; 0 for buckets from an earlier date. */
+function apiSpent(now: number) {
+  const { day, month } = spendKeys(now)
+  return {
+    spentTodayUsd: apiSpend.day === day ? apiSpend.dayUsd : 0,
+    spentMonthUsd: apiSpend.month === month ? apiSpend.monthUsd : 0,
+  }
 }
 
 /**
@@ -216,6 +257,7 @@ function persistPool(now = Date.now()): void {
         ...(sessionAccounts.size ? { sessionAccounts: Object.fromEntries(sessionAccounts) } : {}),
         ...(apiRollover.size ? { apiRollover: [...apiRollover] } : {}),
         ...(Object.keys(models).length ? { modelLimited: models } : {}),
+        ...(apiSpend.day ? { apiSpend } : {}),
       }),
     )
     poolStamp = fileStamp(poolFile)
@@ -463,8 +505,9 @@ export function poolState(
       ...(until > now ? { limitedUntil: until } : {}),
     }
   }
-  const rows: (ReturnType<typeof row> & { kind?: "api" })[] = ids.map(row)
-  if (options?.withApi && apiAccount) rows.push({ ...row(apiAccount.id), kind: "api" })
+  const rows: (ReturnType<typeof row> & { kind?: "api"; spentTodayUsd?: number; spentMonthUsd?: number })[] =
+    ids.map(row)
+  if (options?.withApi && apiAccount) rows.push({ ...row(apiAccount.id), kind: "api", ...apiSpent(now) })
   return rows
 }
 
@@ -868,6 +911,7 @@ export function _resetAccountPool(): void {
   modelLimited.clear()
   sessionAccounts.clear()
   apiRollover.clear()
+  apiSpend = NO_SPEND
   currentAccount = undefined
   poolStamp = undefined
   poolFile = null

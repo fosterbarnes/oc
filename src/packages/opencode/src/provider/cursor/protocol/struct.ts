@@ -79,6 +79,7 @@ export function readAllFields(b: Uint8Array): RawField[] {
       out.push({ fn, wt, varint: 0, bytes: b.subarray(i, i + len) })
       i += len
     } else if (wt === 1) {
+      if (i + 8 > b.length) break // truncated fixed64
       out.push({ fn, wt, varint: 0, i64: b.subarray(i, i + 8) })
       i += 8
     } else if (wt === 5) {

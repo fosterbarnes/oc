@@ -1,6 +1,7 @@
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readFile, stat } from "node:fs/promises"
 import path from "node:path"
 import { homedir } from "node:os"
+import { Glob } from "@opencode-ai/core/util/glob"
 import { opencodeGlobalConfigDirs, opencodeProjectConfigDirs } from "./paths.js"
 
 export type CollectedSkill = {
@@ -59,55 +60,60 @@ async function loadSkillFile(file: string): Promise<CollectedSkill | undefined> 
 
 async function scanSkillsRoot(root: string, out: Map<string, CollectedSkill>): Promise<void> {
   if (!(await exists(root))) return
-  let entries: string[]
-  try {
-    entries = await readdir(root)
-  } catch {
-    return
-  }
-  entries.sort()
-  for (const name of entries) {
-    const skillMd = path.join(root, name, "SKILL.md")
-    if (!(await exists(skillMd))) continue
+  // Same `**/SKILL.md` scan as the host skill loader (util/fingerprint.ts), so nested and linked skills
+  // count the same way on both sides.
+  const files = await Glob.scan("**/SKILL.md", {
+    cwd: root,
+    absolute: true,
+    include: "file",
+    symlink: true,
+    dot: true,
+  }).catch(() => [] as string[])
+  for (const skillMd of files.toSorted()) {
     const skill = await loadSkillFile(skillMd)
-    if (!skill) continue
-    if (!out.has(skill.name)) out.set(skill.name, skill)
+    // Later roots win, like the host loader.
+    if (skill) out.set(skill.name, skill)
   }
 }
 
-async function walkAncestorsFor(dir: string, rel: string, stop: string, out: Map<string, CollectedSkill>) {
+/** `dir` and its ancestors up to `stop`, nearest first. */
+function ancestors(dir: string, stop: string): string[] {
+  const out: string[] = []
   let cur = path.resolve(dir)
   const root = path.resolve(stop)
   for (;;) {
-    await scanSkillsRoot(path.join(cur, rel), out)
+    out.push(cur)
     if (cur === root) break
     const parent = path.dirname(cur)
     if (parent === cur) break
     cur = parent
   }
+  return out
 }
 
 /**
  * Discover skills the way OpenCode does: `.opencode/skills`, global opencode,
- * plus `.claude/skills` and `.agents/skills` (project + home).
+ * plus `.claude/skills` and `.agents/skills` (project + home). Root order and
+ * later-wins precedence match the host loader (src/skill/index.ts discoverRoots).
  */
 export async function collectSkills(workspaceRoot: string, worktree: string): Promise<CollectedSkill[]> {
   const out = new Map<string, CollectedSkill>()
   const home = homedir()
+  const dirs = ancestors(workspaceRoot, worktree)
+  const external = (dir: string) => [path.join(dir, ".claude", "skills"), path.join(dir, ".agents", "skills")]
 
-  for (const projectDir of opencodeProjectConfigDirs(workspaceRoot)) {
-    const relative = path.relative(workspaceRoot, projectDir)
-    await walkAncestorsFor(workspaceRoot, path.join(relative, "skills"), worktree, out)
-  }
-  for (const globalDir of opencodeGlobalConfigDirs()) {
-    await scanSkillsRoot(path.join(globalDir, "skills"), out)
-  }
-
-  await walkAncestorsFor(workspaceRoot, path.join(".claude", "skills"), worktree, out)
-  await scanSkillsRoot(path.join(home, ".claude", "skills"), out)
-
-  await walkAncestorsFor(workspaceRoot, path.join(".agents", "skills"), worktree, out)
-  await scanSkillsRoot(path.join(home, ".agents", "skills"), out)
+  const roots = [
+    ...external(home),
+    // Outer directories first, .claude before .agents within each.
+    ...dirs.toReversed().flatMap(external),
+    ...opencodeGlobalConfigDirs().map((dir) => path.join(dir, "skills")),
+    // Host config.directories() lists `.opencode` dirs nearest first, so the outermost wins.
+    ...opencodeProjectConfigDirs(workspaceRoot).flatMap((projectDir) => {
+      const relative = path.relative(workspaceRoot, projectDir)
+      return dirs.map((dir) => path.join(dir, relative, "skills"))
+    }),
+  ]
+  for (const root of roots) await scanSkillsRoot(root, out)
 
   return [...out.values()]
 }

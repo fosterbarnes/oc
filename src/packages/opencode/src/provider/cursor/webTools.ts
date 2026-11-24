@@ -24,42 +24,53 @@ function exaMcpUrl(): string {
   return url.href
 }
 
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
+  }
+}
+
+/** First text item of an MCP tool result. Throws on a JSON-RPC error or an `isError` result. */
 function mcpText(value: unknown): string | undefined {
   if (!value || typeof value !== "object") return undefined
+  const error = (value as { error?: { message?: unknown } }).error
+  if (error) {
+    const message = typeof error.message === "string" ? error.message : JSON.stringify(error)
+    throw new Error(`Web search failed: ${message}`)
+  }
   const result = (value as { result?: unknown }).result
   if (!result || typeof result !== "object") return undefined
   const content = (result as { content?: unknown }).content
-  if (!Array.isArray(content)) return undefined
-  for (const item of content) {
-    if (
-      item &&
-      typeof item === "object" &&
-      (item as { type?: unknown }).type === "text" &&
-      typeof (item as { text?: unknown }).text === "string"
-    ) {
-      return (item as { text: string }).text
+  let text: string | undefined
+  if (Array.isArray(content)) {
+    for (const item of content) {
+      if (
+        item &&
+        typeof item === "object" &&
+        (item as { type?: unknown }).type === "text" &&
+        typeof (item as { text?: unknown }).text === "string"
+      ) {
+        text = (item as { text: string }).text
+        break
+      }
     }
   }
-  return undefined
+  if ((result as { isError?: unknown }).isError === true) throw new Error(`Web search failed: ${text ?? "tool error"}`)
+  return text
 }
 
 export function parseOpenCodeWebSearchResponse(raw: string): string | undefined {
   const trimmed = raw.trim()
   if (!trimmed) return undefined
-  try {
-    const text = mcpText(JSON.parse(trimmed))
-    if (text) return text
-  } catch {
-    // MCP may respond as an SSE stream instead of one JSON object.
-  }
+  // MCP may respond as one JSON object or as an SSE stream; non-JSON events are skipped.
+  const text = mcpText(parseJson(trimmed))
+  if (text) return text
   for (const line of raw.split("\n")) {
     if (!line.startsWith("data: ")) continue
-    try {
-      const text = mcpText(JSON.parse(line.slice(6)))
-      if (text) return text
-    } catch {
-      // Ignore non-JSON SSE events.
-    }
+    const text = mcpText(parseJson(line.slice(6)))
+    if (text) return text
   }
   return undefined
 }

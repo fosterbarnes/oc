@@ -41,29 +41,48 @@ export function createPushAutoDelete() {
   const enabled = () => kv.get(_KV_KEY, false) === true
   const currentID = () => (route.data.type === "session" ? route.data.sessionID : undefined)
 
+  // Ids being or already deleted: the startup sweep and leaving a session can both reach one session, and a
+  // second delete would fail as not found.
+  const claimed = new Set<string>()
+
   async function remove(sessions: { id: string; title: string }[]) {
-    const open = openInOtherTabs()
-    const targets = sessions.filter(
+    const { deleted, failures } = await deleteEach(
+      sessions,
       (session) =>
+        enabled() &&
+        !claimed.has(session.id) &&
         session.id !== currentID() &&
-        !open.has(session.id) &&
+        !openInOtherTabs().has(session.id) &&
         !local.session.isPinned(session.id) &&
         !["busy", "retry"].includes(sync.data.session_status?.[session.id]?.type ?? ""),
+      (session) => {
+        claimed.add(session.id)
+        return sdk.client.session
+          .delete({ sessionID: session.id })
+          .then(
+            (result) => result.error,
+            (error: unknown) => error ?? "delete failed",
+          )
+          .then((error) => {
+            if (error) claimed.delete(session.id)
+            return error
+          })
+      },
     )
-    const failures: string[] = []
-    for (const session of targets) {
-      const result = await sdk.client.session.delete({ sessionID: session.id }).catch((error: unknown) => ({ error }))
-      if (result.error) failures.push(errorMessage(result.error))
-    }
-    const deleted = targets.length - failures.length
     if (failures.length > 0) {
-      toast.show({ variant: "error", title: `Auto-delete: ${failures.length} failed`, message: failures[0] })
+      toast.show({
+        variant: "error",
+        title: `Auto-delete: ${failures.length} failed`,
+        message: errorMessage(failures[0]),
+      })
     }
-    if (deleted === 0) return
+    if (deleted.length === 0) return
     toast.show({
       variant: "success",
       message:
-        targets.length === 1 ? `Deleted pushed session: ${targets[0].title}` : `Deleted ${deleted} pushed sessions`,
+        deleted.length === 1
+          ? `Deleted pushed session: ${deleted[0].title}`
+          : `Deleted ${deleted.length} pushed sessions`,
     })
   }
 
@@ -84,9 +103,18 @@ export function createPushAutoDelete() {
   createEffect(() => {
     if (swept || sync.status !== "complete" || !kv.ready || !enabled()) return
     swept = true
+    // A failed sweep, or one cut short by turning the setting off, runs again when it next turns on.
     void listCompletedRoots(sdk.client)
       .then((sessions) => remove(sessions.filter((session) => isAutoDeletable(session))))
-      .catch(fail)
+      .then(
+        () => {
+          swept = enabled()
+        },
+        (error: unknown) => {
+          swept = false
+          fail(error)
+        },
+      )
   })
 
   return {
@@ -103,6 +131,24 @@ export function createPushAutoDelete() {
       dialog.clear()
     },
   }
+}
+
+// Checks each session right before its delete, not once up front: the user can open, pin, or start
+// one, or turn auto-delete off, while an earlier delete is in flight. `remove` resolves to its error.
+export async function deleteEach<T extends { id: string }>(
+  sessions: T[],
+  deletable: (session: T) => boolean,
+  remove: (session: T) => Promise<unknown>,
+) {
+  const deleted: T[] = []
+  const failures: unknown[] = []
+  for (const session of sessions) {
+    if (!deletable(session)) continue
+    const error = await remove(session)
+    if (error) failures.push(error)
+    if (!error) deleted.push(session)
+  }
+  return { deleted, failures }
 }
 
 // Sessions other oc tabs show, from their ledgers (`writeLedger` in app.tsx). A tab closed with its

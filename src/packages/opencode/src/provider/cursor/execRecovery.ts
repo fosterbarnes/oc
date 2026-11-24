@@ -77,9 +77,9 @@ export function recoverCorrelatedEditRead(
   // Prefer env.workspace_paths - project_folder / workspace_project_dir are
   // Cursor metadata roots under <host-cache>/projects/, not the git tree.
   const workspaceRoot = workspaceRootFromRequestContext(session.requestContext)
-  const resolvePath = (value: string) => path.resolve(workspaceRoot, value)
-  const absolutePath = resolvePath(requestedPath)
-  if (absolutePath !== resolvePath(editPath)) return false
+  // Same untildify + resolve as the host write tool, so `~/x` names the home file.
+  const absolutePath = resolveReadTargetPath(requestedPath, workspaceRoot)
+  if (absolutePath !== resolveReadTargetPath(editPath, workspaceRoot)) return false
 
   let exists = true
   try {
@@ -105,7 +105,8 @@ export function recoverCorrelatedEditRead(
         return false
       }
 
-      const frames = buildCompleteEditReadMessages(parsed.id, absolutePath, requestedPath)
+      // Read the validated target, not the link path, so a swapped symlink cannot redirect it.
+      const frames = buildCompleteEditReadMessages(parsed.id, realTarget, requestedPath)
       if (!frames) return false
       for (const frame of frames) session.stream.write(frame)
       const editCall = session.editToolCalls?.get(displayCallId)

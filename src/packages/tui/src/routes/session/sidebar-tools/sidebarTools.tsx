@@ -131,8 +131,8 @@ function loadRootPins(kv: ReturnType<typeof useKV>, worktree: string): Set<strin
 }
 
 function commandId(prefix: string, value: string): string {
-  const safe = value.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "") || "item"
-  return `sidebar.${prefix}.${safe}`
+  // Keymap names only forbid whitespace and drop duplicates; encoding keeps `lint:fix` and `lint-fix` apart.
+  return `sidebar.${prefix}.${encodeURIComponent(value)}`
 }
 
 function footerPath(directory: string, homeDirectory: string, branch?: string): string {
@@ -195,7 +195,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     (messageID) => sync.data.part[messageID] ?? [],
     os.homedir(),
   )
-  let configRoot = sessionDirectory === os.homedir() ? initialPromptDirectory || sessionDirectory : sessionDirectory
+  let configRoot = sameRootPath(sessionDirectory, os.homedir())
+    ? initialPromptDirectory || sessionDirectory
+    : sessionDirectory
   let sidebarSettings = readSettings(configRoot, sessionID)
   let projectConfigRoot = configRoot
   let project = configRoot
@@ -274,7 +276,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       (messageID) => sync.data.part[messageID] ?? [],
       os.homedir(),
     )
-    configRoot = sessionDirectory === os.homedir() ? promptDirectory || sessionDirectory : sessionDirectory
+    configRoot = sameRootPath(sessionDirectory, os.homedir()) ? promptDirectory || sessionDirectory : sessionDirectory
     projectConfigRoot = configRoot
     sidebarSettings = readSettings(projectConfigRoot, sessionID)
     project = projectConfigRoot
@@ -320,8 +322,9 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
       (messageID) => sync.data.part[messageID] ?? [],
       os.homedir(),
     )
-    const nextConfigRoot =
-      nextSessionDirectory === os.homedir() ? nextPromptDirectory || nextSessionDirectory : nextSessionDirectory
+    const nextConfigRoot = sameRootPath(nextSessionDirectory, os.homedir())
+      ? nextPromptDirectory || nextSessionDirectory
+      : nextSessionDirectory
     if (nextConfigRoot === configRoot && nextSessionID === sessionID) return
     sessionID = nextSessionID
     project = nextConfigRoot
@@ -479,12 +482,19 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     toggleFavorite,
     insertPath: (filePath) => insertPath(sessionID, filePath),
   })
-  const openRootPicker = () => setTimeout(selectRoot, 100)
+  // One pending open at a time, cancelled on unmount so a late fire never opens a picker for a gone sidebar.
+  let openTimer: ReturnType<typeof setTimeout> | undefined
+  const openLater = (open: () => void) => {
+    clearTimeout(openTimer)
+    openTimer = setTimeout(open, 100)
+  }
+  onCleanup(() => clearTimeout(openTimer))
+  const openRootPicker = () => openLater(selectRoot)
 
   const saveScriptSettings = (next: ScriptSettings, message = "Script settings updated") => {
     scriptSettings = normalizeScriptSettings(next, sidebarSettings.scripts)
     sidebarSettings.scripts = scriptSettings
-    saveUserSidebarSetting("scripts", scriptSettings)
+    void saveUserSidebarSetting("scripts", scriptSettings).catch(toast.error)
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message })
@@ -492,7 +502,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
   const resetScriptSettings = () => {
     scriptSettings = defaultScriptSettings()
     sidebarSettings.scripts = scriptSettings
-    saveUserSidebarSetting("scripts", scriptSettings)
+    void saveUserSidebarSetting("scripts", scriptSettings).catch(toast.error)
     setScripts((prev) => reconcileScripts(prev, readScripts(project, root, scriptSettings)))
     refreshCommands()
     toast.show({ variant: "success", message: "Global script settings reset" })
@@ -502,7 +512,7 @@ export function SidebarTools(props: ParentProps<{ sessionID: string }>) {
     save: saveScriptSettings,
     reset: resetScriptSettings,
   })
-  const openScriptSettings = () => setTimeout(selectScriptSettings, 100)
+  const openScriptSettings = () => openLater(selectScriptSettings)
 
   const sidebarCommands = createMemo(() => {
     commandsVersion()

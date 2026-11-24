@@ -51,7 +51,8 @@ async function scanMacBrowsers(): Promise<Browser[]> {
           .map((entry) => path.join(dir, entry))
       : [],
   )
-  const found = await Promise.all(
+  // Settled, so one malformed Info.plist skips that app instead of failing the scan.
+  const found = await Promise.allSettled(
     apps.map(async (app) => {
       const proc = Bun.spawn(["plutil", "-convert", "json", "-o", "-", path.join(app, "Contents", "Info.plist")], {
         stdout: "pipe",
@@ -75,7 +76,8 @@ async function scanMacBrowsers(): Promise<Browser[]> {
   )
   // First (sorted) path wins per bundle id, so a renamed copy loses to the original.
   const seen = new Set<string>()
-  return found.flatMap((item) => {
+  return found.flatMap((settled) => {
+    const item = settled.status === "fulfilled" ? settled.value : undefined
     if (!item || seen.has(item.id)) return []
     seen.add(item.id)
     return [{ name: item.name, path: item.path }]

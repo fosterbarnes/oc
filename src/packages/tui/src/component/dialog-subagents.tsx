@@ -33,7 +33,11 @@ function shortModelName(modelID: string): string {
   let short = modelID
   if (short.startsWith("claude-")) short = short.slice("claude-".length)
   short = short.replace(/-(\d+)-(\d+)$/, "-$1.$2")
+  // Agent names must match the server's /^[a-z0-9][a-z0-9._-]*$/ (`amazon.nova-micro-v1:0`, `org/model`).
   return short
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+|-+$/g, "")
 }
 
 // List of delegated agents grouped by model. Fetched fresh on open because
@@ -225,12 +229,16 @@ export function DialogSubagents(props: { highlight?: string }) {
 
   // "" = Auto: the agent has no fixed effort, so each task call may pass provider/model#effort
   function chooseEffort(agent: Agent, providerID: string, modelID: string) {
+    // Reloads the list after the save only if the user is still on the dialog the save started from.
     async function save(variant: string) {
+      const owner = dialog.stack.at(-1)
       await persistAgentModel(sdk.client, agent.name, `${providerID}/${modelID}`, toast, variant)
-      reopen(agent.name)
+      if (dialog.stack.at(-1) === owner) reopen(agent.name)
     }
     const { variants } = modelInfo({ providerID, modelID })
     if (variants.length === 0) {
+      // DialogModel cleared the stack: show the list while the save runs instead of no dialog.
+      reopen(agent.name)
       void save("")
       return
     }
@@ -270,6 +278,9 @@ export function DialogSubagents(props: { highlight?: string }) {
 
   // Claude entries may prefer one pool account (`claudeAccount`); skipped with fewer than two accounts.
   async function chooseAccount(providerID: string, modelID: string, levels: string[]) {
+    // Callers cleared the stack: show the list while accounts load, and drop the flow if the user moves on.
+    if (providerID === "claude-code") reopen()
+    const owner = dialog.stack.at(-1)
     const accounts =
       providerID === "claude-code"
         ? await sdk.claudeAccount.state().catch((error) => {
@@ -277,6 +288,7 @@ export function DialogSubagents(props: { highlight?: string }) {
             return undefined
           })
         : []
+    if (dialog.stack.at(-1) !== owner) return
     if (!accounts) {
       reopen()
       return

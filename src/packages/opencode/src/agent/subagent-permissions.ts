@@ -31,6 +31,9 @@ export function isReadonlySubagent(permission: PermissionV1.Ruleset | undefined)
 export function readonlySubagentRules(prior: PermissionV1.Ruleset): PermissionV1.Rule[] {
   return [
     { permission: "*", pattern: "*", action: "deny" },
+    // `Permission.disabled` hides these only for a rule naming them, so `*` alone leaves them listed.
+    { permission: "session_complete", pattern: "*", action: "deny" },
+    { permission: "session_failed", pattern: "*", action: "deny" },
     ...READONLY_TOOLS.flatMap((tool): PermissionV1.Rule[] => [
       { permission: tool, pattern: "*", action: "ask" },
       ...prior.filter((rule) => Wildcard.match(tool, rule.permission)).map((rule) => ({ ...rule, permission: tool })),

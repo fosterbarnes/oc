@@ -290,8 +290,9 @@ function cursorHistoryImageParts(prompt: readonly unknown[]): Record<string, unk
       for (const value of output.value) {
         if (!value || typeof value !== "object") continue
         const file = value as Record<string, unknown>
-        if (file.type === "file-data" && typeof file.mediaType === "string" && file.mediaType.startsWith("image/"))
-          parts.push(file)
+        // AI SDK 6 maps OpenCode's tool `media` images to `image-data`; other files to `file-data`.
+        const isData = file.type === "image-data" || file.type === "file-data"
+        if (isData && typeof file.mediaType === "string" && file.mediaType.startsWith("image/")) parts.push(file)
       }
     }
   }

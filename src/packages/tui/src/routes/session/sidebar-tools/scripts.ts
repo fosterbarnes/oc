@@ -1,6 +1,7 @@
 // Script discovery (package.json and .scripts), the file tree, and row reconciliation.
 import fs from "node:fs"
 import path from "node:path"
+import { displaySlice } from "../../../prompt/display"
 import {
   defaultScriptSettings,
   type ScriptLanguage,
@@ -73,23 +74,29 @@ function readPackageScripts(directory: string, shell: ScriptLauncher): Script[] 
     const packageJson = JSON.parse(fs.readFileSync(path.join(directory, "package.json"), "utf8"))
     if (!packageJson.scripts || typeof packageJson.scripts !== "object") return []
     const manager = packageManager(directory)
-    return Object.keys(packageJson.scripts)
-      .filter((name) => /^[a-zA-Z0-9_:.\/-]+$/.test(name))
-      .sort((a, b) => a.localeCompare(b))
-      .map((name) => ({
-        name,
-        command: `${manager} run ${name}`,
-        launcher: shell,
-        terminal: "native",
-        weztermSize: { Percent: 50 },
-      }))
+    return (
+      Object.keys(packageJson.scripts)
+        // No leading dash: `npm run --silent` would read the name as an npm option.
+        .filter((name) => /^[a-zA-Z0-9_:.\/][a-zA-Z0-9_:.\/-]*$/.test(name))
+        .sort((a, b) => a.localeCompare(b))
+        .map((name) => ({
+          name,
+          command: `${manager} run ${name}`,
+          launcher: shell,
+          terminal: "native",
+          weztermSize: { Percent: 50 },
+        }))
+    )
   } catch {
     return []
   }
 }
 
 function readFileScripts(root: string, languages: readonly ScriptLanguage[]): Script[] {
-  const scriptsDirectory = path.basename(root) === ".scripts" ? root : path.join(root, ".scripts")
+  const base = path.basename(root)
+  // Windows paths are case-insensitive, so `.SCRIPTS` is the scripts folder itself.
+  const scriptsDirectory =
+    (process.platform === "win32" ? base.toLowerCase() : base) === ".scripts" ? root : path.join(root, ".scripts")
   try {
     return fs
       .readdirSync(scriptsDirectory, { withFileTypes: true })
@@ -160,11 +167,12 @@ export function readTree(root: string, expanded: ReadonlySet<string>): TreeEntry
 
 // OpenTUI's native truncate puts the ellipsis mid-text; clip at the end instead.
 // Unmeasured rows (width <= 0) render empty so repeated refreshes do not flash full paths before clipping.
+// Widths are terminal columns, so wide characters count twice.
 export function clipEnd(text: string, width: number): string {
-  if (text.length <= width) return text
+  if (Bun.stringWidth(text) <= width) return text
   if (width <= 0) return ""
-  if (width < 3) return text.slice(0, width)
-  return `${text.slice(0, width - 3)}...`
+  if (width < 3) return displaySlice(text, 0, width)
+  return `${displaySlice(text, 0, width - 3)}...`
 }
 
 function scriptKey(script: Script): string {

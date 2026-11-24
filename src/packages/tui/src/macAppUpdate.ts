@@ -138,14 +138,18 @@ async function plistValue(plist: string, key: string) {
 type Installed = { app: string; bundleId: string; version: string }
 
 async function findInstalled(spec: MacAppSpec): Promise<Installed | undefined> {
+  const found: { app: string; bundleId: string }[] = []
   for (const app of appPaths(spec)) {
     const plist = path.join(app, "Contents", "Info.plist")
     if (!existsSync(plist)) continue
     const bundleId = await plistValue(plist, "CFBundleIdentifier")
     // It ends up in an AppleScript string (quit app id "...").
     if (!/^[A-Za-z0-9.-]+$/.test(bundleId) || (spec.bundleId && bundleId !== spec.bundleId)) continue
-    return { app, bundleId, version: await appVersion(app) }
+    found.push({ app, bundleId })
   }
+  // An unsupported copy in one folder must not hide a supported one in the other.
+  const pick = found.find((item) => !spec.unsupported?.(item.bundleId)) ?? found[0]
+  return pick && { ...pick, version: await appVersion(pick.app) }
 }
 
 async function appVersion(app: string) {

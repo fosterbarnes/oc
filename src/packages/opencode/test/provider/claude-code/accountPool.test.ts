@@ -25,6 +25,7 @@ import {
   _setUsageCacheDir,
   accountConfigEntry,
   accountLimitReason,
+  addApiSpend,
   DEFAULT_ACCOUNT,
   earliestLimitedUntil,
   applyFailoverChoice,
@@ -192,6 +193,31 @@ test("API profile: a global API pick survives while its key is still loading", (
   expect(poolAccount(ids, now)).toBe(ids[0])
   configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
   expect(poolAccount(ids, now)).toBe(api)
+})
+
+test("API spend: the day bucket resets on a new local day, the month bucket on a new month", () => {
+  const ids = ["C:/acct/a"]
+  configureApiAccount({ apiKey: "sk-credit", dir: "C:/acct/api" }, ids)
+  const api = apiAccountId()!
+  const spent = (now: number) => {
+    const row = poolState(ids, now, undefined, undefined, { withApi: true }).find((a) => a.id === api)!
+    return [row.spentTodayUsd, row.spentMonthUsd]
+  }
+  const jan30 = new Date(2026, 0, 30, 12).valueOf()
+  const jan31 = new Date(2026, 0, 31, 12).valueOf()
+  const feb1 = new Date(2026, 1, 1, 12).valueOf()
+  expect(spent(jan30)).toEqual([0, 0])
+  addApiSpend(1.5, jan30)
+  addApiSpend(Number.NaN, jan30)
+  addApiSpend(-2, jan30)
+  addApiSpend(0.5, jan30)
+  expect(spent(jan30)).toEqual([2, 2])
+  addApiSpend(1, jan31)
+  expect(spent(jan31)).toEqual([1, 3])
+  // A new month resets both; an earlier bucket reads 0 without new spend.
+  expect(spent(feb1)).toEqual([0, 0])
+  addApiSpend(4, feb1)
+  expect(spent(feb1)).toEqual([4, 4])
 })
 
 test("a rejection with no usage window gates that model only, not the login", () => {

@@ -41,8 +41,10 @@ function megabytes(bytes: number) {
 
 function rowStatus(row: UpdateRow, now: number) {
   if (row.phase === "downloading" && row.total > 0) {
-    const percent = Math.floor((100 * row.received) / row.total)
-    return `downloading ${percent}% (${megabytes(row.received)}/${megabytes(row.total)} MB)`
+    // A server's Content-Length can undercount the bytes streamed.
+    const total = Math.max(row.total, row.received)
+    const percent = Math.floor((100 * row.received) / total)
+    return `downloading ${percent}% (${megabytes(row.received)}/${megabytes(total)} MB)`
   }
   if (row.phase === "downloading" && row.received > 0) return `downloading ${megabytes(row.received)} MB`
   const base = _TIMED.has(row.phase) ? `${row.phase} ${Math.floor((now - row.since) / 1000)}s` : row.phase

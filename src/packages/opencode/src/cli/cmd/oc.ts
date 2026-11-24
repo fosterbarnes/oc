@@ -313,7 +313,11 @@ async function spawnTab(pane: string, tab: Revive.Tab) {
     OcConfig.executablePath(),
     ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : [])]),
   ]
-  const child = Bun.spawn(["wezterm", "cli", "spawn", "--pane-id", pane, ...args], { stdout: "ignore", stderr: "pipe" })
+  // An unreachable mux must fail here, not start a stray GUI that the tab then opens in.
+  const child = Bun.spawn(["wezterm", "cli", "--no-auto-start", "spawn", "--pane-id", pane, ...args], {
+    stdout: "ignore",
+    stderr: "pipe",
+  })
   const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()])
   if (code !== 0) {
     throw new Error(`wezterm cli spawn exited with code ${code}: ${stderr.trim()}`)

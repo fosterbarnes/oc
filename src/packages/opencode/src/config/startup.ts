@@ -88,15 +88,15 @@ export function plan(input: ReturnType<typeof context>, enabling = true) {
 // Only XDG dirs moved off xdg-basedir's defaults: every process the server starts inherits them,
 // and Windows tools such as gh then read ~/.config instead of %APPDATA% (gh "not logged in").
 function movedXdgDirs(input: ReturnType<typeof context>) {
+  // Windows paths are case-insensitive; a macOS volume may not be, so ~/.Config is a different folder there.
+  const key = (dir: string) => (input.platform === "win32" ? path.resolve(dir).toLowerCase() : path.resolve(dir))
   return Object.fromEntries(
     Object.entries({
       XDG_CONFIG_HOME: [path.dirname(input.config), ".config"],
       XDG_STATE_HOME: [path.dirname(input.state), ".local/state"],
       XDG_DATA_HOME: [path.dirname(input.data), ".local/share"],
       XDG_CACHE_HOME: [path.dirname(input.cache), ".cache"],
-    }).flatMap(([key, [dir, fallback]]) =>
-      path.resolve(dir).toLowerCase() === path.resolve(input.home, fallback).toLowerCase() ? [] : [[key, dir]],
-    ),
+    }).flatMap(([name, [dir, fallback]]) => (key(dir) === key(path.join(input.home, fallback)) ? [] : [[name, dir]])),
   )
 }
 

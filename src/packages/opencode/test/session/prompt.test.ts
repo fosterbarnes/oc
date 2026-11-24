@@ -15,6 +15,7 @@ import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Agent as AgentSvc } from "../../src/agent/agent"
+import { READONLY_MARKER_RULE } from "../../src/agent/subagent-permissions"
 import { BackgroundJob } from "@/background/job"
 import { Command } from "../../src/command"
 import { Config } from "@/config/config"
@@ -490,6 +491,53 @@ it.instance(
       expect(saved[0].parts.find((part) => part.type === "text")?.text).toContain("<failed: pwd>")
     }),
   20_000,
+)
+
+it.instance(
+  "a read-only subagent's brief files obey its read rules",
+  () =>
+    Effect.gen(function* () {
+      const { dir } = yield* useServerConfig(providerCfg)
+      const { prompt, sessions } = yield* boot()
+      yield* writeText(path.join(dir, "secret.txt"), "TOP SECRET")
+      yield* writeText(path.join(dir, "open.txt"), "OPEN TEXT")
+      const child = yield* sessions.create({
+        title: "Read-only child",
+        permission: [{ permission: "read", pattern: "secret.txt", action: "deny" }, READONLY_MARKER_RULE],
+      })
+      const message = yield* prompt.prompt({
+        sessionID: child.id,
+        agent: "build",
+        noReply: true,
+        parts: yield* prompt.resolvePromptParts("Review @secret.txt and @open.txt"),
+      })
+      const text = message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+      expect(text).not.toContain("TOP SECRET")
+      expect(text).toContain("Read tool failed")
+      expect(text).toContain("OPEN TEXT")
+    }),
+  { git: true },
+)
+
+it.instance("a read-only subagent refuses command shell expansion and subtasks", () =>
+  Effect.gen(function* () {
+    yield* useServerConfig((url) => ({
+      ...providerCfg(url),
+      command: {
+        shelly: { template: "Here: !`echo ran`" },
+        delegate: { template: "Delegate", subtask: true, agent: "general" },
+      },
+    }))
+    const { prompt, sessions } = yield* boot()
+    const child = yield* sessions.create({ title: "Read-only child", permission: [READONLY_MARKER_RULE] })
+    for (const command of ["shelly", "delegate"]) {
+      const exit = yield* prompt.command({ sessionID: child.id, command, arguments: "" }).pipe(Effect.exit)
+      expect(Exit.isFailure(exit)).toBe(true)
+      const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+      expect(NamedError.Unknown.isInstance(error) && error.data.message).toContain("read-only subagent may not")
+    }
+    expect(yield* sessions.messages({ sessionID: child.id })).toHaveLength(0)
+  }),
 )
 
 it.instance("unknown subtask agent creates no running tool or assistant", () =>
@@ -3464,3 +3512,30 @@ noLLMServer.instance(
     }),
   30_000,
 )
+
+test("queued notices before a steered prompt still get their own Claude step", () => {
+  const text = (metadata: Record<string, unknown>) => [{ type: "text", synthetic: true, text: "notice", metadata }]
+  const user = (parts: unknown[]) =>
+    ({ info: { id: MessageID.ascending(), role: "user" }, parts }) as unknown as SessionV1.WithParts
+  const assistant = (parentID: string) =>
+    ({
+      info: { id: MessageID.ascending(), role: "assistant", parentID, providerID: "claude-code", finish: "stop" },
+      parts: [],
+    }) as unknown as SessionV1.WithParts
+  const u0 = user([{ type: "text", text: "go" }])
+  const a0 = assistant(u0.info.id)
+  // Posted while the turn was starting: `steerClaudeTurn` skipped them, so they stayed queued.
+  const u1 = user(text({ sessionNotice: true }))
+  const u2 = user(text({ sessionNotice: true }))
+  const s1 = user(
+    text({ sessionNotice: true, steered: Date.now(), steeredAssistantID: a0.info.id, steeredParentID: u0.info.id }),
+  )
+  const a1 = assistant(s1.info.id)
+  const timeline = [u0, a0, u1, u2, s1, a1]
+  expect(SessionPrompt.pendingClaudeUser(timeline, a1.info as SessionV1.Assistant)?.info.id).toBe(u1.info.id)
+  // After u1 got its step, u2 is next; after u2, nothing is left.
+  const a2 = assistant(u1.info.id)
+  expect(SessionPrompt.pendingClaudeUser([...timeline, a2], a2.info as SessionV1.Assistant)?.info.id).toBe(u2.info.id)
+  const a3 = assistant(u2.info.id)
+  expect(SessionPrompt.pendingClaudeUser([...timeline, a2, a3], a3.info as SessionV1.Assistant)).toBeUndefined()
+})

@@ -244,12 +244,17 @@ async function listenerIsOc(hostname: string, port: number, state: ResidentState
 async function observeResident(url: string, secret: string, hostname: string, port: number) {
   const state = await readResidentState()
   const matches = state?.hostname === hostname && state?.port === port
-  // Async snapshot: the launcher intro animates while this runs.
-  const processes = state?.pid && state.created ? await TuiLedger.listProcessesAsync() : undefined
+  // Async snapshots: the launcher intro animates while these run.
+  const [processes, listener] = await Promise.all([
+    state?.pid && state.created ? TuiLedger.listProcessesAsync() : undefined,
+    matches ? residentListenerPidAsync(hostname, port) : undefined,
+  ])
   const alive = state?.pid ? isPidAlive(state.pid, state, processes && (() => processes)) : false
-  // The secret goes only to our own server: matching live state says so; otherwise the listener must be an
-  // oc process. /global/health needs auth, so an unauthenticated probe cannot identify oc.
-  const trusted = (matches && alive) || (await listenerIsOc(hostname, port, state))
+  // The secret goes only to our own server: matching live state, unless another process holds the port (a
+  // restarting server closes its socket before it exits); otherwise an oc listener. /global/health needs auth,
+  // so an unauthenticated probe cannot identify oc. A failed lookup must not strand a healthy server.
+  const owned = matches && alive && (listener === undefined || listener === state?.pid)
+  const trusted = owned || (await listenerIsOc(hostname, port, state))
   const healthy = trusted ? await serverHealthy(url, secret) : false
   const action = residentLaunchAction({
     healthy,

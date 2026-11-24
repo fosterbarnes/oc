@@ -160,7 +160,10 @@ export async function probeOpenAIUsage(options: UsageOptions = {}): Promise<Open
   try {
     const fetched = await fetchUsageResponse(options, USAGE_URL, usageHeaders(credentials))
     const parsed = parseUsageResponse(fetched.body, fetched.receiptMs)
-    return parsed.ok ? { ...parsed, accountID: credentials.accountId, fetchedAt: fetched.receiptMs } : parsed
+    // A failed parse keeps the account so the merge marks the last reading stale instead of dropping it.
+    return parsed.ok
+      ? { ...parsed, accountID: credentials.accountId, fetchedAt: fetched.receiptMs }
+      : { ...parsed, ...(credentials.accountId ? { accountID: credentials.accountId } : {}) }
   } catch (error) {
     const metadata = usageFailureMetadata(error)
     if (error instanceof UsageRequestError && error.status === 401) {

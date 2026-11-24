@@ -28,6 +28,8 @@ export function DialogSync() {
   const save = (next: OcSync.Settings) => {
     setSettings(next)
     persistOcSync(next).catch((error) => {
+      // Show what oc.json holds, unless a newer toggle replaced this one (its own save reports itself).
+      if (settings() === next) setSettings(OcSync.settings())
       toast.show({ variant: "error", message: `Sync setting not saved: ${errorMessage(error)}` })
     })
   }
@@ -55,6 +57,7 @@ export function DialogSync() {
     const message = `Put back this machine's version of ${conflict.id} and the other files that change from ${conflict.peer} overwrote. The restored files sync to your other machines as a new change.`
     if (!(await DialogConfirm.show(dialog, "Restore", message, "Restore"))) return
     dialog.replace(() => <DialogSync />)
+    const reopened = dialog.stack.at(-1)
     await OcItems.undo(conflict.backup)
       .then(async (restored) => {
         const reloaded = await reloadProjects(sdk.client)
@@ -64,7 +67,8 @@ export function DialogSync() {
         })
       })
       .catch((error) => toast.show({ variant: "error", message: `Restore failed: ${errorMessage(error)}` }))
-    void refetch()
+    // Remount so the reopened dialog reads status after the backup is gone; this instance is unmounted.
+    if (dialog.stack.at(-1) === reopened) dialog.replace(() => <DialogSync />)
   }
 
   const options = createMemo<DialogSelectOption<string>[]>(() => {
