@@ -72,12 +72,17 @@ function Mcp(props: { api: TuiPluginApi }) {
   )
 }
 
+// Same text as the session sidebar footer.
+function versionLabel(app: TuiPluginApi["app"]) {
+  return `oc v${(app.displayVersion ?? app.version).split("-")[0]} ∙ OG v${app.version}`
+}
+
 function Version(props: { api: TuiPluginApi }) {
   const theme = () => props.api.theme.current
 
   return (
     <box flexShrink={0}>
-      <text fg={theme().textMuted}>{props.api.app.version}</text>
+      <text fg={theme().textMuted}>{versionLabel(props.api.app)}</text>
     </box>
   )
 }
@@ -92,7 +97,7 @@ function View(props: { api: TuiPluginApi }) {
   })
   // 4 columns of padding plus the gap before the version
   const directoryWidth = createMemo(() =>
-    Math.max(2, dimensions().width - 8 - Bun.stringWidth(props.api.app.version) - mcpWidth()),
+    Math.max(2, dimensions().width - 8 - Bun.stringWidth(versionLabel(props.api.app)) - mcpWidth()),
   )
   return (
     <box

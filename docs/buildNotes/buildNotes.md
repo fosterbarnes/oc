@@ -131,6 +131,20 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-23 (~23:31) - v0.2.412 vanillaChill - Home footer shows oc and OG versions - Claude Opus 5.5, default; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; default; Implementation; completed, live unverified
+- Version: 0.2.412
+- Changed `Version` in src/packages/tui/src/feature-plugins/home/footer.tsx: renders `versionLabel(api.app)` = `oc v<displayVersion sans suffix> ∙ OG v<version>` (sidebarTools.tsx:972 format, no green `-`); directory width budget now measures the label
+- Verification: `tsc --noEmit` in src/packages/tui clean; home page not viewed live (needs `/revive`)
+
+### User
+Home page
+- The bottom-right corner now shows the oc and OpenCode versions, like the session sidebar.
+
+---
+
 ## 2026-11-23 (~21:52) - v0.2.411 emacAnthem - Swarm claim fixes, lost subagent results, steering race, Cursor ledger items, API spend line - Claude Opus 5.5, default; Implementation
 
 ### Agent
