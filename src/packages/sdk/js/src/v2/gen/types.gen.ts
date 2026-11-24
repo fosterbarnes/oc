@@ -1773,6 +1773,7 @@ export type AgentConfig = {
   description?: string
   mode?: "subagent" | "primary" | "all"
   hidden?: boolean
+  readonly?: boolean
   options?: {
     [key: string]: unknown
   }
@@ -2569,6 +2570,7 @@ export type Agent = {
   mode: "subagent" | "primary" | "all"
   native?: boolean
   hidden?: boolean
+  readonly?: boolean
   topP?: number
   temperature?: number
   color?: string
@@ -12603,6 +12605,8 @@ export type SessionClaudeAccountStateResponses = {
       pinned?: boolean
       limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       kind?: "api"
+      spentTodayUsd?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      spentMonthUsd?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     }>
   }
 }
@@ -12644,6 +12648,8 @@ export type SessionClaudeAccountSetResponses = {
       pinned?: boolean
       limitedUntil?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
       kind?: "api"
+      spentTodayUsd?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+      spentMonthUsd?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
     }>
   }
 }

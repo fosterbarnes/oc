@@ -205,7 +205,7 @@ export async function fingerprint(dirs: string[]) {
   )
 }
 
-async function scanFile(dir: string, item: string) {
+export async function scanFile(dir: string, item: string) {
   const agents: Record<string, ConfigAgentV1.Info> = {}
   const diagnostics: AgentDiagnostic[] = []
   const fail = (error: unknown) => ({

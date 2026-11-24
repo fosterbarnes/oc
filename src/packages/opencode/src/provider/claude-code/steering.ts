@@ -20,8 +20,8 @@ export type SteeringHost = {
   switching: () => boolean
   activeProcess: () => ActiveProcess | undefined
   write: (line: string) => void
-  /** Claude read a steer; output waits for `read` or `receiptFailed`. */
-  hold: () => void
+  /** Claude read a steer; output from here waits for its `read` or `receiptFailed`. */
+  hold: (messageID: string) => void
   /** Claude read a steer and its delivery receipt is saved. */
   read: (messageID: string) => void
   /** Claude read a steer whose delivery receipt could not be saved. */
@@ -37,6 +37,8 @@ export class Steering {
   private readonly writtenIds = new Set<string>()
   /** Messages this turn cannot take; it ends at its next tool boundary so oc's loop runs them. */
   private preempts: string[] = []
+  /** Bumped by `clear()`, so a failed retract that started before it does not restore a cleared steer. */
+  private cleared = 0
   private _retired = false
   /** oc recording that Claude read a steer; the finish waits so oc's loop never sends it again. */
   readonly acks = new Set<Promise<void>>()
@@ -87,6 +89,7 @@ export class Steering {
 
   /** The turn restarts on another account; oc's loop sends every unread steer after it. Preempts stay. */
   clear() {
+    this.cleared++
     this.written.length = 0
     this.held = []
     this.readAfterResult = false
@@ -119,14 +122,18 @@ export class Steering {
   private async retract(messageID: string, remove: () => Promise<void>) {
     if (this.host.stopped()) return false
     if (this.writtenIds.has(messageID)) return false
-    const held = this.held.find((steer) => steer.messageID === messageID)
+    const index = this.held.findIndex((steer) => steer.messageID === messageID)
+    const held = this.held[index]
     if (!held && !this.preempts.includes(messageID)) return false
     this.held = this.held.filter((steer) => steer.messageID !== messageID)
     this.preempts = this.preempts.filter((id) => id !== messageID)
+    const cleared = this.cleared
     // The result cannot release oc's next step while its history still contains the removed steer.
     const removal = remove().catch((error) => {
-      if (!this.host.closed()) {
-        if (held) this.held.push(held)
+      // An account switch cleared the queues meanwhile; oc's loop resends the still-saved steer after it.
+      if (!this.host.closed() && this.cleared === cleared) {
+        // Back in its place, so it still goes before steers sent after it.
+        if (held) this.held.splice(Math.min(index, this.held.length), 0, held)
         else this.preempts.push(messageID)
       }
       throw error
@@ -172,7 +179,7 @@ export class Steering {
     this.readAfterResult = true
     log.info("claude consumed steered message", { messageID: steer.messageID, uuid: steer.uuid })
     // Synchronous, before the receipt saves: Claude's answer may already be streaming.
-    this.host.hold()
+    this.host.hold(steer.messageID)
     const ack = steer.delivered().then(
       () => this.host.read(steer.messageID),
       (error) => this.host.receiptFailed(error),
@@ -189,7 +196,9 @@ export class Steering {
     ap.turnAbandoned = true
     ap.wakeTarget = undefined
     // Retire synchronously before a proxy rejection can release the CLI's next turn.
-    void deleteActiveProcessAndWait(this.host.turn.sessionKey, { forceKill: true })
+    void deleteActiveProcessAndWait(this.host.turn.sessionKey, { forceKill: true }).catch((error) =>
+      log.error("failed to retire Claude process", { error: String(error) }),
+    )
     markClaudeSessionLost(this.host.turn.sessionKey, reason)
   }
 }

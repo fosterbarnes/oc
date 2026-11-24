@@ -185,6 +185,49 @@ describe("context-security: agents symlink containment", () => {
     expect(agents.map((a) => a.name)).not.toContain("code-reviewer")
   })
 
+  test("agents maps advertise dispatchable host entries with their resolved prompts", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        const agentsDir = path.join(dir, ".opencode", "agents", "sub")
+        await mkdir(agentsDir, { recursive: true })
+        await writeFile(path.join(agentsDir, "shared.txt"), "  Shared file prompt  \n", "utf-8")
+        await writeFile(path.join(agentsDir, "child.txt"), "Child file prompt", "utf-8")
+        await writeFile(
+          path.join(agentsDir, "general.md"),
+          `---
+description: Shared description
+mode: subagent
+prompt: "{file:shared.txt}"
+agents:
+  general-haiku-5.5:
+    name: ignored-name
+    model: test/haiku
+    reasoning: { low: on, high: on, max: off, xhigh: manual }
+    description: Fast general
+  general-opus-5.5:
+    model: test/opus
+    prompt: "{file:child.txt}"
+  disabled-agent:
+    disable: true
+  invalid-agent:
+    disable: "true"
+---
+Shared prompt`,
+          "utf-8",
+        )
+      },
+    })
+    const agents = await collectAgents(tmp.path)
+    const family = agents.filter((a) => a.fullPath === path.join(tmp.path, ".opencode", "agents", "sub", "general.md"))
+    expect(family.map((a) => a.name)).toEqual(["general-haiku-5.5:low", "general-haiku-5.5:high", "general-opus-5.5"])
+    expect(family.map((a) => a.description)).toEqual(["Fast general", "Fast general", "Shared description"])
+    expect(family.map((a) => a.prompt)).toEqual([
+      "Shared file prompt\n\nShared prompt",
+      "Shared file prompt\n\nShared prompt",
+      "Child file prompt\n\nShared prompt",
+    ])
+  })
+
   test("serialization of request context never contains out-of-root secret", async () => {
     const outsideDir = await mkOutsideDir()
     await writeFile(

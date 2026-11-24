@@ -158,6 +158,8 @@ export const ClaudeAccount = Schema.Struct({
   limitedUntil: Schema.optional(Schema.Number),
   /** The API-credit profile: bills API credits wherever it is picked (global, session, agent). */
   kind: Schema.optional(Schema.Literal("api")),
+  spentTodayUsd: Schema.optional(Schema.Number),
+  spentMonthUsd: Schema.optional(Schema.Number),
 })
 export const ClaudeAccounts = Schema.Struct({ accounts: Schema.Array(ClaudeAccount) })
 // With `sessionID` the call pins/unpins that session (no `id` = unpin); without it, it sets the global account.

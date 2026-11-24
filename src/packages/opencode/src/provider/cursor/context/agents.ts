@@ -1,5 +1,7 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises"
+import { readdir, realpath, stat } from "node:fs/promises"
 import path from "node:path"
+import { SubagentRef } from "@/agent/subagentRef"
+import { ConfigAgent } from "@/config/agent"
 import { opencodeGlobalConfigDirs, opencodeProjectConfigDirs } from "./paths.js"
 
 export type CollectedAgent = {
@@ -16,44 +18,6 @@ async function exists(p: string): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-function parseAgentMarkdown(raw: string): {
-  description: string
-  prompt: string
-} {
-  let description = ""
-  let body = raw
-  if (raw.startsWith("---")) {
-    const end = raw.indexOf("\n---", 3)
-    if (end >= 0) {
-      const fm = raw.slice(3, end).trim()
-      body = raw.slice(end + 4).replace(/^\n/, "")
-      for (const line of fm.split("\n")) {
-        const m = line.match(/^(\w+):\s*(.*)$/)
-        if (!m) continue
-        const trimmed = m[2]!.trim()
-        const quoted =
-          (trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))
-        const val = quoted ? trimmed.slice(1, -1) : trimmed
-        if (m[1] === "description") description = val
-      }
-    }
-  }
-  return { description, prompt: body.slice(0, 20_000) }
-}
-
-/**
- * The host keys agents by path, never by frontmatter `name` (config/agent.ts
- * scanFile): `agents/sub/review.md` dispatches as `review`. Advertising any
- * other name makes the task tool fail with "Unknown agent type".
- */
-function agentNameFromRelative(relative: string): string {
-  const name = relative
-    .replace(/\\/g, "/")
-    .replace(/^agents?\//, "")
-    .replace(/\.md$/, "")
-  return name.startsWith("sub/") ? name.slice("sub/".length) : name
 }
 
 function uniquePaths(paths: string[]): string[] {
@@ -143,16 +107,21 @@ async function scanAgentRoot(root: string, out: Map<string, CollectedAgent>, tru
       }
 
       try {
-        const raw = await readFile(full, "utf-8")
-        const name = agentNameFromRelative(relative)
-        const parsed = parseAgentMarkdown(raw)
-        if (!out.has(name)) {
-          out.set(name, {
-            fullPath: path.resolve(full),
-            name,
-            description: parsed.description,
-            prompt: parsed.prompt,
-          })
+        const result = await ConfigAgent.scanFile(root, full)
+        for (const [name, config] of Object.entries(result.agents)) {
+          if (config.disable) continue
+          const levels = SubagentRef.listed(config.reasoning)
+          if (config.reasoning && levels.length === 0) continue
+          const names = levels.length ? levels.map((level) => `${name}:${level}`) : [name]
+          for (const advertised of names) {
+            if (out.has(advertised)) continue
+            out.set(advertised, {
+              fullPath: path.resolve(full),
+              name: advertised,
+              description: config.description ?? "",
+              prompt: config.prompt?.slice(0, 20_000) ?? "",
+            })
+          }
         }
       } catch {
         /* skip unreadable or malformed files without failing context build */

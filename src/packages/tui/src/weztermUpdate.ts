@@ -115,7 +115,8 @@ export async function installWezterm(
     const installed = await installedVersion(install.cli)
     const latest = await latestVersion()
     if (!sameBuild(latest, expectedVersion)) return fail(`latest build changed (${latest}); confirm again`)
-    if (sameBuild(installed, latest)) return { ok: true, alreadyRunning: false, message: upToDate(installed) }
+    if (sameBuild(installed, latest))
+      return { ok: true, alreadyRunning: false, upToDate: true, message: upToDate(installed) }
     if (install.method === "unknown") return fail(manualMessage(install.cli, installed, latest))
     if (install.method === "setup") {
       const result = await runDesktopInstall({ key: "wezterm", label: LABEL, script: setupScript, onLine })

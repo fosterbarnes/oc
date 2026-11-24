@@ -395,6 +395,7 @@ const layer = Layer.effect(
       msgs: SessionV1.WithParts[]
     }) {
       const { task, model, lastUser, sessionID, session, msgs } = input
+      yield* refuseInReadonly(sessionID, "Subtask starts a subagent")
       // `task.agent` may be `<agent>:<level>`: `base` is the agent, the full ref goes to the task tool.
       const base = SubagentRef.parse(task.agent).name
       const taskAgent = yield* agents.get(base)
@@ -1134,14 +1135,37 @@ const layer = Layer.effect(
                 ]
               }
 
+              const called = {
+                messageID: info.id,
+                sessionID: input.sessionID,
+                type: "text",
+                synthetic: true,
+                text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
+              } satisfies Draft<SessionV1.TextPart>
+              if (readonlyRules) {
+                const exit = yield* execRead({ filePath: filepath }).pipe(Effect.exit)
+                if (Exit.isFailure(exit)) {
+                  const error = Cause.squash(exit.cause)
+                  yield* Effect.logError("failed to read file", { error, filepath })
+                  const message = error instanceof Error ? error.message : String(error)
+                  yield* events.publish(Session.Event.Error, {
+                    sessionID: input.sessionID,
+                    error: new NamedError.Unknown({ message }).toObject(),
+                  })
+                  return [
+                    called,
+                    {
+                      messageID: info.id,
+                      sessionID: input.sessionID,
+                      type: "text",
+                      synthetic: true,
+                      text: `Read tool failed to read ${filepath} with the following error: ${message}`,
+                    },
+                  ]
+                }
+              }
               return [
-                {
-                  messageID: info.id,
-                  sessionID: input.sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: `Called the Read tool with the following input: {"filePath":"${filepath}"}`,
-                },
+                called,
                 {
                   id: part.id,
                   messageID: info.id,
@@ -1286,11 +1310,6 @@ const layer = Layer.effect(
           ),
         }
       })
-      const message = yield* createUserMessage(inherited)
-      if ("skipped" in message) return message
-      if (input.persisted) yield* input.persisted
-      yield* sessions.touch(input.sessionID)
-
       const permissions: PermissionV1.Rule[] = []
       for (const [t, enabled] of Object.entries(input.tools ?? {})) {
         permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
@@ -1299,6 +1318,10 @@ const layer = Layer.effect(
         session.permission = Permission.merge(session.permission ?? [], permissions)
         yield* sessions.setPermission({ sessionID: session.id, permission: session.permission })
       }
+      const message = yield* createUserMessage(inherited)
+      if ("skipped" in message) return message
+      if (input.persisted) yield* input.persisted
+      yield* sessions.touch(input.sessionID)
 
       if (input.noReply === true) return message
       // Every real prompt (new session or reopening a complete/failed one) marks the root session in progress.

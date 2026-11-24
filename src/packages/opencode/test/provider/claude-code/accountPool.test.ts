@@ -19,6 +19,7 @@ import {
 } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import { randomUUID } from "node:crypto"
 import {
   _resetAccountPool,
   _setAccountPoolFile,
@@ -65,6 +66,8 @@ import {
 } from "@/provider/claude-code/sessionManager.js"
 import { ClaudeUsageCache } from "@opencode-ai/core/claude-usage-cache"
 import { Global } from "@opencode-ai/core/global"
+import { OcConfig } from "@/config/oc.js"
+import { turnCostFromTotal } from "@/provider/claude-code/turnStats.js"
 
 beforeEach(() => _resetAccountPool())
 afterEach(() => _resetAccountPool())
@@ -780,15 +783,18 @@ const served = [init, ECHO, endTurn, result(false)]
  * Runs one turn on a two-account pool; `lines` maps each account dir's name to what it emits.
  * `shareProjects` gives every account a `projects` junction to one folder, as `shareClaudeProjects.ps1` does.
  */
-async function poolTurn(lines: Record<string, unknown[]>, shareProjects = false) {
+async function poolTurn(lines: Record<string, unknown[]>, shareProjects = false, withApi = false) {
   _resetRateLimitReports()
   const root = mkdtempSync(path.join(tmpdir(), "oc-account-pool-"))
   const cwd = path.join(root, "project")
   mkdirSync(cwd)
-  const dirs = Object.keys(lines).map((name) => path.join(root, name))
+  const dirs = Object.keys(lines)
+    .filter((name) => !withApi || name !== "api")
+    .map((name) => path.join(root, name))
+  const apiDir = withApi ? path.join(root, "api") : undefined
   if (shareProjects) {
     mkdirSync(path.join(root, "shared"))
-    for (const dir of dirs) {
+    for (const dir of [...dirs, ...(apiDir ? [apiDir] : [])]) {
       mkdirSync(dir)
       symlinkSync(path.join(root, "shared"), path.join(dir, "projects"), "junction")
     }
@@ -823,7 +829,13 @@ require("node:readline").createInterface({ input: process.stdin }).on("line", (i
   chmodSync(cliPath, 0o755)
   const sk = sessionKey(cwd, `tools::default::context=["claude-code"]`)
   try {
-    const model = createClaudeCode({ cliPath, cwd, proxyTools: [], accounts: dirs }).languageModel("claude-test-pool")
+    const model = createClaudeCode({
+      cliPath,
+      cwd,
+      proxyTools: [],
+      accounts: dirs,
+      apiAccount: apiDir ? { dir: apiDir, apiKey: "sk-test" } : undefined,
+    }).languageModel("claude-test-pool")
     const options: Parameters<typeof model.doStream>[0] = {
       prompt: [{ role: "user", content: [{ type: "text", text: "go" }] }],
       tools: [
@@ -848,6 +860,46 @@ test("a usage rejection moves the turn to the next account with the catch-up, hi
   expect(turn.body).toContain("resumed=false tools=false")
   expect(turn.body).not.toContain("You've hit your limit")
   expect(turn.parts.at(-1)).toMatchObject({ type: "finish", finishReason: { unified: "stop" } })
+})
+
+test("API rollover records only the API cost segment after a pool limit", async () => {
+  const sessionID = `cost-${randomUUID()}`
+  turnCostFromTotal(sessionID, 1, false)
+  const settings = await OcConfig.read()
+  await OcConfig.edit(() => ({ claudeApiRollover: "always" }))
+  try {
+    const turn = await poolTurn(
+      {
+        first: [
+          { ...init, session_id: sessionID },
+          { ...rejected, session_id: sessionID },
+          { ...text("You've hit your limit"), session_id: sessionID },
+          { ...endTurn, session_id: sessionID },
+          { ...result(true), session_id: sessionID, total_cost_usd: 1.2 },
+        ],
+        api: [
+          { ...init, session_id: sessionID },
+          ECHO,
+          { ...endTurn, session_id: sessionID },
+          { ...result(false), session_id: sessionID, total_cost_usd: 1.3 },
+        ],
+      },
+      false,
+      true,
+    )
+    expect(turn.body).toContain("**Claude account switched:** first hit its usage limit; continuing on API credits.")
+    const api = poolState(turn.ids, Date.now(), undefined, undefined, { withApi: true }).find(
+      (account) => account.kind === "api",
+    )
+    expect(api?.spentTodayUsd).toBeCloseTo(0.1, 12)
+    expect(api?.spentMonthUsd).toBeCloseTo(0.1, 12)
+    expect(turn.parts.at(-1)).toMatchObject({
+      type: "finish",
+      providerMetadata: { "claude-code": { turnCostUsd: expect.closeTo(0.3, 12) } },
+    })
+  } finally {
+    await OcConfig.edit(() => ({ claudeApiRollover: settings.claudeApiRollover }))
+  }
 })
 
 test("with a shared projects folder a usage rejection resumes the same Claude conversation on the next account", async () => {

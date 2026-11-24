@@ -131,6 +131,134 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-24 (~05:09) - v0.2.414 dirtySpecial - Close swarm shortcuts: reminder fixtures, deleted-delivery retry loop, cancel re-apply after crash - Claude Opus 5.5, default; Build
+
+### Agent
+- Meta: Claude Opus 5.5; default; Build (/swarm round 4); completed
+- Version: 0.2.414 (no bump: already bumped this session, uncommitted)
+- Changed `cursor/protocol/editRemap.ts` rejectEchoedReadReminder: a block counts only when `Instructions from:` names an existing absolute AGENTS.md/CLAUDE.md/CONTEXT.md (`emittedByRead`; text not compared, the file may change after the read), so new files quoting a made-up reminder stay writable. Patch sections split only at Add/Update/Delete File headers and End Patch (`*** Move to:`/`*** End of File` stay inside). Removed the shortcut comment.
+- Fixed `session/scheduledResume.ts` fireEntry: session `metadata.scheduledDeliveries` containing the entry id (written by `ScheduledDelivery.admit`) counts as delivered; a deleted resume message no longer retries forever. Removed the shortcut comment.
+- Fixed cancel markers: the write that applies markers lists them in `State.consumedCancels` (optional, sanitized); `pendingCancels` skips listed names; each consume deletes every listed marker still on disk (retries failed deletes) and prunes gone names. A crash or locked file between write and delete can no longer re-apply a cancel and drop a newer schedule. Removed the shortcut comment.
+- Risk: an older oc build writing the shared state drops `consumedCancels` (oc/native are one compile; only during a revive overlap).
+- Kept (review rejected): withLock stale takeover with a hung >30 s holder (pre-existing; roast); memory-only cancel fallback (pre-existing); contrived multi-hunk/Move patch shapes (fail safe).
+- Added tests: scheduledResume (receipt counts as fired; applied marker not re-applied - fails with the filter disabled), readReminder (made-up path writable, edited AGENTS.md still refused, Move to section).
+- Verification: cursor/* + scheduledResume + scheduledDelivery + streamWriter 169 pass 0 fail; typecheck clean; probe: failed-delete retry deletes leftover and new markers.
+
+### User
+Fixes
+- Cursor can again create files that quote a made-up AGENTS.md reminder (test fixtures, docs), while echoes of real ones stay blocked.
+- A scheduled auto-resume whose message you deleted after it was sent no longer keeps retrying in the background.
+- A crash at the wrong moment can no longer make an old cancel wipe a newer auto-resume.
+
+---
+
+## 2026-11-24 (~04:43) - v0.2.414 dirtySpecial - Swarm round 3: resume queue race, read-terminator race, reminder echo after live Cursor check, editSafety test - Claude Opus 5.5, default; Build
+
+### Agent
+- Meta: Claude Opus 5.5; default; Build (/swarm round 3); completed (live Cursor recheck passed after /revive)
+- Version: 0.2.414 (no bump: already bumped this session, uncommitted)
+- Fixed `session/scheduledResume.ts` fireEntry: delivery check re-reads `queue.snapshot` inside `ScheduledDelivery.admit`, so a prompt queued after the early check goes first; `skipped` -> `store.retry` (next fire's message check counts an already-delivered one). shortcut comment: recorded-then-deleted delivery keeps retrying with backoff.
+- Fixed `scheduledResume.ts` write(): removes pid tmp file on write/rename failure; cleanup error never masks the real one.
+- Fixed `cursor/protocol/readResult.ts` restoreCompleteReadTerminator: restores only while the file still equals the content read (size fast path; BOM-stripped, CR/CRLF-normalized compare; truncated-line reads trust the tail; grown files not read).
+- Fixed `cursor/protocol/editRemap.ts` rejectEchoedReadReminder: ERROR (live): on the running build a Cursor grok-4.7 model pasted a read back plus `done`; the end-anchored guard missed it, oc remapped the write into an edit, and the reminder landed in the file. Guard now matches the block anywhere, checks every block, covers write content, edit newString, Add/Update File `+` lines, indented headers; exception only when the file already contains the block. shortcut comment: a new file meant to hold such a block is refused.
+- Changed `claude-code/streamWriter.ts` close(): rethrows non-TypeError (double close/cancel still tolerated).
+- Fixed test `cursor/editSafety.test.ts` ~/file: Bun os.homedir() ignores runtime HOME changes; case now runs in a child bun with HOME/USERPROFILE preset and a unique file name. Removed the Known failure noted in the previous entry.
+- Kept: scheduledResume `withLock` (core Flock is async, store is sync); Steering `writtenIds` (guards a re-admitted written steer); `readFileSize` 0 on error (proto3 has no unknown).
+- Verification: cursor/* + scheduledResume + scheduledDelivery + streamWriter 167 pass 0 fail; steering + accountPool + fakeModel 93 pass 0 fail; typecheck clean. Live: two real processes on one state file - timed-out cancel honored by the other process (PASS). Replaying the live model's exact write through the new guard: refused.
+- Verification (live, after /revive): Cursor grok-4.7 echo attempt refused with the new message, file unchanged; a normal rewrite under the same nested AGENTS.md wrote `alpha/beta/done` with no reminder.
+- TODO: readReminder tests call the guard directly; pump wiring not covered by a test.
+
+### User
+Fixes
+- A scheduled auto-resume no longer jumps ahead of a prompt you queued at the same moment.
+- Cursor models no longer get a wrong trailing newline when a file changed right after they read it.
+- Cursor models can no longer copy folder AGENTS.md instructions into a file, even when they add more text after them or use an edit instead of a full rewrite.
+
+---
+
+## 2026-11-24 (~04:16) - v0.2.414 dirtySpecial - Swarm fixes: overlapping steers, cross-process resume cancel, AGENTS reminder echo, 11 smaller bugs - Claude Opus 5.5, default; Build
+
+### Agent
+- Meta: Claude Opus 5.5; default; Build (/swarm); completed, live unverified
+- Version: 0.2.414 (no second bump: already bumped this session, uncommitted)
+- Note: /swarm with general-hungerg + general-glm-5.3-flash:low (hunt/verify/review, read-only), general-gpt-6.2-sol:low second opinion; main agent wrote all code. Ledger: `~/.config/opencode/plans/2026-11-24-swarm-oc.md`.
+- Fixed `claude-code/streamWriter.ts`: `hold(messageID)` keeps one boundary per read steer; `splitAt` releases in order up to the first unsaved receipt. Overlapping steers no longer parent the answer to whichever receipt saved first. `steering.ts`/`turnStream.ts` pass the id.
+- Fixed `steering.ts` retract failure: restores at old index; `cleared` generation (bumped by `clear()`) stops restoring a steer an account switch cleared (switchTo is reset before `clear()`, so `switching()` could not guard it). `retire()` catches `deleteActiveProcessAndWait` rejection.
+- Fixed `session/scheduledResume.ts` cross-process cancel: timed-out cancels are unique marker files `<file>.cancel/<sessionID>.<uuid>` (memory fallback when the write fails; rm errors ignored); takeDue/requestResume/cancelSession consume only observed markers after `write`; `owns()` false while one is pending; disabled poll consumes them. Risk: crash between write and marker delete re-applies the cancel (shortcut comment).
+- Changed `requestResume`: throws on lock timeout (null still = disabled/invalid/capped). `turnStream.ts` `maybeScheduleResume` catches and logs, so `finish()`/`failTurn()` cleanup always runs.
+- Fixed corrupt resume state backup: different later corruption -> `.corrupt.<hash>`; repeats are no-ops; message names the real copy.
+- Fixed Cursor: `rejectEchoedReadReminder` (`editRemap.ts`, called in `pump.ts` even after complete reads) refuses a write/Add File body ending in the nested AGENTS.md `<system-reminder>` block, per file, LF-normalized, unless the file on disk already ends with it. `readResult.ts`: offset-only reads cut by the default limit get the partial-read notice; files ending in a blank line keep their final newline. `execResult.ts`: >2000 search paths report `client_truncated`/real total; backslashes kept on POSIX; task answer taken to the last closing tag. `editRemap.ts` `previousLineStart` negative index.
+- Added tests: streamWriter (2, fail without fix), scheduledResume cross-instance cancel (fails without fix), readReminder echo guard.
+- Verification: streamWriter + scheduledResume + scheduledDelivery + cursor/*: 165 pass, 1 fail; steering.test.ts + accountPool.test.ts (fake model): 64 pass; typecheck clean. Probes: corrupt backup naming, terminator/notice cases.
+- ERROR: pre-existing `test/provider/cursor/editSafety.test.ts` "an edit read of ~/file resolves to the home file, not an empty workspace file" fails on macOS with this session's Cursor changes stashed too; not investigated.
+- MISTAKE: one test edit used an inline python write instead of Edit; ASCII only, no damage. Use file tools for project files.
+- TODO (left): scheduledResume stale queue snapshot (:523), readResult terminator TOCTOU, tmp file leak; roast items (withLock vs core Flock, streamWriter close() swallow).
+
+### User
+Fixes
+- When you send two messages while Claude is working, Claude's answer now lands under the right message.
+- Cancelling a session now also stops its scheduled auto-resume in the other oc window (oc and native opencode), even if the cancel had to wait.
+- A failure to save an auto-resume no longer breaks the end of a Claude turn.
+- Cursor models can no longer copy folder AGENTS.md instructions into a file when rewriting it.
+- Cursor reads that stop early now say so, and files ending in a blank line keep it.
+- Smaller Cursor fixes: very large search results say they were cut off, file names with backslashes on Mac/Linux stay intact, and subagent answers are no longer cut short.
+
+---
+
+## 2026-11-24 (~03:22) - v0.2.414 dirtySpecial - Fix 8 bugs from the v0.2.411 swarm review: API spend, read-only attachments, revive, Cursor agents, updaters, dialogs - Claude Opus 5.5, default; Build
+
+### Agent
+- Meta: Claude Opus 5.5; default; Build; completed, live unverified
+- Version: 0.2.414
+- Note: work done by `general-hungerg` (opencode-go/hungerg-free) swarm: 19 read-only hunts of a7dde0c310, 10 verifiers, 8 fixers, 4 reviewers, 4 follow-ups. Unfixed confirmed findings list: `~/.config/opencode/plans/2026-11-24-hungerg-swarm.md`.
+- Fixed `ClaudeAccount` schema (`server/routes/instance/httpapi/groups/session.ts`): added optional `spentTodayUsd`/`spentMonthUsd`; HttpApi encode stripped them so sidebar API spend always showed $0.00. Regenerated `sdk/js/src/v2/gen/types.gen.ts` (+6 lines). openapi.json left to prePush.
+- Fixed `turnStream.ts` onResult: advance cost baseline (`turnCostFromTotal`) before `runPendingSwitch`, so pool segment is not billed as API spend after pool->API rollover.
+- Fixed `session/prompt.ts` read-only children: non-text file parts now authorized via `execRead` before bytes are read; `refuseInReadonly` moved to `handleSubtask` entry (direct subtask parts). Per-prompt `input.tools` merge moved before `createUserMessage` so attachment auth sees `read: false`. Risk: a non-admitted scheduled delivery carrying `tools` now still persists its tool flags (deliveries do not send `tools` today).
+- Fixed `reviveHost.ts` downloadSource: origin check compares owner/repo via `parseGitHubRemote`; SSH clones of oc accepted, forks/non-GitHub still rejected.
+- Fixed `core/util/reviveResume.ts` claim: own ready chain stops the scan (`{ own, body }` result) instead of falling through to an older failed chain.
+- Fixed `cursor/context/agents.ts`: reuses host `ConfigAgent.scanFile` (now exported, `config/agent.ts`) so `agents:` maps expand per key, prompts match host (frontmatter prompt + `{file:}` + body), invalid/disabled entries omitted, leveled agents advertised as `<agent>:<level>`.
+- Fixed `weztermUpdate.ts`/`macAppUpdate.ts`: no-op installs return `upToDate: true`; UI stopped claiming "updated".
+- Fixed `tui/ocCommands.tsx`: awaited settings saves (home folder/sort, user folder, default subagent, server_startup, Jev key set/remove) clear only their own still-open dialog.
+- Added regression tests: httpapi-session, accountPool, prompt, revive, reviveResume, contextSecurity, weztermUpdate, macAppUpdate, new `tui/test/cli/tui/ocCommands.test.tsx`; each failed before its fix per agent runs.
+- Verification: reran all touched files: opencode 212 pass/12 skip/0 fail, tui 9 pass, core 5 pass; typecheck clean in opencode, tui, core. Live unverified: sidebar spend row after a real API turn, Cursor dispatch with leveled agents, revive download into SSH clone, updater UI.
+
+### User
+Fixes
+- The sidebar's Claude API spend row now shows real spend instead of always $0.00.
+- Usage from a regular Claude account is no longer counted as API credit spend when a turn rolls over to API credits.
+- Read-only subagents can no longer read blocked files through PDF or image attachments, or start subagents through direct subtask requests.
+- /revive's Download option now accepts an existing oc clone that uses an SSH remote.
+- A finished revive chain no longer brings back an older failed chain's steps into the prompt.
+- Cursor models now see your real subagent names from files that define several agents, including levels like `name:low`.
+- WezTerm and Mac app updates no longer say "updated" when the app was already current.
+- Closing a settings dialog before a slow save finishes no longer closes the next dialog you open.
+
+---
+
+## 2026-11-24 (~02:44) - v0.2.413 - Claude can handle subagent results one at a time; Mac Claude config matches Windows - Claude Opus 5.5, default; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; default; Debug; completed, live unverified
+- Version: 0.2.413
+- Found: Mac vs Windows "waves vs rolling" subagent dispatch is model choice, not platform. Foreground `task_batch` blocks until every child ends; `background: true` items return at once and each result lands as its own `<task ... state="completed">` user message (Windows `ses_df87fa3bdffeMh00TlqjCW2jVL`: 79 bg tasks). Both machines run oc 0.2.413; Mac background tasks work (`ses_e2c388731ffe3zIpv72gA1Uqa2`, 24). Big Windows sessions also ran in waves.
+- Changed `SUBAGENT_DISPATCH_HINT` (`provider/claude-code/prompts.ts`) and `TASK_BATCH_PROXY_NOTE` (`proxyToolDefs.ts`): large fan-outs or per-result work -> `background: true` on every batch item; foreground batch only for a few results needed together.
+- Changed `~/.config/opencode/skills/foster/subagents/SKILL.md` Dispatch section to match; copied it to the Mac (LF). Mac copy was stale (Nov 20: Grok paragraph, `review-*`, Luna tiers).
+- Fixed Mac `~/.claude2` and `~/.claude3`: symlinked `CLAUDE.md`, `commands`, `skills`, `plans`, `tasks` to `~/.claude` like Windows (created empty `~/.claude/plans` and `tasks`). Old per-account `skills` (Claude `synced` only) moved to `skills.bak-20261124`. Before this, oc's Mac Claude chats on those accounts loaded no global CLAUDE.md, principles, or Claude skills.
+- Added `"outputStyle": "default"` to Mac `opencode.jsonc` `claudeSettings` (backup `/tmp/opencode.jsonc.bak-20261124`), matching Windows.
+- Kept: Claude CLI 2.1.330 Mac vs 2.1.317 PC; settings.json differs only by platform hooks and theme; Mac `.claudeApi` has no plans/tasks links.
+- TODO: add Claude Code settings, CLAUDE.md, and config sync (`~/.claude*` links, `settings.json`, `~/.config/opencode` skills and md) as an option in oc's settings sync (tailnet sync between machines, `tui/src/component/dialog-sync.tsx`), not mirror, so the Mac copies stop drifting.
+- Verification: `test/provider/claude-code/subagentHint.test.ts` 28 pass. Mac links checked with `readlink` and `-e`; skill and `claudeSettings` diffed equal over ssh. Live check not run: a large fan-out in a new Claude chat after `/revive` (PC and Mac) should use background items.
+
+### User
+Subagents
+- Claude in oc now dispatches big batches of subagents in the background and handles each result as it arrives, instead of waiting for the whole wave (after `/revive`).
+
+Mac setup
+- Claude chats on the Mac's extra Claude accounts now load your global CLAUDE.md, principles, Claude skills, and commands, same as on Windows.
+- The Mac's subagents skill and Claude output style now match the PC.
+
+---
+
 ## 2026-11-24 (~02:17) - v0.2.413 decemberHerbie - /revive no longer creates a session for tabs on Home - Claude Opus 5.5, low; Debug
 
 ### Agent

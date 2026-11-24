@@ -1,55 +1,55 @@
 import { afterAll, expect, test } from "bun:test"
+import { randomUUID } from "node:crypto"
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { recoverCorrelatedEditRead } from "@/provider/cursor/execRecovery.js"
 import {
   buildCompleteEditReadMessages,
   remapCorrelatedEditWriteForCatalog,
 } from "@/provider/cursor/protocol/editRemap.js"
 import type { ParsedExecRequest } from "@/provider/cursor/protocol/execParse.js"
 import { decodeMessage } from "@/provider/cursor/protocol/messages.js"
-import type { CursorPump } from "@/provider/cursor/pump.js"
 
 const root = mkdtempSync(path.join(tmpdir(), "cursorEditSafety-"))
 afterAll(() => rmSync(root, { recursive: true, force: true }))
 
+// Bun's os.homedir() reads HOME once at startup and ignores later changes to process.env, so the home
+// directory is set where the real process gets it: in the environment of a fresh Bun process.
 test("an edit read of ~/file resolves to the home file, not an empty workspace file", () => {
   const home = path.join(root, "home")
   const workspace = path.join(root, "workspace")
   for (const dir of [home, workspace]) mkdirSync(dir)
-  writeFileSync(path.join(home, "notes.txt"), "keep me\n")
-  const saved = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE }
-  process.env.HOME = home
-  process.env.USERPROFILE = home
-  try {
-    const writes: Uint8Array[] = []
+  // A name no real home has, so a HOME override that is ignored cannot pass by finding the user's own file.
+  const name = `notes-${randomUUID()}.txt`
+  writeFileSync(path.join(home, name), "keep me\n")
+  const script = `
+    const { recoverCorrelatedEditRead } = await import(${JSON.stringify(path.resolve(import.meta.dir, "../../../src/provider/cursor/execRecovery.ts"))})
+    const workspace = ${JSON.stringify(workspace)}
+    const writes = []
     const pump = {
       session: {
         requestContext: { env: { workspace_paths: [workspace] }, workspace_paths: [workspace] },
-        displayToolCalls: new Map([
-          ["call1", { edit_tool_call: { args: { path: "~/notes.txt", stream_content: "" } } }],
-        ]),
-        stream: { write: (frame: Uint8Array) => writes.push(frame) },
+        displayToolCalls: new Map([["call1", { edit_tool_call: { args: { path: "~/${name}", stream_content: "" } } }]]),
+        stream: { write: (frame) => writes.push(frame) },
       },
       advertisedToolNameSet: new Set(["write"]),
       safeError: () => {},
-    } as unknown as CursorPump
-    const parsed = {
-      id: 7,
-      resultField: "read_result",
-      toolName: "read",
-      args: { filePath: "~/notes.txt" },
-      resultMetadata: {},
-    } as unknown as ParsedExecRequest
-    // The home file is outside the workspace, so it must take the permission path, never an empty-file reply.
-    expect(recoverCorrelatedEditRead(pump, parsed, "call1")).toBe(false)
-    expect(writes).toHaveLength(0)
-    expect(parsed.resultMetadata?.correlatedEditCallId).toBe("call1")
-  } finally {
-    process.env.HOME = saved.HOME
-    process.env.USERPROFILE = saved.USERPROFILE
-  }
+    }
+    const parsed = { id: 7, resultField: "read_result", toolName: "read", args: { filePath: "~/${name}" }, resultMetadata: {} }
+    const recovered = recoverCorrelatedEditRead(pump, parsed, "call1")
+    console.log(JSON.stringify({ recovered, writes: writes.length, callId: parsed.resultMetadata?.correlatedEditCallId }))
+  `
+  const child = Bun.spawnSync([process.execPath, "-e", script], {
+    cwd: path.resolve(import.meta.dir, "../../.."),
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  })
+  expect(child.exitCode, child.stderr.toString()).toBe(0)
+  // The home file is outside the workspace, so it must take the permission path, never an empty-file reply.
+  expect(JSON.parse(child.stdout.toString().trim().split("\n").at(-1)!)).toEqual({
+    recovered: false,
+    writes: 0,
+    callId: "call1",
+  })
 })
 
 test("a non-UTF-8 file is refused instead of handed to Cursor with U+FFFD", () => {

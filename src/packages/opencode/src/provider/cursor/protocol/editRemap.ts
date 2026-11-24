@@ -1,4 +1,5 @@
 import fs from "node:fs"
+import path from "node:path"
 import { encodeMessage } from "./messages.js"
 import { APPLY_PATCH_TOOL, buildAddFilePatch, buildUpdateFilePatch, planSubstringEdit } from "./applyPatch.js"
 import { binaryWritePayload, type ParsedExecRequest } from "./execParse.js"
@@ -86,6 +87,8 @@ function replacementOccurrenceCount(source: string, needle: string): number {
 function previousLineStart(source: string, start: number): number {
   if (start <= 0) return 0
   const before = source[start - 1] === "\n" ? start - 2 : start - 1
+  // lastIndexOf clamps a negative index to 0 and would match a leading newline, returning 1 forever.
+  if (before < 0) return 0
   return source.lastIndexOf("\n", before) + 1
 }
 
@@ -297,6 +300,84 @@ export function remapEditToolsForCatalog(
   // apply_patch's output does not carry opencode `write`'s <path> tag, so keep
   // the requested path for the typed Cursor result.
   parsed.resultMetadata = { ...parsed.resultMetadata, path: filePath }
+}
+
+// The block tool/read.ts appends for a nested AGENTS.md, on its own lines anywhere in a file body
+// (LF-normalized): a live Cursor model echoed it and then appended more lines after it.
+const ECHOED_READ_REMINDER =
+  /(?:^|\n)<system-reminder>\nInstructions from: [^\n]*\n[\s\S]*?\n<\/system-reminder>(?=\n|$)/g
+
+// The nested instruction files session/instruction.ts attaches to reads.
+const INSTRUCTION_FILES = new Set(["AGENTS.md", "CLAUDE.md", "CONTEXT.md"])
+
+/**
+ * The read tool writes `Instructions from: <absolute path>` for a nested instruction file
+ * (session/instruction.ts), so a block it produced names one that exists. Its text is not compared: the
+ * file may have been edited since the read.
+ */
+function emittedByRead(block: string): boolean {
+  return [...block.matchAll(/^Instructions from: (.+)$/gm)].some(
+    ([, source]) => path.isAbsolute(source!) && INSTRUCTION_FILES.has(path.basename(source!)) && fs.existsSync(source!),
+  )
+}
+
+/** Text a mutation would put into each file: a write's content, an edit's newString, a patch file's `+` lines. */
+function insertedTexts(parsed: ParsedExecRequest): { filePath?: string; text: string }[] {
+  const filePath = typeof parsed.args.filePath === "string" ? parsed.args.filePath : undefined
+  if (parsed.toolName === "write" && typeof parsed.args.content === "string") {
+    return [{ filePath, text: parsed.args.content }]
+  }
+  if (parsed.toolName === "edit" && typeof parsed.args.newString === "string") {
+    return [{ filePath, text: parsed.args.newString }]
+  }
+  if (parsed.toolName !== APPLY_PATCH_TOOL || typeof parsed.args.patchText !== "string") return []
+  // Split only at file headers and the end marker (the host's parser trims them, so indented ones count);
+  // `*** Move to:` and `*** End of File` stay inside their file's section.
+  const header = /\r?\n(?=[ \t]*\*\*\* (?:(?:Add|Update|Delete) File: |End Patch))/
+  return parsed.args.patchText.split(header).flatMap((section) => {
+    const [header, ...lines] = section.split(/\r?\n/)
+    const target = /^\*\*\* (?:Add|Update) File: (.+)$/.exec(header?.trim() ?? "")?.[1]?.trim()
+    if (!target) return []
+    return [
+      {
+        filePath: target,
+        text: lines
+          .filter((line) => line.startsWith("+"))
+          .map((line) => line.slice(1))
+          .join("\n"),
+      },
+    ]
+  })
+}
+
+/**
+ * Native ReadSuccess has one content string, so a nested AGENTS.md reminder rides in it and Cursor's
+ * model can echo it into a file. Refuse a write, edit, or patch that would insert that block, unless the
+ * file on disk already contains it (a fixture, a saved transcript). Only blocks the read tool could have
+ * produced count (see emittedByRead), so new files quoting a made-up reminder stay writable. Unlike the
+ * partial-read guard this also runs after a complete correlated read: complete reads carry it too.
+ */
+export function rejectEchoedReadReminder(parsed: ParsedExecRequest, workspaceRoot = ""): void {
+  if (parsed.localError) return
+  const echoed = insertedTexts(parsed).find(({ filePath, text }) => {
+    const blocks = [...text.replaceAll("\r\n", "\n").matchAll(ECHOED_READ_REMINDER)]
+      .map((match) => match[0].trim())
+      .filter(emittedByRead)
+    if (!blocks.length) return false
+    const existing = (() => {
+      try {
+        return filePath ? fs.readFileSync(resolveReadTargetPath(filePath, workspaceRoot), "utf8") : undefined
+      } catch {
+        return undefined
+      }
+    })()?.replaceAll("\r\n", "\n")
+    return blocks.some((block) => !existing?.includes(block))
+  })
+  if (!echoed) return
+  parsed.localError =
+    `NO FILE CHANGE WAS MADE. Refusing to change ${JSON.stringify(echoed.filePath ?? "the target file")} ` +
+    "because the new text contains the <system-reminder> block the read tool added after the file content; " +
+    "it is not part of the file. Make the change again without that block."
 }
 
 /**

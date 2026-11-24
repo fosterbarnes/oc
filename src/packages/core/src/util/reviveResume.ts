@@ -128,11 +128,12 @@ export async function claim(sessionID: string, pid: number, now = Date.now(), di
         const own = state === "ready" && body?.writerPid === pid
         // An unreadable file can never be sent, so it goes too.
         if (!own) await fs.rm(source, { force: true })
-        return own ? undefined : body
+        return { own, body }
       })
       .finally(() => fs.rm(lock, { force: true }))
-    if (!taken) continue
-    return { body: taken, send: state === "ready" && now - at <= READY_TTL_MS }
+    if (taken.own) return
+    if (!taken.body) continue
+    return { body: taken.body, send: state === "ready" && now - at <= READY_TTL_MS }
   }
 }
 

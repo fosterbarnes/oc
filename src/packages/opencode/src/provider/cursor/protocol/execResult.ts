@@ -217,7 +217,8 @@ export function buildTypedExecResult(
       // render as `../C:\...` or `../src\a.ts`.
       const searched = str(resultMetadata?.path)
       const cwd = forwardSlashes(searched ? path.resolve(resultRoot ?? "", searched) : (resultRoot ?? ""))
-      const files = extractResultPaths(output).map(forwardSlashes)
+      const found = extractResultPaths(output)
+      const files = found.slice(0, 2000).map(forwardSlashes)
       return {
         success: {
           pattern: "",
@@ -227,8 +228,8 @@ export function buildTypedExecResult(
             [cwd]: {
               files: {
                 files,
-                total_files: files.length,
-                client_truncated: false,
+                total_files: found.length,
+                client_truncated: found.length > files.length,
               },
             },
           },
@@ -430,11 +431,13 @@ function parseOpenCodeTaskOutput(output: string): {
   const state = /\bstate="(running|completed|error)"/i.exec(attrs)?.[1] as "running" | "completed" | "error" | undefined
   if (!agentId || !state) return { message: output }
   const tag = state === "error" ? "task_error" : "task_result"
-  const body = new RegExp(`<${tag}>\\n?([\\s\\S]*?)\\n?</${tag}>`, "i").exec(output)
+  // Greedy to the last closing tag: the agent's answer may itself quote the tag. Greedy also takes the
+  // newline before that tag, which the lazy form left out, so drop it.
+  const body = new RegExp(`<${tag}>\\n?([\\s\\S]*)</${tag}>`, "i").exec(output)?.[1].replace(/\n$/, "")
   return {
     agentId,
     state,
-    message: body?.[1] ?? output,
+    message: body ?? output,
   }
 }
 
@@ -452,11 +455,11 @@ function extractResultPaths(output: string): string[] {
     .split(/\r?\n/)
     .map((line) => line.trim().replace(/:$/, ""))
     .filter((line) => path.isAbsolute(line) || path.win32.isAbsolute(line))
-    .slice(0, 2000)
 }
 
+// A backslash is a separator only on Windows; on POSIX it is part of a file name.
 function forwardSlashes(file: string): string {
-  return file.replaceAll("\\", "/")
+  return path.sep === "\\" ? file.replaceAll("\\", "/") : file
 }
 
 /** Entry names between `<entries>` tags of OpenCode's directory read, without its count note. */

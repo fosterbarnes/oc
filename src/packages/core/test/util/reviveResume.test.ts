@@ -50,6 +50,28 @@ test("the writer skips its own ready chain but claims its failed one", async () 
   expect(await ReviveResume.claim("ses_a", 1, now, dir)).toEqual({ body: body(now + 1), send: false })
 })
 
+test("the writer does not claim an older failed chain behind its own ready chain", async () => {
+  const now = Date.now()
+  const failed = await ReviveResume.write(body(now), dir)
+  await ReviveResume.settle(failed, "failed", dir)
+  const ready = await ReviveResume.write(body(now + 1), dir)
+  await ReviveResume.settle(ready, "ready", dir)
+  expect(await ReviveResume.claim("ses_a", 1, now, dir)).toBeUndefined()
+  expect(await ReviveResume.status(failed, dir)).toBe("failed")
+  expect(await ReviveResume.status(ready, dir)).toBe("ready")
+})
+
+test("a malformed newest chain does not hide an older failed chain", async () => {
+  const now = Date.now()
+  const failed = await ReviveResume.write(body(now), dir)
+  await ReviveResume.settle(failed, "failed", dir)
+  const malformed = await ReviveResume.write(body(now + 1), dir)
+  await ReviveResume.settle(malformed, "ready", dir)
+  await Bun.write(path.join(dir, `${malformed}.ready.json`), "null")
+  expect(await ReviveResume.claim("ses_a", 1, now, dir)).toEqual({ body: body(now), send: false })
+  expect(await ReviveResume.status(malformed, dir)).toBeUndefined()
+})
+
 test("an expired ready chain is restored instead of sent, and stale pending files are removed", async () => {
   const at = Date.now() - ReviveResume.READY_TTL_MS - 1
   const id = await ReviveResume.write(body(at), dir)

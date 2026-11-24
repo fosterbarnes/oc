@@ -56,7 +56,9 @@ export const TASK_BATCH_PROXY_NOTE =
   " MCP tool calls one at a time, so separate task calls run serially even" +
   " when emitted together, while one task_batch call fans them out as" +
   " parallel opencode task calls. Each task takes the same fields as the" +
-  " task tool. Results come back in task order, each labelled. Like task it" +
+  " task tool. Results come back in task order, each labelled. With" +
+  " `background: true` on every item it returns at once and each result" +
+  " arrives later as its own message; use that for large fan-outs. Like task it" +
   " has no proxy deadline by default (a positive proxyToolTimeoutMs override" +
   " adds one)."
 

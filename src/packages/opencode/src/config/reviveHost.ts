@@ -9,6 +9,7 @@ import { OcSource } from "@opencode-ai/core/util/ocSource"
 import { ProcessDarwin } from "@opencode-ai/core/util/processDarwin"
 import { ReviveResume } from "@opencode-ai/core/util/reviveResume"
 import { sourceTree } from "@opencode-ai/core/util/sourceTree"
+import { parseGitHubRemote } from "../util/repository"
 import { TuiLedger } from "./tuiLedger"
 import { Revive } from "./revive"
 import { edit, executablePath, read } from "./oc"
@@ -499,8 +500,11 @@ async function downloadSource(directory: string) {
         .stdout.toString()
         .trim()
     : ""
-  const repo = (url: string) => url.replace(/(?:\.git)?\/*$/, "").toLowerCase()
-  if (cloned && repo(origin) !== repo(Revive.SOURCE_REPO))
+  const repo = (url: string) => {
+    const parsed = parseGitHubRemote(url)
+    return parsed ? `${parsed.owner}/${parsed.repo}`.toLowerCase() : null
+  }
+  if (cloned && (!repo(origin) || repo(origin) !== repo(Revive.SOURCE_REPO)))
     throw new Error(
       `${directory} is a git repository but not an oc clone; choose an empty folder or an existing oc source`,
     )

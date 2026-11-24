@@ -6,8 +6,11 @@ export class StreamWriter {
   private textId: string | null = null
   /** oc message Claude read mid-turn; the next output starts oc's reply to it. */
   private readMessageID: string | null = null
-  /** Output after Claude read a steer whose receipt is still saving (`hold`); it answers that steer. */
-  private held: ({ type: string } & Record<string, unknown>)[] | null = null
+  /**
+   * Output after Claude read a steer whose receipt is still saving (`hold`), with one boundary per read
+   * steer, so each stretch lands in the reply to the steer read just before it.
+   */
+  private held: (({ type: string } & Record<string, unknown>) | { readSplit: string; saved: boolean })[] | null = null
   /** Every text and reasoning delta written, in order: what opencode will show. */
   shown = ""
 
@@ -28,28 +31,41 @@ export class StreamWriter {
    * Claude read a message sent mid-turn; its receipt saves before `splitAt`. Output from here on is held
    * so it lands in the reply that answers the message, not the one before it.
    */
-  hold() {
-    if (this.held) return
+  hold(messageID: string) {
+    // A text block open at the read belongs to the reply before it.
     this.endText()
-    this.held = []
+    this.held ??= []
+    this.held.push({ readSplit: messageID, saved: false })
   }
 
   /** Send held output as it is (no split): the receipt failed or the stream is closing. */
   release() {
     const parts = this.held ?? []
     this.held = null
-    for (const part of parts) this.emit(part)
+    for (const part of parts) if ("type" in part) this.emit(part)
   }
 
   /**
-   * Claude read a message sent mid-turn. Its reply starts at the next output, so several messages
-   * read back to back share one reply, answering the newest.
+   * The receipt for a read message saved. Its reply starts at the next output, so several messages
+   * read back to back share one reply, answering the newest. Receipts can save in any order: output
+   * waits until every earlier read's receipt has saved.
    */
   splitAt(messageID: string) {
-    // Held output already started after the read, so its open text stays open.
-    if (!this.held) this.endText()
-    this.readMessageID = messageID
-    this.release()
+    const boundary = this.held?.find((part) => !("type" in part) && part.readSplit === messageID)
+    if (!boundary || "type" in boundary) {
+      if (!this.held) this.endText()
+      this.readMessageID = messageID
+      return
+    }
+    boundary.saved = true
+    while (this.held?.length) {
+      const head = this.held[0]
+      if ("type" in head) this.emit(head)
+      else if (head.saved) this.readMessageID = head.readSplit
+      else return
+      this.held.shift()
+    }
+    this.held = null
   }
 
   private emit(part: { type: string } & Record<string, unknown>) {
@@ -98,7 +114,10 @@ export class StreamWriter {
     try {
       this.release()
       this.controller.close()
-    } catch {}
+    } catch (error) {
+      // Closing twice (abort then the child's close) or after the consumer cancelled throws TypeError.
+      if (!(error instanceof TypeError)) throw error
+    }
   }
 
   private startText() {

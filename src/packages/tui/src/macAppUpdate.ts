@@ -209,8 +209,7 @@ export async function installMacApp(
   let dir: string | undefined
   try {
     dir = await mkdtemp(path.join(os.tmpdir(), "oc-mac-app-update-"))
-    const message = await install(spec, expectedVersion, dir, onLine)
-    return { ok: true, alreadyRunning: false, message }
+    return { ok: true, alreadyRunning: false, ...(await install(spec, expectedVersion, dir, onLine)) }
   } catch (cause) {
     return { ok: false, alreadyRunning: false, message: `Failed to update ${spec.label}: ${errorText(cause)}` }
   } finally {
@@ -220,14 +219,20 @@ export async function installMacApp(
   }
 }
 
-async function install(spec: MacAppSpec, expectedVersion: string, dir: string, onLine?: OnLine) {
+async function install(
+  spec: MacAppSpec,
+  expectedVersion: string,
+  dir: string,
+  onLine?: OnLine,
+): Promise<{ message: string; upToDate?: true }> {
   const installed = await findInstalled(spec)
   if (!installed) throw new Error(`${spec.label} not installed`)
   const { app, bundleId } = installed
   const before = installed.version
   const latest = await spec.latest()
   if (latest.version !== expectedVersion) throw new Error(`latest version changed (${latest.version}); confirm again`)
-  if (compareDesktopVersions(latest.version, before) <= 0) return `${spec.label} is up to date (${before})`
+  if (compareDesktopVersions(latest.version, before) <= 0)
+    return { message: `${spec.label} is up to date (${before})`, upToDate: true }
   if (!(await writable(app))) throw new Error(`oc cannot write ${app}; update it from the app`)
 
   const zip = path.join(dir, "update.zip")
@@ -263,7 +268,7 @@ async function install(spec: MacAppSpec, expectedVersion: string, dir: string, o
   const after = await appVersion(app)
   if (compareDesktopVersions(after, expectedVersion) < 0)
     throw new Error(`install finished but ${spec.label} reports ${after}`)
-  return `Updated ${spec.label} ${before} -> ${after}`
+  return { message: `Updated ${spec.label} ${before} -> ${after}` }
 }
 
 // The swap renames the app inside its folder, so both must be writable.

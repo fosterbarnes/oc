@@ -2,8 +2,10 @@ import { randomUUID } from "node:crypto"
 import {
   copyFileSync,
   constants,
+  existsSync,
   linkSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -46,6 +48,8 @@ export interface State {
   entries: Entry[]
   resumeCounts: Record<string, number>
   delivered: Record<string, string[]>
+  /** Cancel markers already applied whose files may still exist (see createStore). */
+  consumedCancels?: string[]
 }
 
 export interface RequestInput {
@@ -117,7 +121,15 @@ function sanitize(raw: unknown): State {
         return [key, value.slice(-50)]
       }),
     ),
+    ...(r.consumedCancels === undefined ? {} : { consumedCancels: cancelNames(r.consumedCancels) }),
   }
+}
+
+function cancelNames(value: unknown): string[] {
+  if (!Array.isArray(value) || !value.every((name) => typeof name === "string")) {
+    throw new Error("Invalid scheduled resume cancels")
+  }
+  return value
 }
 
 export interface Store {
@@ -137,14 +149,68 @@ export interface Store {
   readonly wake: ReturnType<typeof ScheduledDelivery.makeWake>
 }
 
+const readdirSafe = (dir: string) => {
+  try {
+    return readdirSync(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return []
+    throw error
+  }
+}
+const cancelSessionOf = (marker: string) => marker.slice(0, marker.lastIndexOf("."))
+
 export function createStore(file: string | null, clock: () => number = Date.now): Store {
   const wake = wakes.get(file) ?? ScheduledDelivery.makeWake()
   wakes.set(file, wake)
   const owner = ScheduledDelivery.ownerOnce()
   let identity: Awaited<ReturnType<typeof ScheduledDelivery.owner>> | undefined
-  // Sessions whose cancel timed out on the lock. takeDue, the only path that fires entries, applies them
-  // under its own lock, so a timed-out cancel cannot let the resume fire later.
-  const cancelled = new Set<string>()
+  // Cancels that timed out on the lock, as `<sessionID>.<uuid>` markers. They are files beside the state
+  // so the other instance sharing it (oc + native) honors them too; takeDue applies them under its lock,
+  // and owns() refuses a claimed entry while one is pending. A unique name per cancel means consuming
+  // the markers a transaction saw can never erase a cancel published after it. The state write that applies
+  // markers also lists them in `consumedCancels`, so a crash before their files are deleted cannot apply
+  // them again later (and drop a newer schedule); the list keeps only names whose files still exist.
+  const cancelDir = file ? `${file}.cancel` : undefined
+  const memoryCancels = new Set<string>()
+  const markerNames = () => [...(cancelDir ? readdirSafe(cancelDir) : []), ...memoryCancels]
+  const pendingCancels = (state: State, sessionID?: string) =>
+    markerNames().filter(
+      (name) =>
+        !state.consumedCancels?.includes(name) && (sessionID === undefined || cancelSessionOf(name) === sessionID),
+    )
+  /**
+   * Call before the state write that applies `names`. Returns every applied marker whose file still exists
+   * (earlier ones whose delete failed included) for consumeCancels to delete after the write.
+   */
+  const recordConsumed = (state: State, names: string[]) => {
+    const live = new Set(markerNames())
+    const kept = (state.consumedCancels ?? []).filter((name) => live.has(name))
+    state.consumedCancels = [...kept, ...names]
+    return state.consumedCancels
+  }
+  const addCancel = (sessionID: string) => {
+    const name = `${sessionID}.${randomUUID()}`
+    if (cancelDir) {
+      try {
+        mkdirSync(cancelDir, { recursive: true })
+        writeFileSync(path.join(cancelDir, name), "")
+        return
+      } catch {
+        // Session cancel calls this and must still stop the run; this instance keeps the cancel in memory.
+      }
+    }
+    memoryCancels.add(name)
+  }
+  const consumeCancels = (names: string[]) => {
+    for (const name of names) {
+      memoryCancels.delete(name)
+      try {
+        if (cancelDir) rmSync(path.join(cancelDir, name), { force: true })
+      } catch {
+        // Session cancel reaches this; a locked marker (Windows) is retried by the next consumer.
+      }
+    }
+  }
   const read = (): State => {
     if (!file) return defaultState()
     try {
@@ -156,7 +222,14 @@ export function createStore(file: string | null, clock: () => number = Date.now)
         !(cause instanceof Error && cause.message.startsWith("Invalid scheduled resume"))
       )
         throw cause
-      const backup = `${file}.corrupt`
+      // Every read of a broken file lands here. A later, different corruption gets its own copy (named by
+      // content, so repeated reads of it make one) instead of claiming the first one's.
+      const corrupt = readFileSync(file)
+      const first = `${file}.corrupt`
+      const backup =
+        existsSync(first) && !readFileSync(first).equals(corrupt)
+          ? `${file}.corrupt.${Bun.hash(corrupt).toString(16)}`
+          : first
       try {
         copyFileSync(file, backup, constants.COPYFILE_EXCL)
       } catch (error) {
@@ -234,8 +307,18 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     if (!file) return
     mkdirSync(path.dirname(file), { recursive: true })
     const tmp = `${file}.${process.pid}.tmp`
-    writeFileSync(tmp, JSON.stringify(state), "utf8")
-    renameSync(tmp, file)
+    try {
+      writeFileSync(tmp, JSON.stringify(state), "utf8")
+      renameSync(tmp, file)
+    } catch (error) {
+      // Later processes have other pids and would never reuse or remove this one.
+      try {
+        rmSync(tmp, { force: true })
+      } catch {
+        // Keep the write's own error; a locked tmp (Windows) is only left behind.
+      }
+      throw error
+    }
     wake.notify()
   }
 
@@ -265,13 +348,14 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       throw new Error("Scheduled resume lock timeout")
     })()
 
-  const requestResume = (input: RequestInput, now: number = clock()): Entry | null =>
-    withLock(() => {
+  const requestResume = (input: RequestInput, now: number = clock()): Entry | null => {
+    const result = withLock((): Entry | null => {
       const state = read()
       if (!state.enabled) return null
       if (!input.sessionID || !input.directory || !Number.isFinite(input.fireAt)) return null
       // A cancel still waiting for takeDue applies first, so this newer schedule survives it.
-      if (cancelled.delete(input.sessionID)) dropSession(state, input.sessionID)
+      const pending = pendingCancels(state, input.sessionID)
+      if (pending.length) dropSession(state, input.sessionID)
       if ((state.resumeCounts[input.sessionID] ?? 0) >= MAX_AUTO_RESUMES) return null
       const entry: Entry = {
         id: randomUUID(),
@@ -284,9 +368,15 @@ export function createStore(file: string | null, clock: () => number = Date.now)
       }
       // One entry per session: a newer schedule replaces the older one.
       state.entries = [...state.entries.filter((e) => e.sessionID !== input.sessionID), entry]
+      const applied = recordConsumed(state, pending)
       write(state)
+      consumeCancels(applied)
       return entry
-    }) ?? null
+    })
+    // A crashed holder keeps the lock up to STALE_MS; the caller logs the lost schedule.
+    if (result === undefined) throw new Error("Scheduled resume lock timeout")
+    return result
+  }
 
   const cancel = (id: string): boolean =>
     withLock(() => {
@@ -309,13 +399,17 @@ export function createStore(file: string | null, clock: () => number = Date.now)
 
   const cancelSession = (sessionID: string): boolean => {
     const done = withLock(() => {
-      cancelled.delete(sessionID)
       const state = read()
-      if (!dropSession(state, sessionID)) return false
-      write(state)
-      return true
+      const pending = pendingCancels(state, sessionID)
+      const dropped = dropSession(state, sessionID)
+      if (dropped || pending.length) {
+        const applied = recordConsumed(state, pending)
+        write(state)
+        consumeCancels(applied)
+      }
+      return dropped
     })
-    if (done === undefined) cancelled.add(sessionID)
+    if (done === undefined) addCancel(sessionID)
     return done ?? false
   }
 
@@ -323,9 +417,15 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     if (!read().enabled) {
       withLock(() => {
         const state = read()
-        if (state.enabled || state.entries.length === 0) return
+        if (state.enabled) return
+        // Cancels still apply their count reset, and their markers must not pile up while disabled.
+        const pending = pendingCancels(state)
+        const dropped = pending.filter((marker) => dropSession(state, cancelSessionOf(marker))).length
+        if (!dropped && !pending.length && state.entries.length === 0) return
         state.entries = []
+        const applied = recordConsumed(state, pending)
         write(state)
+        consumeCancels(applied)
       })
       return []
     }
@@ -342,9 +442,14 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     return (
       withLock(() => {
         const state = read()
-        const dropped = [...cancelled].filter((sessionID) => dropSession(state, sessionID)).length
-        cancelled.clear()
-        if (dropped) write(state)
+        const pending = pendingCancels(state)
+        pending.forEach((marker) => dropSession(state, cancelSessionOf(marker)))
+        // Deletes only after the write: a failed write leaves the cancels for the next poll.
+        if (pending.length) {
+          const applied = recordConsumed(state, pending)
+          write(state)
+          consumeCancels(applied)
+        }
         // A liveness result cannot evict a claim replaced while the OS query was in flight.
         const due = state.entries.filter(
           (entry) =>
@@ -424,10 +529,16 @@ export function createStore(file: string | null, clock: () => number = Date.now)
     noteFired,
     noteUserIntervened,
     wake,
-    owns: (entry) =>
-      read().entries.some(
-        (item) => item.id === entry.id && item.claim?.owner === identity?.owner && item.claim?.at === entry.claim?.at,
-      ),
+    // A cancel still waiting on the lock stops an entry this process already claimed.
+    owns: (entry) => {
+      const state = read()
+      return (
+        pendingCancels(state, entry.sessionID).length === 0 &&
+        state.entries.some(
+          (item) => item.id === entry.id && item.claim?.owner === identity?.owner && item.claim?.at === entry.claim?.at,
+        )
+      )
+    },
   }
 }
 
@@ -491,7 +602,10 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
     const ctx = yield* services.store.load({ directory: entry.directory || info.directory })
     yield* Effect.gen(function* () {
       const messages = yield* services.session.messages({ sessionID: entry.sessionID })
+      // Admission records the delivery id on the session (ScheduledDelivery.admit); it outlives a deleted message.
+      const receipts: unknown = info.metadata?.scheduledDeliveries
       if (
+        (Array.isArray(receipts) && receipts.includes(entry.id)) ||
         messages.some(
           (message) =>
             message.info.id === entry.messageID ||
@@ -519,23 +633,30 @@ export const fireEntry = Effect.fn("ScheduledResume.fireEntry")(function* (
       }
       // Queued prompts go first. A paused queue also waits here, so the resume never jumps ahead of it.
       // Scheduled prompts keep their own time and do not hold the resume.
-      const queued = yield* services.prompt.queue.snapshot(entry.sessionID)
-      if (queued.entries.some((queuedEntry) => queuedEntry.runAt === undefined)) {
+      const queueClear = services.prompt.queue
+        .snapshot(entry.sessionID)
+        .pipe(Effect.map((queued) => !queued.entries.some((queuedEntry) => queuedEntry.runAt === undefined)))
+      if (!(yield* queueClear)) {
         yield* persist(() => store.retry(entry))
         return
       }
       if (!store.owns(entry)) return
-      yield* services.prompt.prompt({
+      const sent = yield* services.prompt.prompt({
         sessionID: entry.sessionID,
         messageID: entry.messageID,
-        delivery: { id: entry.id, check: Effect.sync(() => store.owns(entry)) },
+        // Rechecked inside admission: a prompt queued after the check above must still go first.
+        delivery: { id: entry.id, check: queueClear.pipe(Effect.map((clear) => clear && store.owns(entry))) },
         persisted: persist(() => store.noteFired(entry.sessionID, entry.id)),
         ...(lastUser ? { model: lastUser.model, agent: lastUser.agent } : {}),
         parts: [
           { type: "text", text: store.getState().prompt, synthetic: true, metadata: { scheduledResumeID: entry.id } },
         ],
       })
-      if (store.owns(entry)) yield* persist(() => store.noteFired(entry.sessionID, entry.id))
+      if (!store.owns(entry)) return
+      // Admission declined it (a prompt got queued first): try again later. If it was in fact already
+      // delivered, the next attempt finds its receipt above and counts it as fired.
+      if ("skipped" in sent) return yield* persist(() => store.retry(entry))
+      yield* persist(() => store.noteFired(entry.sessionID, entry.id))
     }).pipe(Effect.provideService(InstanceRef, ctx))
   })
   yield* fire.pipe(

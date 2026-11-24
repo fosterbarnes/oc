@@ -316,8 +316,8 @@ class ClaudeTurn {
       switching: () => !!this.switchTo,
       activeProcess: () => this.activeProcess,
       write: (line) => this.proc.stdin?.write(line),
-      hold: () => {
-        if (!this.closed) this.out.hold()
+      hold: (messageID) => {
+        if (!this.closed) this.out.hold(messageID)
       },
       read: (messageID) => {
         if (!this.closed) this.out.splitAt(messageID)
@@ -1334,6 +1334,10 @@ class ClaudeTurn {
     this.beginTextAccountSwitch(msg)
     // An aborted turn ends here; it must not restart on another account.
     if (this.switchTo && (this.autoContinue.aborted || this.cancelled)) this.switchTo = undefined
+    if (this.switchTo) {
+      const segmentCost = turnCostFromTotal(msg.session_id, msg.total_cost_usd, this.cliArgs.includes("--resume"))
+      if (segmentCost !== undefined) this.turnCostUsd = (this.turnCostUsd ?? 0) + segmentCost
+    }
     if (this.runPendingSwitch(() => this.onResult(msg))) return
     if (msg.session_id) setClaudeSessionId(this.sk, msg.session_id, this.account)
 
@@ -2109,12 +2113,20 @@ class ClaudeTurn {
     // Pinned chats fail over too, so the earliest reset in the pool resumes any chat.
     const resetAt = earliestLimitedUntil(ids)
     if (resetAt === undefined) return
-    const entry = ScheduledResume.requestResume({
-      sessionID,
-      directory: this.turn.directory,
-      fireAt: resetAt + 60_000,
-      reason: ScheduledResume.RESUME_REASON,
-    })
+    // finish() and failTurn() call this before their cleanup, so a failed write must not throw past them.
+    const entry = (() => {
+      try {
+        return ScheduledResume.requestResume({
+          sessionID,
+          directory: this.turn.directory,
+          fireAt: resetAt + 60_000,
+          reason: ScheduledResume.RESUME_REASON,
+        })
+      } catch (error) {
+        log.error("failed to schedule auto-resume", { sessionKey: this.sk, sessionID, error: String(error) })
+        return null
+      }
+    })()
     if (entry)
       log.notice("scheduled auto-resume after usage reset", { sessionKey: this.sk, sessionID, fireAt: entry.fireAt })
   }

@@ -519,6 +519,50 @@ it.instance(
   { git: true },
 )
 
+it.instance(
+  "a read-only subagent refuses denied PDF and image attachments",
+  () =>
+    Effect.gen(function* () {
+      const { dir } = yield* useServerConfig(providerCfg)
+      const { prompt, sessions } = yield* boot()
+      const fs = yield* FSUtil.Service
+      const pdf = path.join(dir, "secret.pdf")
+      const image = path.join(dir, "secret.png")
+      yield* writeText(pdf, "%PDF-1.4\nTOP SECRET PDF")
+      yield* fs.writeWithDirs(image, pngBytes)
+      for (const tools of [undefined, { read: false }] as const) {
+        const child = yield* sessions.create({
+          title: "Read-only child",
+          permission: [
+            ...(tools
+              ? []
+              : [
+                  { permission: "read", pattern: "secret.pdf", action: "deny" as const },
+                  { permission: "read", pattern: "secret.png", action: "deny" as const },
+                ]),
+            READONLY_MARKER_RULE,
+          ],
+        })
+        const message = yield* prompt.prompt({
+          sessionID: child.id,
+          agent: "build",
+          noReply: true,
+          ...(tools ? { tools } : {}),
+          parts: [
+            { type: "file", mime: "application/pdf", filename: "secret.pdf", url: pathToFileURL(pdf).href },
+            { type: "file", mime: "image/png", filename: "secret.png", url: pathToFileURL(image).href },
+          ],
+        })
+        const text = message.parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n")
+        expect(message.parts.some((part) => part.type === "file")).toBe(false)
+        expect(text).toContain(`Read tool failed to read ${pdf}`)
+        expect(text).toContain(`Read tool failed to read ${image}`)
+        expect(JSON.stringify(message.parts)).not.toContain("TOP SECRET")
+      }
+    }),
+  { git: true },
+)
+
 it.instance("a read-only subagent refuses command shell expansion and subtasks", () =>
   Effect.gen(function* () {
     yield* useServerConfig((url) => ({
@@ -537,6 +581,36 @@ it.instance("a read-only subagent refuses command shell expansion and subtasks",
       expect(NamedError.Unknown.isInstance(error) && error.data.message).toContain("read-only subagent may not")
     }
     expect(yield* sessions.messages({ sessionID: child.id })).toHaveLength(0)
+  }),
+)
+
+it.instance("a read-only subagent refuses a direct subtask part", () =>
+  Effect.gen(function* () {
+    const { llm } = yield* useServerConfig(providerCfg)
+    const { prompt, sessions } = yield* boot()
+    const child = yield* sessions.create({ title: "Read-only child", permission: [READONLY_MARKER_RULE] })
+    const exit = yield* prompt
+      .prompt({
+        sessionID: child.id,
+        agent: "build",
+        parts: [
+          {
+            type: "subtask",
+            agent: "general",
+            prompt: "inspect the cache key path",
+            description: "inspect bug",
+          },
+        ],
+      })
+      .pipe(Effect.exit)
+    expect(Exit.isFailure(exit)).toBe(true)
+    const error = Exit.isFailure(exit) ? Cause.squash(exit.cause) : undefined
+    expect(NamedError.Unknown.isInstance(error) && error.data.message).toContain("read-only subagent may not")
+    const messages = yield* sessions.messages({ sessionID: child.id })
+    expect(messages.filter((message) => message.info.role === "assistant")).toHaveLength(0)
+    expect(messages.flatMap((message) => message.parts).some((part) => part.type === "tool")).toBe(false)
+    expect(yield* sessions.children(child.id)).toHaveLength(0)
+    expect(yield* llm.calls).toBe(0)
   }),
 )
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Deferred, Effect } from "effect"
@@ -213,6 +213,49 @@ describe("scheduledResume store", () => {
     }
   })
 
+  // A crash (or a locked file on Windows) between applying a cancel and deleting its marker left the marker
+  // live, so a later poll applied it again and dropped the session's newer schedule.
+  test("a cancel marker already applied in a state write is not applied again", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file, () => 100)
+      store.setEnabled(true)
+      store.requestResume({ sessionID: "s", directory: "/d", fireAt: 50, reason: "r" })
+      // What disk holds after a crash right after the applying write: the marker listed and still present.
+      const marker = `s.${randomUUID()}`
+      mkdirSync(`${tmp.file}.cancel`, { recursive: true })
+      writeFileSync(join(`${tmp.file}.cancel`, marker), "")
+      const state = JSON.parse(readFileSync(tmp.file, "utf8"))
+      writeFileSync(tmp.file, JSON.stringify({ ...state, consumedCancels: [marker] }))
+      expect((await store.takeDue()).map((entry) => entry.sessionID)).toEqual(["s" as SessionID])
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  // oc's resident server and native opencode share the file; a cancel that timed out on the lock in one
+  // used to live only in that process's memory, so the other still claimed and fired the resume.
+  test("a cancel that timed out on the lock stops the other instance from firing", async () => {
+    const tmp = tmpFile()
+    try {
+      const oc = ScheduledResume.createStore(tmp.file, () => 100)
+      const native = ScheduledResume.createStore(tmp.file, () => 100)
+      oc.setEnabled(true)
+      oc.requestResume({ sessionID: "s", directory: "/d", fireAt: 50, reason: "r" })
+      const [claimed] = await native.takeDue()
+      expect(claimed?.sessionID).toBe("s" as SessionID)
+      writeFileSync(`${tmp.file}.lock`, String(process.pid))
+      expect(oc.cancelSession("s")).toBe(false)
+      expect(native.owns(claimed!)).toBe(false)
+      rmSync(`${tmp.file}.lock`)
+      oc.requestResume({ sessionID: "other", directory: "/d", fireAt: 50, reason: "r" })
+      expect((await native.takeDue(100 + 600_000)).map((entry) => entry.sessionID)).toEqual(["other" as SessionID])
+      expect(native.getState().entries.map((entry) => entry.sessionID)).toEqual(["other" as SessionID])
+    } finally {
+      tmp.cleanup()
+    }
+  }, 15_000)
+
   test("cancel removes the entry without resetting the resume count", () => {
     const tmp = tmpFile()
     try {
@@ -359,6 +402,52 @@ describe("scheduledResume fireEntry", () => {
       expect(prompts).toEqual([])
       expect(store.getState().resumeCounts).toEqual({})
       expect(store.getState().entries[0]).toMatchObject({ id: due.id, attempts: 1, fireAt: 61_000 })
+      expect(store.getState().entries[0]?.claim).toBeUndefined()
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  // A delivery whose message was deleted afterwards used to retry forever: admission kept skipping its id.
+  test("a delivery recorded on the session counts as fired even when its message is gone", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file, () => 1000)
+      const due = await claimed(store)
+      const { svc, prompts } = services()
+      const session = svc.session as unknown as { get: () => Effect.Effect<unknown> }
+      session.get = () => Effect.succeed({ directory: "/tmp/proj", metadata: { scheduledDeliveries: [due.id] } })
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
+      expect(prompts).toEqual([])
+      expect(store.getState().entries).toEqual([])
+      expect(store.getState().resumeCounts).toEqual({ ses_abc: 1 })
+    } finally {
+      tmp.cleanup()
+    }
+  })
+
+  // The queue was only checked before the slow prompt path, so a prompt queued in between lost its turn.
+  test("a prompt queued while the resume is being admitted still goes first", async () => {
+    const tmp = tmpFile()
+    try {
+      const store = ScheduledResume.createStore(tmp.file, () => 1000)
+      const due = await claimed(store)
+      const queued: { id: string; state: "pending"; text: string; attachments: number }[] = []
+      const { svc } = services()
+      const prompt = svc.prompt as unknown as {
+        queue: { snapshot: () => Effect.Effect<{ entries: typeof queued }> }
+        prompt: (input: { delivery: { check: Effect.Effect<boolean> } }) => Effect.Effect<unknown>
+      }
+      prompt.queue.snapshot = () => Effect.sync(() => ({ entries: queued }))
+      // Like ScheduledDelivery.admit: the user's prompt lands in the queue before the check runs.
+      prompt.prompt = (input) =>
+        Effect.gen(function* () {
+          queued.push({ id: "msg_late", state: "pending", text: "late", attachments: 0 })
+          return (yield* input.delivery.check) ? { info: {}, parts: [] } : { info: {}, parts: [], skipped: true }
+        })
+      await Effect.runPromise(ScheduledResume.fireEntry(svc, store, due))
+      expect(store.getState().resumeCounts).toEqual({})
+      expect(store.getState().entries[0]).toMatchObject({ id: due.id, attempts: 1 })
       expect(store.getState().entries[0]?.claim).toBeUndefined()
     } finally {
       tmp.cleanup()

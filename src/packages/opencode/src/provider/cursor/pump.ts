@@ -22,6 +22,7 @@ import {
   resolveCustomWebToolAlias,
 } from "./protocol/descriptors.js"
 import {
+  rejectEchoedReadReminder,
   rejectPartialReadMutation,
   remapCorrelatedEditWriteForCatalog,
   remapEditToolsForCatalog,
@@ -821,6 +822,7 @@ export class CursorPump {
         // ordinary capped read it cannot have appended our warning marker,
         // and the source itself may legitimately contain the marker text.
         if (!editCall?.completeRead) rejectPartialReadMutation(parsed)
+        rejectEchoedReadReminder(parsed, workspaceRootFromRequestContext(session.requestContext))
         if (editCall) {
           const remapped = remapCorrelatedEditWriteForCatalog(
             parsed,

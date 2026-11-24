@@ -201,8 +201,7 @@ export function restoreCompleteReadTerminator(
     metadata.startLine !== undefined ||
     metadata.endLine !== undefined ||
     num(resultMetadata?.offset) !== undefined ||
-    num(resultMetadata?.limit) !== undefined ||
-    content.endsWith("\n")
+    num(resultMetadata?.limit) !== undefined
   )
     return content
 
@@ -214,10 +213,26 @@ export function restoreCompleteReadTerminator(
     if (size === 0) return content
     const tail = Buffer.alloc(Math.min(2, size))
     fs.readSync(fd, tail, 0, tail.length, size - tail.length)
-    if (tail.length >= 2 && tail[tail.length - 2] === 0x0d && tail[tail.length - 1] === 0x0a) {
-      return `${content}\r\n`
-    }
-    if (tail[tail.length - 1] === 0x0a) return `${content}\n`
+    const terminator =
+      tail.length >= 2 && tail[tail.length - 2] === 0x0d && tail[tail.length - 1] === 0x0a
+        ? "\r\n"
+        : tail[tail.length - 1] === 0x0a
+          ? "\n"
+          : ""
+    if (!terminator) return content
+    // The file is inspected after the read finished, so it may have changed since: restore the terminator
+    // only while the file still holds exactly the content read. Sizes settle the common LF case; CRLF
+    // files are compared LF-normalized. Lines the read tool truncated cannot be compared, so trust the tail.
+    const bytes = Buffer.byteLength(content)
+    if (size === bytes + terminator.length) return `${content}${terminator}`
+    if (content.includes("(line truncated to ")) return `${content}${terminator}`
+    // Larger than a BOM plus a CR per line allows: the file changed, so it is not read in full.
+    if (size > bytes + countLines(content) + 1 + 3 + terminator.length) return content
+    const current = Buffer.alloc(size)
+    fs.readSync(fd, current, 0, size, 0)
+    // The read tool's decoder drops a UTF-8 BOM, and its line splitter also ends lines at a lone CR.
+    const normalized = current.toString("utf8").replace(/^﻿/, "").replace(/\r\n?/g, "\n")
+    if (normalized === `${content}\n`) return `${content}${terminator}`
   } catch {
     // The host read result remains authoritative when the local path cannot be
     // inspected (deleted/raced/permission changed after the tool completed).
@@ -294,14 +309,14 @@ export function readTruncationNotice(output: string, resultMetadata?: Record<str
  * Model-visible replacement for the stripped footer.
  *
  * Only for reads the model did not ask to bound. A caller that passed an
- * explicit offset/limit already knows it asked for a slice - warning there
- * would cry wolf on every deliberate paged read.
+ * explicit limit already knows it asked for a slice - warning there would cry
+ * wolf on every deliberate paged read. An offset alone does not bound the
+ * read: the host's default line limit cut it short.
  */
 function partialReadNotice(output: string, resultMetadata?: Record<string, unknown>): string | undefined {
   const summary = readTruncationSummary(output)
   if (!summary) return undefined
-  const rangeRequested = num(resultMetadata?.offset) !== undefined || num(resultMetadata?.limit) !== undefined
-  if (rangeRequested && !summary.capped) return undefined
+  if (num(resultMetadata?.limit) !== undefined && !summary.capped) return undefined
   const range =
     summary.totalLines !== undefined
       ? `lines ${summary.startLine}-${summary.endLine} of ${summary.totalLines}`

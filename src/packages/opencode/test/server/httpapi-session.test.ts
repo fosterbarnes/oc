@@ -4,7 +4,7 @@ import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { mkdir } from "node:fs/promises"
 import path from "node:path"
-import { Cause, Config, Effect, Exit, Layer } from "effect"
+import { Cause, Config, Effect, Exit, Layer, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/unstable/http"
 import { layerWebSocketConstructorGlobal } from "effect/unstable/socket/Socket"
 import { AppNodeBuilder } from "@opencode-ai/core/effect/app-node-builder"
@@ -22,7 +22,7 @@ import { Project } from "../../src/project/project"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import * as HttpSessionError from "../../src/server/routes/instance/httpapi/handlers/session-errors"
 import { ExperimentalPaths } from "../../src/server/routes/instance/httpapi/groups/experimental"
-import { SessionPaths } from "../../src/server/routes/instance/httpapi/groups/session"
+import { ClaudeAccounts, SessionPaths } from "../../src/server/routes/instance/httpapi/groups/session"
 import { Session } from "@/session/session"
 import { SessionRunState } from "@/session/run-state"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -308,6 +308,21 @@ describe("session HttpApi", () => {
           message: `Session is busy: ${sessionID}`,
         })
       }
+    }),
+  )
+
+  it.effect("preserves Claude API spend when encoding account responses", () =>
+    Effect.sync(() => {
+      const account = {
+        id: "api",
+        label: "API credits",
+        current: true,
+        kind: "api" as const,
+        spentTodayUsd: 1.25,
+        spentMonthUsd: 3.5,
+      }
+      const encoded = Schema.encodeUnknownSync(ClaudeAccounts)({ accounts: [account] })
+      expect(encoded.accounts[0]).toEqual(account)
     }),
   )
 

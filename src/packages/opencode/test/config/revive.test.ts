@@ -761,17 +761,41 @@ test("build outputs must exist and must not provide the same name twice", async 
   await expect(Revive.installSources([path.join(tmp.path, "missing")])).rejects.toThrow("Build output not found")
 })
 
-test("a source download refuses an existing repository that is not an oc clone", async () => {
-  await using tmp = await tmpdir({ git: true })
-  const remote = Bun.spawnSync(["git", "-C", tmp.path, "remote", "add", "origin", "https://example.com/other.git"])
-  expect(remote.exitCode).toBe(0)
-  await expect(
+test("a source download accepts an existing oc clone with an SSH origin", async () => {
+  const prepare = (sourceDir: string) =>
     ReviveHost.prepare({
       source: "download",
-      sourceDir: tmp.path,
+      sourceDir,
       result: path.join(Global.Path.state, "oc-revive", "prepare-test.json"),
-    }),
-  ).rejects.toThrow("not an oc clone")
+    })
+  for (const origin of ["git@github.com:fosterbarnes/oc.git", "ssh://git@github.com/fosterbarnes/oc.git"]) {
+    await using tmp = await tmpdir({ git: true })
+    const remote = Bun.spawnSync(["git", "-C", tmp.path, "remote", "add", "origin", origin])
+    expect(remote.exitCode).toBe(0)
+    const ssh = Bun.spawnSync(["git", "-C", tmp.path, "config", "core.sshCommand", "false"])
+    expect(ssh.exitCode).toBe(0)
+    await expect(prepare(tmp.path)).rejects.toThrow("git exited with code 1")
+  }
+})
+
+test("a source download refuses an existing repository that is not an oc clone", async () => {
+  const prepare = (sourceDir: string) =>
+    ReviveHost.prepare({
+      source: "download",
+      sourceDir,
+      result: path.join(Global.Path.state, "oc-revive", "prepare-test.json"),
+    })
+  for (const origin of [
+    "https://example.com/other.git",
+    "not-a-url",
+    "git@github.com:fosterbarnes/other.git",
+    "git@github.com:other/oc.git",
+  ]) {
+    await using tmp = await tmpdir({ git: true })
+    const remote = Bun.spawnSync(["git", "-C", tmp.path, "remote", "add", "origin", origin])
+    expect(remote.exitCode).toBe(0)
+    await expect(prepare(tmp.path)).rejects.toThrow("not an oc clone")
+  }
 })
 
 // No-window /mirror revive (ReviveHost.startHeadless / reviveHeadless).

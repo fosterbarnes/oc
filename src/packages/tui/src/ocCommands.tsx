@@ -363,6 +363,7 @@ export function createOcCommands(input: {
               current={sync.data.config.default_subagent}
               options={options}
               onSelect={async (option) => {
+                const owner = dialog.stack.at(-1)
                 const result = await sdk.client.global.config.update({ config: { default_subagent: option.value } })
                 if (result.error) {
                   toast.show({
@@ -372,7 +373,7 @@ export function createOcCommands(input: {
                   return
                 }
                 toast.show({ message: `Saved default sub-agent: ${option.value}`, variant: "success" })
-                dialog.clear()
+                if (dialog.stack.at(-1) === owner) dialog.clear()
               }}
             />
           ))
@@ -425,7 +426,8 @@ export function createOcCommands(input: {
                   return
                 }
                 // Closes after the save, so the next command reads the new oc.json
-                if (await persistOcConfig("homeDir", resolved, toast)) dialog.clear()
+                const owner = dialog.stack.at(-1)
+                if ((await persistOcConfig("homeDir", resolved, toast)) && dialog.stack.at(-1) === owner) dialog.clear()
               }}
             />
           ))
@@ -449,7 +451,9 @@ export function createOcCommands(input: {
                 { value: "modified", title: "modified" },
               ]}
               onSelect={async (option) => {
-                if (await persistOcConfig("homeDirSort", option.value, toast)) dialog.clear()
+                const owner = dialog.stack.at(-1)
+                if ((await persistOcConfig("homeDirSort", option.value, toast)) && dialog.stack.at(-1) === owner)
+                  dialog.clear()
               }}
             />
           ))
@@ -478,7 +482,8 @@ export function createOcCommands(input: {
                   toast.show({ message: `Directory not found: ${trimmed}`, variant: "error" })
                   return
                 }
-                if (await persistOcConfig("ocDir", resolved, toast)) dialog.clear()
+                const owner = dialog.stack.at(-1)
+                if ((await persistOcConfig("ocDir", resolved, toast)) && dialog.stack.at(-1) === owner) dialog.clear()
               }}
             />
           ))
@@ -504,7 +509,9 @@ export function createOcCommands(input: {
                 { value: "false", title: "off" },
               ]}
               onSelect={async (option) => {
-                if (await persistOcConfig("serverStartAtLogin", option.value, toast)) dialog.clear()
+                const owner = dialog.stack.at(-1)
+                if ((await persistOcConfig("serverStartAtLogin", option.value, toast)) && dialog.stack.at(-1) === owner)
+                  dialog.clear()
               }}
             />
           ))
@@ -1259,12 +1266,13 @@ export function createOcCommands(input: {
                 onConfirm={async (value) => {
                   const key = value.trim()
                   if (!key) return
+                  const owner = dialog.stack.at(-1)
                   const result = await sdk.client.auth.set({ providerID: "typesafe", auth: { type: "api", key } })
                   if (result.error) {
                     toast.show({ message: `Failed to save Jev key: ${String(result.error)}`, variant: "error" })
                     return
                   }
-                  dialog.clear()
+                  if (dialog.stack.at(-1) === owner) dialog.clear()
                   toast.show({ message: "Saved Jev key; jev_* tools are on", variant: "success" })
                 }}
               />
@@ -1283,12 +1291,13 @@ export function createOcCommands(input: {
               ]}
               onSelect={async (option) => {
                 if (option.value === "set") return saveKey()
+                const owner = dialog.stack.at(-1)
                 const result = await sdk.client.auth.remove({ providerID: "typesafe" })
                 if (result.error) {
                   toast.show({ message: `Failed to clear Jev key: ${String(result.error)}`, variant: "error" })
                   return
                 }
-                dialog.clear()
+                if (dialog.stack.at(-1) === owner) dialog.clear()
                 toast.show({ message: "Cleared Jev key", variant: "success" })
               }}
             />
