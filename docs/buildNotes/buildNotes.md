@@ -131,6 +131,36 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-24 (~02:17) - v0.2.413 decemberHerbie - /revive no longer creates a session for tabs on Home - Claude Opus 5.5, low; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; low; Debug; completed, live unverified
+- Version: 0.2.413
+- Fixed `oc revive-tabs` (src/packages/opencode/src/cli/cmd/oc.ts): a tab with no `sessionID` (ledger drops it on Home, packages/tui/src/app.tsx) went through `launchProject(directory)`, which calls `bootstrapSession` for any target. Added `home` option to `launchProject` and a hidden `--home` flag on `oc launch`; the first tab and every `spawnTab` pass it when the tab has no session, so any mix of Home and session tabs reopens as-is.
+- Verification: `tsc --noEmit` clean for oc.ts; `bun test test/config/revive.test.ts` 35 pass. Live WezTerm /revive with mixed Home/session tabs not run.
+
+### User
+Revive
+- Tabs that were on the Home screen come back on the Home screen after /revive instead of opening a new empty session.
+
+---
+
+## 2026-11-24 (~01:53) - v0.2.413 decemberHerbie - Mirror to a Mac no longer fails with ENOTSUP - Claude Opus 5.5, default; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; default; Debug; completed, live unverified
+- Version: 0.2.413
+- Fixed `oc oc mirror receive` (`src/packages/opencode/src/cli/cmd/oc.ts`): `Bun.write(bundle, Bun.stdin)` -> `pipeline(process.stdin, createWriteStream(bundle))`. On macOS Bun copies stdin with `fcopyfile`, which throws ENOTSUP when stdin is the ssh socket, so every mirror to a Mac failed. Windows receivers did not hit it.
+- Verification: on the Mac, piped 300 KB over `ssh mac` into bun: old call reproduced `ENOTSUP ... fcopyfile`, new call wrote identical bytes (sha1 match), and empty stdin wrote a 0-byte file (empty-bundle case). Full /mirror not run: the Mac needs this build first (`/revive` there).
+- Applied this PC's source (caf905c + uncommitted fix) to the Mac by user request: bundle via scp, then the Mac's own `oc oc mirror receive --dirty overwrite` with stdin from the file (sidesteps the bug). Mac's uncommitted Cursor provider edits and untracked `provider/cursor/debugTempImage.ts` discarded as asked. Mac still needs `/revive` to run the fix.
+- Risk: version name from `bumpVersion.ps1` came out as a long garbled string; left as generated.
+
+### User
+Mirror
+- Mirroring to the MacBook no longer fails with "ENOTSUP: operation not supported on socket, fcopyfile" once the Mac runs this build.
+
+---
+
 ## 2026-11-23 (~23:31) - v0.2.412 vanillaChill - Home footer shows oc and OG versions - Claude Opus 5.5, default; Implementation
 
 ### Agent

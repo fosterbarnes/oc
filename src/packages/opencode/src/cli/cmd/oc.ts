@@ -3,6 +3,8 @@ import os from "os"
 import path from "path"
 import fs from "fs/promises"
 import { spawn } from "child_process"
+import { createWriteStream } from "fs"
+import { pipeline } from "stream/promises"
 import { cmd } from "./cmd"
 import { CliError } from "../effect-cmd"
 import { OcConfig } from "@/config/oc"
@@ -215,6 +217,8 @@ const LaunchCommand = cmd({
     yargs
       .positional("target", { type: "string", describe: "project path or home-directory child" })
       .option("session", { type: "string", describe: "resume this session without creating another" })
+      // Revive reopens a tab that was on Home: open Home in the target directory, no new session.
+      .option("home", { type: "boolean", hidden: true })
       .option("palette", {
         type: "string",
         describe: 'open palette entry by title, e.g. "New session (oc)"',
@@ -240,12 +244,12 @@ const LaunchCommand = cmd({
       return
     }
 
-    await launchProject(args.target, { session: args.session })
+    await launchProject(args.target, { session: args.session, home: args.home })
   },
 })
 
-// A target gets a fresh bootstrapped session; no target opens the home screen.
-async function launchProject(target: string | undefined, options: { session?: string }) {
+// A target gets a fresh bootstrapped session unless `home`; no target opens the home screen.
+async function launchProject(target: string | undefined, options: { session?: string; home?: boolean }) {
   const settings = await OcConfig.read()
   const stopIntro = startIntro(settings.intro?.background)
   try {
@@ -253,7 +257,7 @@ async function launchProject(target: string | undefined, options: { session?: st
     const ocDir = typeof settings.ocDir === "string" ? settings.ocDir : undefined
     const directory = resolveTargetDirectory(target, ocDir, homeDir)
     const server = await Resident.startServer()
-    const session = options.session ?? (target ? await bootstrapSession(server, directory) : undefined)
+    const session = options.session ?? (target && !options.home ? await bootstrapSession(server, directory) : undefined)
     // Leave the intro frame up; the TUI continues it from the same clock and frame.
     await attach(server, settings, { directory, session, intro: stopIntro(false) })
   } finally {
@@ -301,7 +305,7 @@ const ReviveTabsCommand = cmd({
         .catch(() => undefined)
     }
     const [first] = tabs
-    await launchProject(first.directory, { session: first.sessionID })
+    await launchProject(first.directory, { session: first.sessionID, home: !first.sessionID })
   },
 })
 
@@ -311,7 +315,7 @@ async function spawnTab(pane: string, tab: Revive.Tab) {
     tab.directory,
     "--",
     OcConfig.executablePath(),
-    ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : [])]),
+    ...runtimeArgs(["oc", "launch", tab.directory, ...(tab.sessionID ? ["--session", tab.sessionID] : ["--home"])]),
   ]
   // An unreachable mux must fail here, not start a stray GUI that the tab then opens in.
   const child = Bun.spawn(["wezterm", "cli", "--no-auto-start", "spawn", "--pane-id", pane, ...args], {
@@ -425,7 +429,9 @@ const MirrorCommand = cmd({
           const { OcMirror } = await import("@opencode-ai/core/util/ocMirror")
           const result = await OcMirror.withTempDir(async (dir) => {
             const bundle = path.join(dir, "mirror.bundle")
-            await Bun.write(bundle, Bun.stdin)
+            // Streamed: under ssh stdin is a socket, and Bun.write(file, Bun.stdin) uses fcopyfile on
+            // macOS, which fails there with ENOTSUP.
+            await pipeline(process.stdin, createWriteStream(bundle))
             return OcMirror.receive(bundle, {
               head: args.head,
               snapshot: args.snapshot,
