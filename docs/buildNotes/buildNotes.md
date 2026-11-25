@@ -131,6 +131,27 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-25 (~05:40) - v0.2.416 flippyMega - OpenCode deals from @opencode posts - Claude Opus 5.5, Thinking; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; Thinking; Implementation; completed
+- Version: 0.2.416 flippyMega
+- Why: Zen tracker missed HungerG and "Gimme Kimi Phase 1"; both are Go promos announced only on https://x.com/opencode, never on the Zen pricing page. User's original goal was the X feed.
+- Moved `src/packages/tui/src/zenDeals.tsx` -> `opencodeDeals.tsx` (git mv). Palette `oc.zen_deals` "Zen deals" `/zenDeals` -> `oc.opencode_deals` "OpenCode deals" `/deals`; `app.tsx` `createDealsCommand`, `command-palette.tsx` rank updated. State file now `Global.Path.state/opencode-deals.json` (old `zen-deals.json` left in place, unused).
+- Added X sources (keyless): `https://api.fxtwitter.com/2/profile/opencode/statuses` (recent ~19 posts, no pinned post; once returned 200 with empty results) + `https://syndication.twitter.com/srv/timeline-profile/screen-name/opencode` `__NEXT_DATA__` (pinned post first, rest stale 2025 popular posts). Rejected: xcancel (451 suspended), nitter.net (410), rsshub.app (404), paid X API.
+- Added `parseFxPosts`, `parseEmbedPosts`, `postDeal` (author opencode, not reply/repost, `_DEAL_WORDS` regex), `mergeDeals` (posts accumulate across checks, cut at 30 days; failed Zen read keeps saved Zen deals), `diffDeals` (only Zen deals "end"). `checkDeals` uses `Promise.allSettled`; throws only when all 3 sources fail; returns `failed` names.
+- Changed dialog: `DialogAlert` text -> `DialogSelect` grouped "@opencode" (title = first post line, date, body as wrapped details) and "Zen pricing"; select opens the post / pricing page via `openLink` (dialog stays open). Partial source failure -> warning toast "Not read: ...".
+- Risk: fxtwitter + syndication are unofficial; keyword filter lets chatty posts through (GTA6 contest "free" post shows). `ponytail:` comments name upgrades (paid X API, classifier).
+- Verification: tui `bun run typecheck` exit 0. Live probe (temp script importing the module, deleted): seed 0/0 with 8 X deal posts (Gimme Kimi pinned, HungerG, GLM 60% off, Hy4 flash, GLM phases) + 19 Zen deals; rerun 0/0; fake prior state -> added Gimme Kimi + GLM 5.3, ended Old Promo; Zen undefined keeps saved Zen deals; garbage HTML -> undefined / 0 posts. TUI not launched.
+
+### User
+OpenCode deals
+- The "Zen deals" entry is now "OpenCode deals" (`/deals`) and also reads the deal posts from @opencode on X, so Go promos like HungerG and Gimme Kimi show up without visiting X.
+- The page lists recent deal posts (last 30 days) with their date and full text, then the Zen pricing discounts; selecting a row opens that post or the pricing page.
+- New deal posts and Zen discount changes still pop a toast during the hourly check.
+
+---
+
 ## 2026-11-25 (~03:20) - v0.2.415 outrageousLuggage - Zen deals tracker - Claude Opus 5.5, Thinking; Implementation
 
 ### Agent
