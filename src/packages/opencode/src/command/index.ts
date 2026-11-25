@@ -64,6 +64,29 @@ export function hints(template: string) {
   return result
 }
 
+// Match [Image N] as single token, quoted strings, or non-space sequences
+const argsRegex = /(?:\[Image\s+\d+\]|"[^"]*"|'[^']*'|[^\s"']+)/gi
+const placeholderRegex = /\$(\d+)/g
+const quoteTrimRegex = /^["']|["']$/g
+
+// Fills `$1`..`$n` (the highest takes the rest of the arguments) and `$ARGUMENTS`. A template with neither
+// placeholder gets the arguments appended. Shell substitution is left to the caller.
+export function fill(template: string, input: string) {
+  const args = (input.match(argsRegex) ?? []).map((arg) => arg.replace(quoteTrimRegex, ""))
+  const placeholders = template.match(placeholderRegex) ?? []
+  const last = Math.max(0, ...placeholders.map((item) => Number(item.slice(1))))
+  const filled = template
+    .replaceAll(placeholderRegex, (_, index) => {
+      const position = Number(index)
+      if (position - 1 >= args.length) return ""
+      if (position === last) return args.slice(position - 1).join(" ")
+      return args[position - 1]
+    })
+    .replaceAll("$ARGUMENTS", () => input)
+  if (placeholders.length === 0 && !template.includes("$ARGUMENTS") && input.trim()) return filled + "\n\n" + input
+  return filled
+}
+
 export const Default = {
   INIT: "init",
   REVIEW: "review",

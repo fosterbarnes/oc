@@ -131,6 +131,65 @@ Budget (AGENTS.md "Build notes"): at most 80 lines and 12 KB. Current invariants
 
 ---
 
+## 2026-11-25 (~03:20) - v0.2.415 outrageousLuggage - Zen deals tracker - Claude Opus 5.5, Thinking; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; Thinking; Implementation (after /spit + /second-opinion); completed
+- Version: 0.2.415 outrageousLuggage (first agent-push rejected: origin had v0.2.413 decemberHerbie + v0.2.414 dirtySpecial; local commit undone, pulled, work restored on top, then bumped)
+- Added `src/packages/tui/src/zenDeals.tsx`: `parseZenDeals` scrapes https://opencode.ai/docs/console/models/ (target of /docs/zen redirect): `<td>Name (N% off)</td>`, `<strong>A, B, and C:</strong> The N% discount applies through <date>.`, `<li>Name is ... for a limited time`. Returns undefined when the `aria-label="Console model pricing"` table is missing (layout change != all deals ended).
+- Added `diffZenDeals` (key name+detail; changed % or end date = new; name gone = ended) and `checkZenDeals` (state `Global.Path.state/zen-deals.json`, tmp+rename write, first run seeds silently).
+- Added `createZenDealsCommand`: background check 1 min after TUI start, then hourly (unref timers, onCleanup); toast "Zen deals" on changes, silent on failure. Palette `oc.zen_deals` "Zen deals", group Updates, `/zenDeals`: checks now, toasts changes, DialogAlert list; errors via `toast.error`.
+- Wired in `app.tsx` (after `ocCommands.settings`) and ranked in `component/command-palette.tsx` `_COMMAND_RANK` Updates row.
+- Kept TUI-side, not server: models.dev/Zen JSON have no promo flag (second opinion verified: GLM 5.3 60% off has no multiplier; date multipliers mixed with service_tier). Plan + panel reconciliation: `~/.config/opencode/plans/2026-11-25-zenDealsTracker.md`.
+- Skipped: 3-day end-date reminder, cross-window lock (ponytail comment), X/Twitter source.
+- Risk: scraper breaks if the docs HTML changes; background checks then fail quietly, running the palette entry shows "layout changed".
+- Verification: `bun run typecheck` in tui exit 0. Live probe (pure functions copied to temp, deleted): 19 deals (8 discounts incl. Gemini end dates, 11 free) matching the page; seed 0/0; rerun 0/0; fake prior state -> added GLM 5.3 + Mistral Large 4, ended Old Promo; garbage HTML -> undefined. TUI not launched.
+- Note: the two entries below (slash answers, cua_observe) were this PC's uncommitted v0.2.413-era work; also restored on top of origin. Mirror ENOTSUP fix and subagent dispatch hint were already in origin (identical).
+- Verification (after merge onto origin): opencode + tui typecheck exit 0; question + prompt + command tests 93 pass 0 fail; cua.test.ts 5 pass.
+- ERROR: known test interaction: `prompt.test.ts` "@<agent>:<level> resolves to an agent part that keeps the level" fails only when run in one `bun test` process with `test/tool/cua.test.ts`; passes alone, in its file (84 pass), and on origin code. Not investigated.
+
+### User
+Zen deals
+- oc now checks OpenCode Zen's pricing page hourly and shows a toast when a model becomes free or discounted for a limited time, or when a deal ends.
+- New palette entry "Zen deals" (Updates group, also `/zenDeals`) checks right away and lists every current deal with its end date when the page gives one.
+
+---
+
+## 2026-11-24 (~23:23) - v0.2.413 tenaciousZstzstzstzstzstztsztsztstzstzstztsztsztstzstzstztsztststssztsztsztsztstzstztszst - slash commands as question answers - Claude Opus 5.5, Thinking; Implementation
+
+### Agent
+- Meta: Claude Opus 5.5; Thinking; Implementation; completed
+- Version: 0.2.413 tenaciousZstzstzstzstzstztsztsztstzstzstztsztsztstzstzstztsztststssztsztsztsztstzstztszst (already bumped by uncommitted work from an earlier session; not bumped again)
+- Added `expand` in `tool/question.ts`: an answer `/name args` (name or alias via `Command.get`/`list`) is replaced in the tool output by `<answer> (the /name command; follow its instructions once, for this answer only:\n<body>\n)`. `metadata.answers` and the Replied event keep the raw text. No `commandHeader`, so the command never becomes the active mode.
+- Refused (answer kept, plus "needs its own turn; ask the user to send it from the prompt"): subtask, agent, model, permission, toolHost, pushSession, or a filled body with `` !`...` `` shell output. Unknown names and non-command text pass through unchanged.
+- Kept the expansion inside the quoted answer value with no quote after it: Cursor's `parseAnswerSegments` (`provider/cursor/protocol/askQuestion.ts`) reads answers back out of this output, so a block appended after the summary sentence would be lost or break the last segment.
+- Moved the argument filling (`$1..$n`, `$ARGUMENTS`, appending) from `SessionPrompt.commandTemplate` into `Command.fill` (`command/index.ts`) with its regexes; `commandTemplate` calls it and still does shell substitution itself.
+- Kept: a restored question (TUI `questionAnswerText` -> `promptAsync`) sends the command as plain text, not expanded.
+- Added `Command.node` to the `test/tool/question.test.ts` layer group (QuestionTool now requires `Command.Service`; the registry already provides it).
+- Wiki: `Sessions.md` Questions section describes command answers.
+- Verification: throwaway probe (real QuestionTool + Question.reply, config commands) covered plain expansion, `$1`/`$2` args, alias, subtask refusal, shell refusal, unknown command, plain text, and raw metadata; it also expanded the user's real global `/reExplain` command. Probe removed. `bun test test/tool/question.test.ts test/session/prompt.test.ts test/command`: 91 pass, 0 fail. `tsc --noEmit` on packages/opencode: exit 0. A live run with a model was not checked.
+
+### User
+Questions
+- You can answer an agent's question by typing a slash command such as `/reExplain`, and the agent follows that command's instructions once for that answer.
+- Commands that need their own turn (subagent, a different agent or model, special permissions, shell output) are not run from an answer; the agent asks you to send them from the prompt.
+
+---
+
+## 2026-11-24 (~22:50) - v0.2.413 - cua_observe gets a longer tree-read budget - Claude Opus 5.5, Thinking; Debug
+
+### Agent
+- Meta: Claude Opus 5.5; Thinking; Debug (from a musicApp /agentTest); completed, live unverified in oc (needs /revive)
+- Version: 0.2.413
+- Fixed `CuaObserveTool` (`src/packages/opencode/src/tool/cua.ts`): never passed `timeout_ms`, so cua-driver's 1000 ms default applied and every read of musicApp's main WPF window returned 0 elements ("UIA provider did not answer"); agentTester fell back to pixels + Alt+F4. Added optional `timeout_ms` param, default `OBSERVE_TIMEOUT_MS` 5000.
+- Verification: `bun test test/tool/cua.test.ts` 5 pass. Same read via `cua_raw get_window_state timeout_ms 4000` returned the full tree (btnMiniPlayer etc.). Live cua_observe check after /revive not run.
+
+### User
+Agent testing
+- GUI tests can now read big app windows (like musicApp's album grid) instead of seeing an empty window and falling back to clicking by pixel.
+
+---
+
 ## 2026-11-24 (~05:09) - v0.2.414 dirtySpecial - Close swarm shortcuts: reminder fixtures, deleted-delivery retry loop, cancel re-apply after crash - Claude Opus 5.5, default; Build
 
 ### Agent

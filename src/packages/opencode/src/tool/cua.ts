@@ -32,6 +32,8 @@ const SENSITIVE: Record<string, string> = {
 // run_script is a program whose delivery modes oc cannot inspect.
 const FOREGROUND_TOOLS = new Set(["bring_to_front", "run_script"])
 const MAX_TAKEOVER_MINUTES = 30
+// The driver's own 1000 ms default returns 0 elements on big WPF windows (musicApp's album grid).
+const OBSERVE_TIMEOUT_MS = 5000
 
 // Server-wide on purpose: there is one desktop, whichever session drives it.
 let takeoverUntil = 0
@@ -141,6 +143,9 @@ const ObserveParameters = Schema.Struct({
     description: "Read the whole tree instead of only what changed since your last read of this window.",
   }),
   max_elements: Schema.optional(Schema.Int).annotate({ description: "Cap on nodes walked. Default 250." }),
+  timeout_ms: Schema.optional(Schema.Int).annotate({
+    description: `Time budget for the tree walk. Default ${OBSERVE_TIMEOUT_MS}; raise it if a read returns 0 elements.`,
+  }),
   screenshot: Schema.optional(Schema.Literals(["view", "file"])).annotate({
     description:
       "view: attach the window image (costs tokens; for surfaces the tree misses). file: save a PNG and return its path (evidence).",
@@ -246,6 +251,7 @@ export const CuaObserveTool = Tool.define(
           query: params.query,
           since: params.full ? undefined : "latest",
           max_elements: params.max_elements,
+          timeout_ms: params.timeout_ms ?? OBSERVE_TIMEOUT_MS,
           include_screenshot: params.screenshot !== undefined,
           screenshot_out_file: file,
         })

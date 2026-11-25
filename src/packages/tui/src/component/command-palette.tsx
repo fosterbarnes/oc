@@ -63,7 +63,7 @@ const _COMMAND_RANK = rankOf(
       "oc.subagent_usage",
     ],
     ["model.default", "agent.session", "oc.context_limit", "oc.todos.toggle", "oc.push_auto_delete"],
-    ["oc.update_all_harnesses", "oc.update_models"],
+    ["oc.update_all_harnesses", "oc.update_models", "oc.zen_deals"],
     [
       "app.toggle.paste_summary",
       "oc.image_paste_preview",
